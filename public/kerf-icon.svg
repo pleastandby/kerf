@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>KERF abstract icon</title>
+  <defs>
+    <linearGradient id="warm" x1="270" y1="220" x2="570" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF9D18"/>
+      <stop offset="0.55" stop-color="#FF7043"/>
+      <stop offset="1" stop-color="#FF9A9D"/>
+    </linearGradient>
+    <linearGradient id="cool" x1="270" y1="600" x2="580" y2="990" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2878FF"/>
+      <stop offset="0.55" stop-color="#4F5BFF"/>
+      <stop offset="1" stop-color="#83D9FF"/>
+    </linearGradient>
+    <linearGradient id="upperWing" x1="560" y1="490" x2="870" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9D73FF"/>
+      <stop offset="1" stop-color="#D0A0FF"/>
+    </linearGradient>
+    <linearGradient id="lowerWing" x1="560" y1="650" x2="900" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A7F4C6"/>
+      <stop offset="0.55" stop-color="#38C9B0"/>
+      <stop offset="1" stop-color="#00A99D"/>
+    </linearGradient>
+    <linearGradient id="centerBlend" x1="570" y1="480" x2="730" y2="670" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7B48F4"/>
+      <stop offset="1" stop-color="#9A75FF"/>
+    </linearGradient>
+    <clipPath id="leftShape">
+      <rect x="202" y="188" width="330" height="650" rx="88"/>
+    </clipPath>
+  </defs>
+  <!-- Main vertical form -->
+  <g clip-path="url(#leftShape)">
+    <rect x="202" y="188" width="330" height="430" fill="url(#warm)"/>
+    <rect x="202" y="618" width="330" height="220" fill="url(#cool)"/>
+    <path d="M202 618H532L202 818V618Z" fill="#648DFF" fill-opacity=".38"/>
+    <path d="M532 468L202 618H532V468Z" fill="#FFD0C7" fill-opacity=".2"/>
+  </g>
+  <!-- Upper diagonal arm -->
+  <path d="M532 510L770 272C804 238 858 238 892 272C926 306 926 360 892 394L652 634L532 510Z" fill="url(#upperWing)"/>
+  <!-- Lower diagonal arm -->
+  <path d="M532 618L652 498L890 736C924 770 924 824 890 858C856 892 802 892 768 858L532 618Z" fill="url(#lowerWing)"/>
+  <!-- Faceted translucent intersection -->
+  <path d="M532 468L652 588L532 708V468Z" fill="url(#centerBlend)"/>
+  <path d="M532 468L652 588L592 648L532 588V468Z" fill="#C2A4FF" fill-opacity=".42"/>
+</svg>

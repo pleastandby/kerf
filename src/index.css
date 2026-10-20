@@ -1,0 +1,277 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg-canvas: #1e1e1e;
+  --bg-panel: #252526;
+  --bg-panel-secondary: #1e1e1f;
+  --bg-header: #2c2c2c;
+  --bg-hover: #333334;
+  --bg-active: #3c3c3d;
+  --bg-input: #181819;
+  
+  --border-color: #38383a;
+  --border-subtle: #2d2d30;
+  
+  --text-primary: #f3f3f3;
+  --text-secondary: #969696;
+  --text-muted: #6e6e6e;
+  
+  --accent: #0d99ff;
+  --accent-hover: #007be5;
+  --accent-light: rgba(13, 153, 255, 0.15);
+  
+  --danger: #f43f5e;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --purple: #a855f7;
+  
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.7);
+  
+  --font-main: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Fira Code', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+body, html, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-main);
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3e3e42;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #505055;
+}
+
+/* Figma Layout */
+.figma-app {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.figma-workspace {
+  display: flex;
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  height: calc(100vh - 48px);
+}
+
+/* Common button styles */
+.figma-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: var(--font-main);
+}
+.figma-btn:hover {
+  background: var(--bg-hover);
+}
+.figma-btn:active {
+  background: var(--bg-active);
+}
+.figma-btn.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  border-color: rgba(13, 153, 255, 0.4);
+}
+.figma-btn-primary {
+  background: var(--accent);
+  color: #ffffff;
+}
+.figma-btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+/* Inputs */
+.figma-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 4px 8px;
+  outline: none;
+  font-family: var(--font-main);
+  transition: border-color 0.15s ease;
+  width: 100%;
+}
+.figma-input:focus {
+  border-color: var(--accent);
+}
+
+/* Tooltip / Badge */
+.figma-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+}
+
+/* Dropdown Menu */
+.figma-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  min-width: 180px;
+  padding: 4px;
+  animation: fadeIn 0.12s ease-out;
+}
+
+.figma-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
+  transition: background 0.1s ease;
+}
+.figma-dropdown-item:hover {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Canvas Styles */
+.canvas-container {
+  flex: 1;
+  position: relative;
+  background-color: var(--bg-canvas);
+  overflow: hidden;
+  cursor: default;
+}
+.canvas-container.tool-hand {
+  cursor: grab;
+}
+.canvas-container.tool-hand:active {
+  cursor: grabbing;
+}
+.canvas-container.tool-draw {
+  cursor: crosshair;
+}
+
+/* Canvas Grid Pattern */
+.canvas-grid-dots {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+}
+
+/* Floating Overlay Pill */
+.floating-overlay-pill {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(37, 37, 38, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 30px;
+  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+}
+
+/* Context Menu & Keyboard Badges */
+.context-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  color: #E0E0E0;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+  font-family: var(--font-main);
+}
+.context-menu-item:hover {
+  background: #0D99FF;
+  color: #FFFFFF;
+}
+.context-menu-item:hover kbd {
+  color: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.context-menu-item kbd {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: #888;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
