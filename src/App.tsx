@@ -907,7 +907,9 @@ export function App() {
   }, [activeWorkspaceId]);
 
   // Project management handlers for Home page
-  const handleOpenProjectFromHome = useCallback((proj: Project) => {
+  const handleOpenProjectFromHome = useCallback(async (proj: Project) => {
+    await deviceDB.saveProject(proj);
+    await refreshAllProjects();
     setProject(proj);
     setSelectedIds([]);
     const page = proj.pages.find((p) => p.id === proj.activePageId) || proj.pages[0];
@@ -917,7 +919,7 @@ export function App() {
       setActiveWorkspaceId(proj.workspaceId);
     }
     setViewMode('editor');
-  }, []);
+  }, [refreshAllProjects]);
 
   const handleCreateProjectFromHome = useCallback(async (templateElements?: any[], projectName?: string) => {
     const newProj: Project = {

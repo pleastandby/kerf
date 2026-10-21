@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { Project } from '../types';
 import { deviceDB } from '../storage/db';
+import { parseAndImportDesignFile } from '../utils/figmaImporter';
 
 interface ProjectsModalProps {
   isOpen: boolean;
@@ -98,38 +99,32 @@ export const ProjectsModal: React.FC<ProjectsModalProps> = ({
 
   const handleExport = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(p, null, 2));
+    const dataStr = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(JSON.stringify(p, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `${p.name.toLowerCase().replace(/\s+/g, '_')}.figma.json`);
+    downloadAnchor.setAttribute('download', `${p.name.toLowerCase().replace(/\s+/g, '_')}.kerf`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
   };
 
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const content = event.target?.result as string;
-        const importedProject: Project = JSON.parse(content);
-        if (!importedProject.id || !importedProject.pages) {
-          throw new Error('Invalid project structure');
-        }
-        importedProject.id = `project-${Date.now()}`;
-        importedProject.name = `${importedProject.name} (Imported)`;
-        await deviceDB.saveProject(importedProject);
-        await loadProjects();
-        onSwitchProject(importedProject);
-        onClose();
-      } catch (err) {
-        alert('Failed to import project: Invalid file format');
+    try {
+      const importedProject = await parseAndImportDesignFile(file, currentProject.workspaceId || 'ws-personal');
+      await deviceDB.saveProject(importedProject);
+      await loadProjects();
+      onSwitchProject(importedProject);
+      onClose();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to import design: Invalid file format');
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
       }
-    };
-    reader.readAsText(file);
+    }
   };
 
   const formatBytes = (bytes: number) => {
@@ -227,13 +222,13 @@ export const ProjectsModal: React.FC<ProjectsModalProps> = ({
               style={{ fontSize: '11px', padding: '4px 8px' }}
             >
               <Upload size={12} />
-              <span>Import .kerf</span>
+              <span>Import .kerf / .figma</span>
             </button>
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleImportFile}
-              accept=".json,.kerf,.figma"
+              accept=".kerf,.figma,.fig,.json"
               style={{ display: 'none' }}
             />
             <button

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import type { Project, Workspace } from '../types';
 import { bankingTemplateElements, landingPageTemplateElements } from '../templates';
+import { parseAndImportDesignFile } from '../utils/figmaImporter';
 
 interface HomePageProps {
   projects: Project[];
@@ -71,6 +72,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [newWsColor, setNewWsColor] = useState('#0D99FF');
 
   const [activeProjectMenuId, setActiveProjectMenuId] = useState<string | null>(null);
+  const [menuDirection, setMenuDirection] = useState<'down' | 'up'>('down');
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState('');
   const [toast, setToast] = useState<{ id: string; name: string } | null>(null);
@@ -98,10 +100,10 @@ export const HomePage: React.FC<HomePageProps> = ({
   }, []);
 
   const handleExportProject = (p: Project) => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(p, null, 2));
+    const dataStr = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(JSON.stringify(p, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `${p.name.toLowerCase().replace(/\s+/g, '_')}.kerf.json`);
+    downloadAnchor.setAttribute('download', `${p.name.toLowerCase().replace(/\s+/g, '_')}.kerf`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -119,6 +121,17 @@ export const HomePage: React.FC<HomePageProps> = ({
     toastTimerRef.current = setTimeout(() => {
       setToast(null);
     }, 6000);
+  };
+
+  const handlePermanentDeleteFile = (p: Project) => {
+    setActiveProjectMenuId(null);
+    if (window.confirm(`Permanently delete "${p.name}"? This file will be completely erased and cannot be recovered.`)) {
+      if (onPermanentDelete) {
+        onPermanentDelete(p.id);
+      } else {
+        onDeleteProject(p.id);
+      }
+    }
   };
 
   const handleUndoMoveToBin = () => {
@@ -164,23 +177,20 @@ export const HomePage: React.FC<HomePageProps> = ({
     setRenamingProjectId(null);
   };
 
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const parsed: Project = JSON.parse(event.target?.result as string);
-        parsed.id = `project-${Date.now()}`;
-        parsed.name = `${parsed.name} (Imported)`;
-        parsed.workspaceId = activeWorkspaceId;
-        onOpenProject(parsed);
-      } catch {
-        alert('Invalid Figma project file format');
+    try {
+      const importedProject = await parseAndImportDesignFile(file, activeWorkspaceId);
+      onOpenProject(importedProject);
+    } catch (err: any) {
+      alert(err?.message || 'Invalid design file format. Please provide a valid .kerf, .figma, or JSON file.');
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
       }
-    };
-    reader.readAsText(file);
+    }
   };
 
   const formatBytes = (bytes: number) => {
@@ -208,7 +218,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         type="file"
         ref={fileInputRef}
         onChange={handleImportFile}
-        accept=".json,.figma"
+        accept=".kerf,.figma,.fig,.json"
         style={{ display: 'none' }}
       />
 
@@ -536,9 +546,10 @@ export const HomePage: React.FC<HomePageProps> = ({
                 backgroundColor: '#262628',
                 border: '1px solid #38383B',
               }}
+              title="Import .kerf or .figma design file"
             >
               <Upload size={14} />
-              <span>Import .kerf</span>
+              <span>Import .kerf / .figma</span>
             </button>
 
             <button
@@ -832,6 +843,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 const isRenaming = renamingProjectId === p.id;
                 const ws = workspaces.find((w) => w.id === p.workspaceId) || activeWorkspace;
                 const isInBin = activeNav === 'bin' || !!p.deleted;
+                const isMenuOpen = activeProjectMenuId === p.id;
 
                 return (
                   <div
@@ -847,16 +859,23 @@ export const HomePage: React.FC<HomePageProps> = ({
                     }}
                     style={{
                       backgroundColor: '#202024',
-                      border: isInBin ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid #2F2F34',
+                      border: isInBin
+                        ? '1px solid rgba(239, 68, 68, 0.25)'
+                        : isMenuOpen
+                        ? '1px solid #0D99FF'
+                        : '1px solid #2F2F34',
                       borderRadius: '10px',
-                      overflow: 'hidden',
+                      overflow: isMenuOpen ? 'visible' : 'hidden',
                       cursor: 'pointer',
                       display: 'flex',
                       flexDirection: 'column',
-                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
-                      transition: 'transform 0.15s ease, border-color 0.15s ease',
+                      boxShadow: isMenuOpen
+                        ? '0 8px 24px rgba(0, 0, 0, 0.6), 0 0 0 1px #0D99FF'
+                        : '0 4px 16px rgba(0, 0, 0, 0.4)',
+                      transition: 'transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease',
                       position: 'relative',
                       opacity: isInBin ? 0.85 : 1,
+                      zIndex: isMenuOpen ? 50 : 1,
                     }}
                     className="layer-row"
                   >
@@ -866,6 +885,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                         height: '140px',
                         backgroundColor: '#141416',
                         borderBottom: '1px solid #28282D',
+                        borderTopLeftRadius: '9px',
+                        borderTopRightRadius: '9px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -1022,9 +1043,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (window.confirm(`Permanently delete "${p.name}"? This file will be completely erased and cannot be recovered.`)) {
-                                  onPermanentDelete?.(p.id);
-                                }
+                                handlePermanentDeleteFile(p);
                               }}
                               title="Delete Permanently"
                             >
@@ -1032,130 +1051,166 @@ export const HomePage: React.FC<HomePageProps> = ({
                             </button>
                           </>
                         ) : (
-                          <>
-                            {/* Card Context Menu Trigger (Only three dots here, direct delete moved inside) */}
+                          <div style={{ position: 'relative' }}>
+                            {/* Card Context Menu Trigger (Ellipses / Overflow Menu) */}
                             <button
                               className="figma-btn"
-                              style={{ padding: '5px', color: '#888', borderRadius: '4px' }}
+                              style={{
+                                padding: '5px',
+                                color: isMenuOpen ? '#FFF' : '#888',
+                                backgroundColor: isMenuOpen ? 'rgba(255, 255, 255, 0.14)' : 'transparent',
+                                border: isMenuOpen ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid transparent',
+                                borderRadius: '4px',
+                                transition: 'all 0.12s ease',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setActiveProjectMenuId(activeProjectMenuId === p.id ? null : p.id);
+                                if (isMenuOpen) {
+                                  setActiveProjectMenuId(null);
+                                } else {
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  const spaceBelow = window.innerHeight - rect.bottom;
+                                  setMenuDirection(spaceBelow < 320 ? 'up' : 'down');
+                                  setActiveProjectMenuId(p.id);
+                                }
                               }}
                               title="More options"
                             >
                               <MoreVertical size={14} />
                             </button>
-                          </>
+
+                            {/* Card Context Dropdown */}
+                            {isMenuOpen && (
+                              <div
+                                className="figma-dropdown"
+                                style={{
+                                  position: 'absolute',
+                                  right: 0,
+                                  left: 'auto',
+                                  ...(menuDirection === 'up'
+                                    ? { bottom: 'calc(100% + 6px)', top: 'auto', marginTop: 0, marginBottom: '4px' }
+                                    : { top: 'calc(100% + 6px)', bottom: 'auto', marginTop: '4px', marginBottom: 0 }),
+                                  width: '210px',
+                                  maxHeight: '380px',
+                                  overflowY: 'auto',
+                                  zIndex: 1000,
+                                  backgroundColor: '#1E1E22',
+                                  border: '1px solid #38383E',
+                                  borderRadius: '8px',
+                                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08)',
+                                  padding: '5px',
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {/* 1. Open File */}
+                                <div
+                                  className="figma-dropdown-item"
+                                  onClick={() => {
+                                    onOpenProject(p);
+                                    setActiveProjectMenuId(null);
+                                  }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                >
+                                  <ExternalLink size={13} />
+                                  <span>Open File</span>
+                                </div>
+
+                                {/* 2. Rename */}
+                                <div
+                                  className="figma-dropdown-item"
+                                  onClick={(e) => {
+                                    setActiveProjectMenuId(null);
+                                    handleStartRename(p, e);
+                                  }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                >
+                                  <Edit2 size={13} />
+                                  <span>Rename</span>
+                                </div>
+
+                                {/* 3. Duplicate */}
+                                <div
+                                  className="figma-dropdown-item"
+                                  onClick={() => {
+                                    onDuplicateProject(p.id);
+                                    setActiveProjectMenuId(null);
+                                  }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                >
+                                  <Copy size={13} />
+                                  <span>Duplicate</span>
+                                </div>
+
+                                {/* 4. Export File (.kerf) */}
+                                <div
+                                  className="figma-dropdown-item"
+                                  onClick={() => {
+                                    handleExportProject(p);
+                                    setActiveProjectMenuId(null);
+                                  }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                >
+                                  <Download size={13} />
+                                  <span>Export File (.kerf)</span>
+                                </div>
+
+                                {workspaces.length > 1 && (
+                                  <>
+                                    <div style={{ height: '1px', backgroundColor: '#2E2E34', margin: '4px 0' }} />
+                                    <div style={{ padding: '4px 8px', fontSize: '10px', color: '#777', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                      Workspace
+                                    </div>
+                                    {workspaces
+                                      .filter((w) => w.id !== p.workspaceId)
+                                      .map((w) => (
+                                        <div
+                                          key={`move-${w.id}`}
+                                          className="figma-dropdown-item"
+                                          onClick={() => {
+                                            onMoveProjectToWorkspace(p.id, w.id);
+                                            setActiveProjectMenuId(null);
+                                          }}
+                                          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                        >
+                                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: w.color }} />
+                                          <span>Move to {w.name}</span>
+                                        </div>
+                                      ))}
+                                  </>
+                                )}
+
+                                <div style={{ height: '1px', backgroundColor: '#2E2E34', margin: '4px 0' }} />
+
+                                {/* 5. Move to Bin (Soft delete) */}
+                                <div
+                                  className="figma-dropdown-item"
+                                  style={{ color: '#F87171', display: 'flex', alignItems: 'center', gap: '8px' }}
+                                  onClick={() => handleMoveFileToBin(p)}
+                                  title="Move to Bin (can be restored later)"
+                                >
+                                  <Trash2 size={13} color="#F87171" />
+                                  <span>Move to Bin</span>
+                                </div>
+
+                                {/* 6. Permanent Delete */}
+                                <div
+                                  className="figma-dropdown-item"
+                                  style={{ color: '#EF4444', display: 'flex', alignItems: 'center', gap: '8px' }}
+                                  onClick={() => handlePermanentDeleteFile(p)}
+                                  title="Permanently remove file from device storage"
+                                >
+                                  <Trash2 size={13} color="#EF4444" />
+                                  <span>Delete Permanently</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
-
-                      {/* Card Context Dropdown */}
-                      {activeProjectMenuId === p.id && (
-                        <div
-                          className="figma-dropdown"
-                          style={{
-                            right: '10px',
-                            top: '100%',
-                            width: '200px',
-                            maxHeight: '360px',
-                            overflowY: 'auto',
-                            zIndex: 100,
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div
-                            className="figma-dropdown-item"
-                            onClick={() => {
-                              onOpenProject(p);
-                              setActiveProjectMenuId(null);
-                            }}
-                          >
-                            <ExternalLink size={13} />
-                            <span>Open File</span>
-                          </div>
-                          <div
-                            className="figma-dropdown-item"
-                            onClick={(e) => handleStartRename(p, e)}
-                          >
-                            <Edit2 size={13} />
-                            <span>Rename</span>
-                          </div>
-                          <div
-                            className="figma-dropdown-item"
-                            onClick={() => {
-                              onDuplicateProject(p.id);
-                              setActiveProjectMenuId(null);
-                            }}
-                          >
-                            <Copy size={13} />
-                            <span>Duplicate</span>
-                          </div>
-                          <div
-                            className="figma-dropdown-item"
-                            onClick={() => {
-                              handleExportProject(p);
-                              setActiveProjectMenuId(null);
-                            }}
-                          >
-                            <Download size={13} />
-                            <span>Export File (.kerf)</span>
-                          </div>
-
-                          <div style={{ height: '1px', backgroundColor: '#333', margin: '4px 0' }} />
-
-                          {/* Duplicate & Move Option */}
-                          <div style={{ padding: '4px 8px', fontSize: '10px', color: '#888', fontWeight: 600 }}>
-                            DUPLICATE TO WORKSPACE:
-                          </div>
-                          {workspaces.map((w) => (
-                            <div
-                              key={`dup-${w.id}`}
-                              className="figma-dropdown-item"
-                              onClick={() => {
-                                onDuplicateProject(p.id, w.id);
-                                setActiveProjectMenuId(null);
-                              }}
-                            >
-                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: w.color }} />
-                              <span>{w.name}</span>
-                            </div>
-                          ))}
-
-                          <div style={{ height: '1px', backgroundColor: '#333', margin: '4px 0' }} />
-
-                          {/* Move to another workspace */}
-                          <div style={{ padding: '4px 8px', fontSize: '10px', color: '#888', fontWeight: 600 }}>
-                            MOVE TO WORKSPACE:
-                          </div>
-                          {workspaces
-                            .filter((w) => w.id !== p.workspaceId)
-                            .map((w) => (
-                              <div
-                                key={`move-${w.id}`}
-                                className="figma-dropdown-item"
-                                onClick={() => {
-                                  onMoveProjectToWorkspace(p.id, w.id);
-                                  setActiveProjectMenuId(null);
-                                }}
-                              >
-                                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: w.color }} />
-                                <span>{w.name}</span>
-                              </div>
-                            ))}
-
-                          <div style={{ height: '1px', backgroundColor: '#333', margin: '4px 0' }} />
-
-                          {/* Move to Bin (Soft delete) */}
-                          <div
-                            className="figma-dropdown-item"
-                            style={{ color: '#EF4444' }}
-                            onClick={() => handleMoveFileToBin(p)}
-                          >
-                            <Trash2 size={13} color="#EF4444" />
-                            <span>Move to Bin</span>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
                 );

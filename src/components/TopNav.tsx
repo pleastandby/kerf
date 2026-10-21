@@ -758,8 +758,8 @@ export const TopNav: React.FC<TopNavProps> = ({
                   setExportOpen(false);
                 }}
               >
-                <span>Save Project JSON</span>
-                <span className="figma-badge">Backup</span>
+                <span>Export Project (.kerf)</span>
+                <span className="figma-badge">.kerf</span>
               </div>
             </div>
           )}

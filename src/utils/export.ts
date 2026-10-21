@@ -16,7 +16,7 @@ export function downloadFile(content: string, fileName: string, contentType: str
 
 export function exportProjectJSON(project: Project) {
   const json = JSON.stringify(project, null, 2);
-  downloadFile(json, `${project.name.toLowerCase().replace(/\s+/g, '-')}.kerf.json`, 'application/json');
+  downloadFile(json, `${project.name.toLowerCase().replace(/\s+/g, '-')}.kerf`, 'application/octet-stream');
   triggerConfetti();
 }
 
