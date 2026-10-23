@@ -1,25 +1,28 @@
-# Logs
+# Logs & Temporary Files
 logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+*.tmp
+*.bak
 
-node_modules
-dist
-dist-ssr
-*.local
-testdata
+# Build Artifacts
+native-windows/crates/kerf_core/target/
+target/
+bin/
+obj/
+*.pdb
+*.ilk
 
-# Editor directories and files
+# Executables & Binaries (uncomment if you don't commit binaries)
+# KerfStudio.exe
+# KerfStudioSetup.exe
+# kerf_core.dll
+
+# IDE & Editor metadata
+.vs/
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+.idea/
 *.suo
-*.ntvs*
-*.njsproj
-*.sln
+*.user
 *.sw?
+.DS_Store

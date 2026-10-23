@@ -1,345 +1,165 @@
-# Kerf — Next-Gen Vector Design & Prototyping Studio
+# Kerf Studio — Native Windows GPU-Accelerated Vector Design Application
 
-![React](https://img.shields.io/badge/React-19.2-blue?logo=react)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)
-![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite)
-![WebGL](https://img.shields.io/badge/WebGL-Hardware%20Acceleration-green)
+![Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows)
+![DirectX](https://img.shields.io/badge/Graphics-Direct3D%2011%20Hardware-green)
+![Rust](https://img.shields.io/badge/Engine-Rust%201.99%20Native%20SIMD-dea584?logo=rust)
+![C# / WPF](https://img.shields.io/badge/.NET%20Framework-4.8%20WPF-512BD4?logo=csharp)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-**Kerf** is a state-of-the-art web-based vector design and prototyping studio inspired by Figma. Built with modern React 19, TypeScript, and Vite, Kerf features an infinite canvas, hardware-accelerated rendering, Figma-grade **Auto Layout**, vector path drawing, component hierarchy, interactive prototyping, and multi-format code exports.
+**Kerf Studio** is a standalone, GPU-accelerated native Windows desktop application for professional vector design, Bézier path manipulation, and component layout. Built with a Direct3D 11 hardware-accelerated retained scene graph and a high-performance native Rust geometric kernel (`kerf_core.dll`), Kerf Studio delivers true 60+ FPS subpixel rendering, analytical mathematical Bézier solvers, and a creative suite experience inspired by After Effects and Figma.
 
 ---
 
-## ✨ Features
+## ✨ Key Capabilities & Features
 
-- **🏠 Workspace Dashboard & Home Hub**:
-  - Multi-workspace organization (Personal, Team, Enterprise).
-  - Project management (create, duplicate, rename, export, import, delete).
-  - Built-in UI templates (Mobile Banking App, SaaS Landing Page, Design System).
-- **📐 Figma-Grade Auto Layout (`Shift + A`)**:
-  - Wrap any selection or element into an auto-align frame instantly with <kbd>Shift</kbd> + <kbd>A</kbd>.
-  - Toggle or remove Auto Layout with <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>A</kbd>.
-  - **4 Direction / Layout Modes**:
-    - **Horizontal Row (`->`)**: Flex row with primary and counter-axis alignment.
-    - **Vertical Column (`↓`)**: Vertical stacking with flexible spacing.
-    - **Wrap (`↩`)**: Flowing flex-wrap layout across rows.
-    - **Grid (`⊞`)**: Multi-column responsive matrix layout.
-  - **3x3 Interactive Alignment Matrix**: Figma-signature 9-point alignment box.
-  - **Distribution**: Packed vs. Space Between (`auto` gap).
-  - **Gap & 4-Side Padding**: Individual Top, Right, Bottom, Left controls with quick presets.
-  - **Frame Sizing**: Hug Contents vs. Fixed Width / Height.
-  - **Child Ordering**: Reorder children within auto-layout frames with a single click.
-- **🖊️ Smooth Pen & Pencil Vector Tools**:
-  - Full Bézier curve path drawing with anchor handles.
-  - Relative coordinate vector engine: drawn paths move, scale, and align seamlessly with selection, grouping, auto-layout, and arrow-key nudges.
-- **🎨 Infinite Canvas & Modern Design System**:
-  - Smooth pan (<kbd>Space</kbd> + Drag or Middle Mouse) and pinch/scroll exponential zoom up to 3200%.
-  - Smart snapping guides, rulers, custom pixel grids (isometric, dot, line).
-  - Shapes: Rectangle, Ellipse, Star, Polygon / Triangle, Line, Arrow, Typography, Image.
-  - Fills: Solid colors, linear gradients, opacity.
-  - Strokes: Width, solid, dashed, dotted.
-  - Effects: Real-time Drop Shadows, Inner Shadows, Layer Blurs.
-- **⚡ Hardware Engine & WebGL Telemetry**:
-  - Hybrid SVG/Canvas DOM rendering coupled with WebGL affine transform acceleration.
-  - Real-time telemetry: FPS, frame time, draw calls, and memory monitoring.
-- **🚀 Production Code & Asset Export**:
-  - One-click CSS, Tailwind CSS, and SVG code generation with auto-layout flex rules.
-  - Pixel-perfect PNG / JPG raster export at custom scale (1x, 2x, 3x) and SVG vector export.
-  - Native `.kerf` JSON file backup and restore.
-- **🐍 Optional Python Design Engine**:
-  - Built-in Python console and lightweight Python backend for procedural design scripts and server-side project persistence.
+### 🎬 After Effects-Style Cinematic Launch Experience
+- **Sleek Hardware Initialization Splash**:
+  - Deep obsidian dark mode UI with ambient radial bloom and hardware telemetry display.
+  - Features the official **Kerf Folded-Ribbon iridescent brand mark** (peach, coral, indigo, sky blue, mint & teal multi-stop gradients).
+  - Progressive subsystem initialization tracker with real-time status updates:
+    - Direct3D 11 retained visual engine mounting
+    - Native Rust geometric kernel (`kerf_core.dll`) C-ABI binding
+    - Analytical Bézier extrema solver calibration ($B'(t) = 0$)
+    - Canonical document virtual file system activation
+  - Smooth animated gradient progress bar with instant skip-to-canvas capability (<kbd>Space</kbd>, <kbd>Enter</kbd>, or mouse click).
 
----
+### ⚡ Native Rust Graphics & Geometry Engine (`kerf_core.dll`)
+- **Analytical Cubic Bézier Extrema Solver**:
+  - Solves $B'(t) = 3at^2 + 2bt + c = 0$ quadratic roots analytically in native x64 assembly to obtain exact mathematical bounds without coarse sampling.
+- **Adaptive de Casteljau Curve Flattening**:
+  - Subdivides curves recursively with configurable tolerance, producing smooth polylines for tessellation and raster export.
+- **SIMD Hardware Acceleration**:
+  - Auto-detects AVX2, FMA3, and SSE4.1 CPU instructions at runtime for vector transformations and hit-testing.
+- **Winding Number Point-in-Path Containment**:
+  - Robust non-zero winding number algorithm to test whether coordinates are inside complex, concave, or self-intersecting Bézier paths.
+- **Signed Path Area (Shoelace Formula)**:
+  - Exact signed area calculation for winding orientation (CW vs. CCW) and hole detection.
+- **Convex Hull (Andrew's Monotone Chain)**:
+  - $O(N \log N)$ exact convex hull calculation for arbitrary vertex clouds and multi-selection bounds.
+- **Fault-Tolerant C# Interop**:
+  - High-speed P/Invoke bridge (`RustEngineInterop.cs`) with graceful managed fallback if native DLL is missing.
 
-## 🛠️ Tech Stack
+### 🖊️ Real-Time Bézier Pen & Vector Node Engine
+- **Live Rubber-Band Curve Preview**:
+  - Real-time elastic Bézier segment connecting the active anchor node to the cursor.
+- **Loop Closure Detection**:
+  - Glowing closure indicator with snap badges when hovering near the starting anchor.
+- **Anchor & Tangent Handle Interaction**:
+  - Independent and symmetric tangent handle dragging with subpixel precision.
+- **Non-Destructive Controls**:
+  - <kbd>Backspace</kbd> / <kbd>Delete</kbd>: Undo last node placement while keeping the Pen tool active.
+  - <kbd>Enter</kbd> / <kbd>Esc</kbd> / Right-Click: Finalize vector path and return to Selection tool.
 
-- **Frontend**: [React 19](https://react.dev/), [TypeScript](https://www.typescriptlang.org/), [Vite 8](https://vitejs.dev/)
-- **Icons**: [Lucide React](https://lucide.dev/)
-- **Visuals & Canvas**: Vanilla HTML5 SVG / Canvas API + WebGL Shaders
-- **Effects**: [canvas-confetti](https://www.npmjs.com/package/canvas-confetti)
-- **Local Storage**: IndexedDB (custom client-side storage) + LocalStorage backup
-- **Backend (Optional)**: Python 3 standard library `http.server` or FastAPI / Uvicorn
+### 📐 Figma-Grade Auto Layout Engine
+- **Flex Reflow**:
+  - Horizontal Row (`->`) and Vertical Column (`↓`) directions.
+- **Alignment & Distribution**:
+  - 3x3 interactive alignment matrix with Packed vs. Space Between (`auto` gap).
+- **Padding & Sizing**:
+  - 4-side padding (Top, Right, Bottom, Left) and Hug Contents vs. Fixed Width/Height frames.
 
----
-
-## 📋 Prerequisites
-
-Before running the project locally or deploying, ensure you have:
-
-- **Node.js**: `v18.0.0` or higher (Node.js 20+ LTS recommended)
-- **npm**: `v9.0.0` or higher (or `pnpm` / `yarn`)
-- **Python** *(optional, for Python backend)*: `v3.9` or higher
+### 💾 Canonical Document Virtual File System
+- **Crash Recovery & Autosave**:
+  - Background atomic project persistence preventing data loss.
+- **Multi-Version Migration**:
+  - Transparent forward migration of legacy `.kerf` documents to canonical v3.0 schemas.
+- **Production Asset Export**:
+  - Pixel-perfect SVG vector export and high-DPI rasterization (1x, 2x, 3x).
 
 ---
 
-## 🚀 Running Locally
+## 🏛️ Architecture & Directory Manifest
 
-### 1. Clone the repository
-```bash
-git clone https://github.com/your-username/figma-kerf-studio.git
-cd figma-kerf-studio
 ```
-
-### 2. Install dependencies
-```bash
-npm install
-```
-
-### 3. Start the frontend development server
-```bash
-npm run dev
-```
-
-The Vite dev server will start at:
-```
-➜  Local:   http://localhost:5173/
-➜  Network: use --host to expose
-```
-Open [http://localhost:5173/](http://localhost:5173/) in your web browser. The Home Workspace dashboard will load first!
-
----
-
-### 4. (Optional) Start the Python Backend Server
-
-The web application functions 100% standalone in the browser using client-side IndexedDB storage. If you would like to run the procedural Python script execution engine and server-side project saving:
-
-```bash
-# In a separate terminal:
-cd server
-
-# Run using Python's built-in standard library (no external packages required):
-python app.py
-```
-
-The server will listen on `http://localhost:8000`.
-
-*(Optional)* To install extended dependencies for FastAPI and headless rasterization:
-```bash
-pip install -r server/requirements.txt
+Figma/
+├── KerfStudio.exe                 # Standalone 64-bit Desktop Application
+├── KerfStudioSetup.exe            # Windows Installer Wizard
+├── kerf_core.dll                  # Native Rust Acceleration Library (x64)
+├── PROGRESS.md                    # Modernization Handover & Milestone Tracker
+├── README.md                      # Project Documentation
+├── assets/                        # Brand Assets & Vector Logos
+│   ├── kerf-logo-new.svg          # Official folded-ribbon SVG
+│   └── kerf.ico                   # Multi-resolution Windows application icon
+├── native-windows/                # Desktop Application Source Directory
+│   ├── build.bat                  # Unified compilation script (Rust + C#)
+│   ├── KerfInstaller.cs           # Native Windows Installer source
+│   ├── crates/kerf_core/          # Rust Native Acceleration Core
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── bezier.rs          # Cubic evaluation, bounds, arc length
+│   │       ├── geometry.rs        # Hit testing, RDP, winding, convex hull
+│   │       ├── simd.rs            # AVX2/FMA CPU capability detection
+│   │       └── lib.rs             # C-ABI export surface
+│   ├── src/                       # C# Desktop Application Core
+│   │   ├── Program.cs             # Application Entry & Splash Lifecycle
+│   │   ├── Engine/                # RetainedSceneGraph, GpuRenderer, RustEngineInterop
+│   │   ├── Model/                 # CanonicalDocument, Migrations, History
+│   │   ├── Tools/                 # BezierVectorEngine, AutoLayout, Booleans
+│   │   ├── IO/                    # StorageManager, SvgExporter, RasterExporter
+│   │   └── UI/                    # StudioView, HomePageView, MainWindow, SplashScreen, KerfLogo
+│   └── tests/                     # Automated Verification Test Suite (13/13 tests)
+│       ├── TestRunner.cs
+│       └── TestRunner.exe
+└── testdata/                      # Test files & sample projects
 ```
 
 ---
 
-## ⌨️ Essential Keyboard Shortcuts
+## 🚀 Building & Running
 
-| Shortcut | Description |
-| :--- | :--- |
-| <kbd>Shift</kbd> + <kbd>A</kbd> | **Add Auto Layout Frame** (auto-aligns selection into frame) |
-| <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>A</kbd> | **Remove Auto Layout** |
-| <kbd>V</kbd> | Select / Move tool |
-| <kbd>H</kbd> | Hand / Pan tool |
-| <kbd>Space</kbd> + **Drag** | Temporary quick pan |
-| <kbd>P</kbd> | Pen vector path tool (<kbd>Enter</kbd> to finish path) |
-| <kbd>R</kbd> | Rectangle tool |
-| <kbd>O</kbd> | Ellipse / Circle tool |
-| <kbd>T</kbd> | Text tool |
-| <kbd>F</kbd> | Frame tool |
-| <kbd>L</kbd> | Line tool |
-| <kbd>Shift</kbd> + <kbd>L</kbd> | Arrow tool |
-| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>G</kbd> | Group selected elements |
-| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> | Ungroup selection |
-| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>D</kbd> | Duplicate selection |
-| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Z</kbd> | Undo |
-| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Y</kbd> / <kbd>Shift</kbd> + <kbd>Z</kbd> | Redo |
-| <kbd>Arrow Keys</kbd> | Nudge selected element 1px (hold <kbd>Shift</kbd> for 10px) |
-| <kbd>Ctrl</kbd> + **Wheel** | Smooth zoom toward cursor |
-| <kbd>?</kbd> | Open Keyboard Shortcuts Modal |
+### Requirements
+- **Operating System**: Windows 10 / 11 (64-bit)
+- **.NET Framework**: 4.8 runtime (pre-installed on Windows 10/11)
+- **Rust Toolchain** *(optional, for compiling `kerf_core.dll`)*: `stable-x86_64-pc-windows-gnu` or `stable-x86_64-pc-windows-msvc`
 
----
+### 1. Build the Complete Desktop Suite
+Run the unified build batch script from `native-windows`:
+```cmd
+cd native-windows
+build.bat
+```
+This will automatically:
+1. Compile `crates/kerf_core` in release mode into `kerf_core.dll`.
+2. Deploy `kerf_core.dll` into the output path.
+3. Compile all C# source modules into `KerfStudio.exe` with `kerf.ico` embedded.
+4. Compile `KerfStudioSetup.exe` installer with registry and file associations.
 
-## 🏗️ Production Build
-
-To validate TypeScript types and generate the optimized production bundle:
-
-```bash
-npm run build
+### 2. Run the Verification Test Suite
+```cmd
+native-windows\tests\TestRunner.exe
+```
+Output:
+```
+=====================================================================
+ Kerf Studio - Automated Verification Test Suite (v3.0.0)
+=====================================================================
+[PASS] Document Migrations: Legacy React v1/v2 to Canonical v3.0
+[PASS] Document Migrations: Legacy WPF v2.4 to Canonical v3.0
+[PASS] Document Persistence: Atomic Save & Re-load Roundtrip
+[PASS] Command History: Add, Undo, Redo, Batch Transactions
+[PASS] Transform Engine: 8-handle Aspect Ratio & Center Scaling
+[PASS] Bézier Engine: Anchor & Smooth Handle Alignments
+[PASS] Auto Layout Engine: Horizontal & Vertical Reflow with Hug Sizing
+[PASS] Boolean Geometry Engine: Path Combination
+[PASS] SVG Exporter: Compliant Vector XML Generation
+[PASS] Layer Hierarchy & Management: Containers, Cycles, Nested Undo/Redo
+[PASS] Bézier Pen Curves & Vector Edit Mode: Handles, HitTest, Node Mutators
+[PASS] Path Geometry Sync & Corner Curving: Movement, Scaling, Corner Widgets
+    [INFO] Rust Core: Native DLL Loaded (AVX2 + FMA Accelerated)
+[PASS] Native Rust Acceleration: Signed Area, Point Containment & Convex Hull
+=====================================================================
+ Tests Completed: 13 Passed, 0 Failed
+=====================================================================
 ```
 
-The compiled output will be generated in the `dist/` directory:
-- `dist/index.html`
-- `dist/assets/index-*.js`
-- `dist/assets/index-*.css`
-
-To preview the production build locally:
-```bash
-npm run preview
+### 3. Launch Kerf Studio
+Simply double-click `KerfStudio.exe` or execute:
+```cmd
+KerfStudio.exe
 ```
-
----
-
-## 🌐 Deployment Instructions
-
-Kerf is built as a static Single Page Application (SPA), which makes it fast, reliable, and capable of being deployed anywhere at near-zero cost.
-
-### Option 1: Deploy to Vercel (Recommended)
-
-#### Via Vercel CLI:
-```bash
-npm install -g vercel
-vercel
-```
-
-#### Via GitHub / Vercel Web Dashboard:
-1. Push your repository to GitHub / GitLab / Bitbucket.
-2. Go to [Vercel](https://vercel.com/) and click **Add New Project**.
-3. Import your repository.
-4. Framework Preset will be automatically detected as **Vite**.
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-   - **Install Command**: `npm install`
-5. Click **Deploy**.
-
----
-
-### Option 2: Deploy to Netlify
-
-#### Via Netlify CLI:
-```bash
-npm install -g netlify-cli
-netlify deploy --prod --dir=dist
-```
-
-#### Via Netlify Dashboard:
-1. Connect your repository on [Netlify](https://www.netlify.com/).
-2. Set build settings:
-   - **Base directory**: `.`
-   - **Build command**: `npm run build`
-   - **Publish directory**: `dist`
-3. If using client-side routing, create a `public/_redirects` file with:
-   ```
-   /*    /index.html   200
-   ```
-4. Click **Deploy Site**.
-
----
-
-### Option 3: Deploy with Docker
-
-A production-ready `Dockerfile` using multi-stage builds with Nginx:
-
-```dockerfile
-# Stage 1: Build the React application
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-# Stage 2: Serve via Nginx
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-Example `nginx.conf`:
-```nginx
-server {
-    listen 80;
-    server_name localhost;
-
-    location / {
-        root /usr/share/nginx/html;
-        index index.html;
-        try_files $uri $uri/ /index.html;
-    }
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;
-}
-```
-
-Build and run the Docker image:
-```bash
-docker build -t kerf-studio .
-docker run -p 8080:80 kerf-studio
-```
-Then visit `http://localhost:8080`.
-
----
-
-### Option 4: Deploy to GitHub Pages
-
-1. In `vite.config.ts`, set the `base` path to your repository name:
-   ```typescript
-   export default defineConfig({
-     base: '/<repository-name>/',
-     plugins: [react()],
-   });
-   ```
-2. Build the project:
-   ```bash
-   npm run build
-   ```
-3. Deploy the `dist` folder using the `gh-pages` package:
-   ```bash
-   npx gh-pages -d dist
-   ```
-
----
-
-### Option 5: Full-Stack Deployment (Frontend + Python Server)
-
-If you wish to deploy the Python backend as well:
-
-- **Frontend**: Deploy `dist/` to Vercel, Netlify, or Cloudflare Pages.
-- **Python Backend**: Deploy `server/` to [Render](https://render.com/), [Railway](https://railway.app/), or [Fly.io](https://fly.io/).
-  - Set the start command:
-    ```bash
-    python server/app.py
-    ```
-    or with Uvicorn:
-    ```bash
-    uvicorn server.app:app --host 0.0.0.0 --port $PORT
-    ```
-
----
-
-## 📁 Project Structure
-
-```
-├── public/                 # Static assets & icons
-├── server/                 # Python backend
-│   ├── app.py              # Lightweight HTTP & procedural script server
-│   ├── requirements.txt    # Optional Python dependencies
-│   └── data/               # Persistent server JSON project files
-├── src/
-│   ├── assets/             # Brand logos & graphics
-│   ├── components/         # React UI Components
-│   │   ├── Canvas.tsx              # Interactive SVG/Canvas workspace
-│   │   ├── HomePage.tsx            # Home dashboard & workspace manager
-│   │   ├── TopNav.tsx              # Toolbar, breadcrumbs & actions
-│   │   ├── LeftSidebar.tsx         # Layers tree & assets inspector
-│   │   ├── RightSidebar.tsx        # Properties & Auto Layout panel
-│   │   ├── ContextMenu.tsx         # Right-click context menu
-│   │   ├── ShortcutsModal.tsx      # Keyboard shortcuts cheat sheet
-│   │   ├── PropertiesModal.tsx     # Fullscreen property inspector
-│   │   ├── PrototypeModal.tsx      # Interactive prototyping player
-│   │   ├── EngineModal.tsx         # WebGL telemetry & hardware stats
-│   │   ├── PythonConsoleModal.tsx  # Procedural design script runner
-│   │   └── CanvasSettingsModal.tsx # Grids, rulers & background setup
-│   ├── engine/             # WebGL rendering engine & shaders
-│   ├── storage/            # IndexedDB device storage adapter
-│   ├── utils/
-│   │   ├── autoLayout.ts    # Figma Auto Layout calculation engine
-│   │   ├── vectorUtils.ts   # Bézier & relative SVG path utilities
-│   │   ├── export.ts        # SVG, PNG, JPG & JSON export engine
-│   │   └── codeGenerator.ts # CSS & Tailwind code generation
-│   ├── templates.ts        # Built-in sample designs (Banking, SaaS)
-│   ├── types.ts            # TypeScript interfaces & types
-│   ├── App.tsx             # Main application state & shortcut manager
-│   ├── main.tsx            # React application entry point
-│   └── index.css           # Global design system & theme variables
-├── package.json            # Project dependencies & build scripts
-├── tsconfig.json           # TypeScript configuration
-├── vite.config.ts          # Vite build configuration
-└── README.md               # Documentation
-```
+Kerf Studio will open with the After Effects-style splash loading screen, initialize the Direct3D hardware context and native Rust SIMD engine, and present the studio canvas.
 
 ---
 
 ## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
+MIT License. © 2026 Kerf Studio Team.

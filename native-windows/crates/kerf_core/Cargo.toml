@@ -1,0 +1,17 @@
+[package]
+name = "kerf_core"
+version = "1.0.0"
+edition = "2021"
+authors = ["Kerf Studio Team"]
+description = "High-performance vector geometry and graphics engine for Kerf Studio"
+
+[lib]
+name = "kerf_core"
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

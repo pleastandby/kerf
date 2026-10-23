@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512" fill="none">
+  <title>KERF soft folded-gradient symbol</title>
+  <desc>Abstract folded ribbon mark with peach, coral, indigo, sky blue, mint and teal gradients on a transparent background.</desc>
+  <defs>
+    <linearGradient id="peachCoral" x1="116" y1="72" x2="232" y2="286" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE8C7"/>
+      <stop offset=".38" stop-color="#FFC7A8"/>
+      <stop offset=".72" stop-color="#FF927F"/>
+      <stop offset="1" stop-color="#F56D88"/>
+    </linearGradient>
+    <linearGradient id="indigoBlue" x1="122" y1="282" x2="237" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6C54B6"/>
+      <stop offset=".48" stop-color="#354F8E"/>
+      <stop offset="1" stop-color="#174568"/>
+    </linearGradient>
+    <linearGradient id="skyBlue" x1="265" y1="100" x2="380" y2="228" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#B8E4FF"/>
+      <stop offset=".55" stop-color="#77B9F5"/>
+      <stop offset="1" stop-color="#3476D8"/>
+    </linearGradient>
+    <linearGradient id="mintTeal" x1="270" y1="264" x2="390" y2="405" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D8F2BD"/>
+      <stop offset=".38" stop-color="#76D6B7"/>
+      <stop offset=".75" stop-color="#27B8A9"/>
+      <stop offset="1" stop-color="#009C98"/>
+    </linearGradient>
+    <linearGradient id="warmFold" x1="160" y1="180" x2="254" y2="285" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB29D"/>
+      <stop offset=".5" stop-color="#F6B9C7"/>
+      <stop offset="1" stop-color="#D5B6F0"/>
+    </linearGradient>
+    <linearGradient id="centerFold" x1="232" y1="210" x2="314" y2="280" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B2C4F1"/>
+      <stop offset=".5" stop-color="#8ACFCB"/>
+      <stop offset="1" stop-color="#D4E8B6"/>
+    </linearGradient>
+    <linearGradient id="blueFold" x1="160" y1="280" x2="244" y2="355" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7359B5"/>
+      <stop offset="1" stop-color="#264E87"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Upper-left folded panel -->
+  <path d="M113 169C113 115 151 73 205 73H242V211C242 235 229 254 208 268L113 326V169Z" fill="url(#peachCoral)"/>
+  <!-- Lower-left panel -->
+  <path d="M113 326L208 268C226 257 242 268 242 289V420H170C138 420 113 395 113 363V326Z" fill="url(#indigoBlue)"/>
+  <!-- Upper-right folded wing -->
+  <path d="M242 179L303 118C326 95 346 92 369 92H410V143C410 164 401 181 385 196L315 255L242 210V179Z" fill="url(#skyBlue)"/>
+  <!-- Lower-right folded wing -->
+  <path d="M242 235L315 255L382 324C400 342 410 358 410 379C410 402 392 420 369 420C350 420 337 412 322 397L242 315V235Z" fill="url(#mintTeal)"/>
+
+  <!-- Soft, folded central transitions -->
+  <path d="M113 326L208 268C226 257 242 241 242 211V289C242 305 232 317 216 326L168 354C145 367 124 355 113 340V326Z" fill="url(#warmFold)" opacity=".96"/>
+  <path d="M242 179L303 118C326 95 346 92 369 92H410V143C410 164 401 181 385 196L315 255L242 210V179Z" fill="url(#skyBlue)"/>
+  <path d="M242 211L315 255L270 285L242 315V211Z" fill="url(#centerFold)" opacity=".98"/>
+  <path d="M242 211L270 229L315 255L270 285L242 315V211Z" fill="#B9D8D8" opacity=".32"/>
+  <path d="M113 326C128 302 151 294 174 300L216 311C231 315 242 329 242 347V420H170C138 420 113 395 113 363V326Z" fill="url(#blueFold)" opacity=".82"/>
+  <path d="M242 315L270 285L322 334L282 365L242 326V315Z" fill="#35BEB2" opacity=".24"/>
+</svg>

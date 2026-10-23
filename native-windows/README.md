@@ -1,71 +1,106 @@
-# Kerf Native Windows Studio Engine
+# Kerf Studio — Native Windows Architecture & Reference Manual
 
 ## Overview
-**Kerf Studio** is a standalone native Windows desktop vector design studio compiled to a single 64-bit Windows executable (`KerfStudio.exe`).
+**Kerf Studio (v3.0.0)** is a production-grade native Windows desktop vector design and prototyping application inspired by Figma and Adobe Illustrator. Compiled to a standalone 64-bit Windows executable (`KerfStudio.exe`) using .NET Framework 4.0/4.8 Direct3D hardware-accelerated milcore composition.
 
-Unlike web browser wrappers, Kerf Native Studio runs directly on the Windows operating system and bypasses all browser sandboxes, DOM trees, and Web APIs. It interfaces directly with the Windows graphics driver through **hardware-accelerated DirectX / Direct2D and DirectWrite**, utilizing the dedicated GPU and CPU SIMD resources.
+Unlike browser-based wrappers, Kerf Studio is built specifically as a primary Windows desktop application with transactional local storage, native `.kerf` file associations, a retained Direct3D scene graph, and honest hardware telemetry.
 
 ---
 
-## Technical Stack & Architecture
-
-Inspired by graphics-intensive suites like **Adobe After Effects**, **Adobe Illustrator**, and **Figma Desktop**:
+## Technical Architecture (v3.0.0)
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│                      KerfStudio.exe                    │
-│            Native 64-bit Standalone Windows PE         │
+│                   KerfStudio.exe (v3.0.0)              │
+│       Native 64-bit Standalone Direct3D Vector Studio  │
 ├────────────────────────────────────────────────────────┤
-│  Win32 Message Loop & High-DPI Raw Input Subsystem     │
-│  (Window Procedure, Subpixel Pointer & Wheel Events)   │
+│  Windows Shell & UI Routing Layer                      │
+│  • Custom WindowChrome (Frameless, Minimize/Max/Close) │
+│  • View Router (HomePageView <-> StudioView)           │
+│  • Save-Before-Closing Modal Guard & Recovery Alert    │
 ├────────────────────────────────────────────────────────┤
-│           DirectX Hardware Rendering Pipeline          │
-│  • GPU Geometry & Quad Tessellation                    │
-│  • DirectWrite Subpixel Font Glyph Rendering           │
-│  • Hardware Bicubic Scaling & Anti-Aliased Rasterizer  │
-│  • Real-Time Telemetry & Draw Call Batch Monitor       │
+│  Retained Scene Graph & GPU Render Pipeline            │
+│  • RetainedSceneGraph: DrawingVisual caching per node  │
+│  • Spatial Indexing & AABB Viewport Culling            │
+│  • Direct3D Pixel Shaders: Blur & DropShadowEffect     │
+│  • Multi-pass Inner Shadows with geometric clipping    │
+│  • Multi-stop Linear & Radial Gradient Brushes         │
+│  • Truthful Telemetry: Microsecond frame time & Tier   │
+│  • Tier 0 Software Rasterizer Fallback                 │
 ├────────────────────────────────────────────────────────┤
-│               Core Design & Layout Engine              │
-│  • Infinite Canvas (Exponential Zoom & Pan Engine)     │
-│  • Figma-Grade Auto Layout (Row, Column, Spacing, Pad) │
-│  • Shape Generators (Rect, Ellipse, Star, Poly, Frame) │
-│  • Real-Time Property Inspector & Color Converter      │
-│  • Live CSS Code Generator & Inspector                 │
+│  Canonical Document Container & Transactional Engine   │
+│  • Canonical KerfDocument v3.0.0 (Pages, Layers, Fills)│
+│  • DocumentMigrations: Lossless React v1/v2 & WPF v2.4 │
+│  • CommandHistory: ICommand Undo/Redo & Batch Actions  │
 ├────────────────────────────────────────────────────────┤
-│             Windows OS Native File Subsystem           │
-│  • Native Win32 File Dialogs (Open, Save As)           │
-│  • Native .kerf Project Persistence                    │
-│  • Hardware RenderTargetBitmap High-Res PNG Export     │
-│  • Standard SVG Vector Markup Export                   │
+│  Interactive Tool Island & Geometry Engine             │
+│  • 8-handle Transform Box with Aspect Lock & Rotation  │
+│  • Bézier Vector Pen: Anchor nodes & Smooth handles    │
+│  • Boolean Operations: Union, Subtract, Intersect, Xor │
+│  • Figma Auto Layout: Horizontal, Vertical, Wrap, Grid │
+│  • Card-based Layer Panel: Depth indent & reordering   │
+├────────────────────────────────────────────────────────┤
+│  Storage, Export & Deployment                          │
+│  • Atomic Transactional Saves (write tmp + rename)     │
+│  • Autosave Recovery Engine (%LocalAppData%\Autosave)  │
+│  • Validated XML SVG Vector Exporter                   │
+│  • High-DPI Raster Exporter (PNG/JPEG at 1x, 2x, 3x)   │
+│  • Windows Installer Wizard (Registry & Shortcuts)     │
 └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Features
+## Canonical Document Model (v3.0.0)
 
-1. **Hardware-Accelerated Infinite Canvas**:
-   - Smooth panning (<kbd>Space</kbd> + Left Drag or Middle Mouse Drag).
-   - Cursor-centered exponential zooming (<kbd>Ctrl</kbd> + Mouse Wheel, 10% to 3200%).
-   - Hardware-rendered infinite dot alignment grid.
+Every design is stored in a clean, versioned JSON container:
+- `KerfDocument`: Project metadata, SchemaVersion ("3.0.0"), AssetLibrary, Pages.
+- `Page`: Canvas settings, background color, dot/grid spacing, guides, hierarchical Layers.
+- `LayerNode`:
+  - Bounds & Transform: `X`, `Y`, `Width`, `Height`, `Rotation`, `ScaleX`, `ScaleY`.
+  - Corner Radii: Uniform `CornerRadius` or 4-corner individual radii.
+  - Geometry: `VectorGeometry` with Bézier anchor nodes, incoming/outgoing tangent handles.
+  - Fills: `Paint[]` supporting Solid colors, Linear gradients (angle, stops), Radial gradients, Images.
+  - Strokes: `StrokeData[]` supporting inside/center/outside alignment, line caps, line joins, dash patterns.
+  - Effects: `EffectData[]` with Drop Shadows, Inner Shadows, and Gaussian Layer Blur.
+  - Layout: `AutoLayoutData` with direction, padding, gap, alignment, justify, and hug/fill sizing.
+  - Typography: `TypographyData` with font family, weight, size, line-height, text case, and alignment.
 
-2. **Vector Creation Tools**:
-   - **Select** (<kbd>V</kbd>) & **Hand** (<kbd>H</kbd>)
-   - **Frame / Artboard** (<kbd>F</kbd>)
-   - **Rectangle** (<kbd>R</kbd>) & **Ellipse** (<kbd>O</kbd>)
-   - **Star** (<kbd>S</kbd>) & **Polygon / Triangle** (<kbd>P</kbd>)
-   - **Typography / Text** (<kbd>T</kbd>)
-   - **Line / Vector Path** (<kbd>L</kbd>)
+---
 
-3. **Figma Auto Layout**:
-   - Direction: Horizontal Row (`->`) and Vertical Column (`↓`)
-   - Item spacing (gap) & 4-side padding
-   - Automatic frame resizing ("Hug Contents")
+## Building and Testing
 
-4. **Inspector & Code Generation**:
-   - Geometry (X, Y, Width, Height, Corner Radius, Opacity, Stroke Width)
-   - Real-time RGB / Hex color picker
-   - Live CSS Flexbox inspector
+### Compilation
+From the `native-windows/` directory:
+```cmd
+build.bat
+```
+This invokes `csc.exe` with C# 5 compatibility, compiling `src/**/*.cs` into `..\KerfStudio.exe` and `KerfInstaller.cs` into `..\KerfStudioSetup.exe`.
 
-5. **Standalone Distribution**:
-   - Single portable executable: `KerfStudio.exe` (no installers, runtimes, or browser dependencies required).
+### Automated Verification Tests
+Run the test suite:
+```cmd
+csc /target:exe /platform:x64 /out:tests\TestRunner.exe /r:System.dll,System.Core.dll,System.Xaml.dll,System.Web.Extensions.dll,PresentationCore.dll,PresentationFramework.dll,WindowsBase.dll src\Model\*.cs src\Engine\*.cs src\Tools\*.cs src\IO\*.cs tests\TestRunner.cs
+tests\TestRunner.exe
+```
+
+---
+
+## Keyboard Shortcuts
+- <kbd>V</kbd>: Select & Transform Tool
+- <kbd>H</kbd>: Hand Pan Tool (or hold <kbd>Space</kbd> + Left Drag)
+- <kbd>F</kbd>: Frame Tool
+- <kbd>R</kbd>: Rectangle Tool
+- <kbd>O</kbd>: Ellipse Tool
+- <kbd>S</kbd>: Star Tool
+- <kbd>P</kbd>: Polygon Tool
+- <kbd>B</kbd>: Bézier Pen Tool
+- <kbd>T</kbd>: Typography / Text Tool
+- <kbd>L</kbd>: Line Tool
+- <kbd>A</kbd>: Arrow Tool
+- <kbd>Ctrl</kbd> + <kbd>Z</kbd>: Undo
+- <kbd>Ctrl</kbd> + <kbd>Y</kbd>: Redo
+- <kbd>Ctrl</kbd> + <kbd>S</kbd>: Save Project (.kerf)
+- <kbd>Delete</kbd> / <kbd>Backspace</kbd>: Delete Selected Layer(s)
+- <kbd>Shift</kbd> (during transform): Constrain Aspect Ratio / Snap Angle
+- <kbd>Alt</kbd> (during transform): Scale from Center
