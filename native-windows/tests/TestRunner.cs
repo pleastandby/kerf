@@ -1749,6 +1749,58 @@ namespace Kerf.Tests
                 GradientRollerEngine.RenderOverlay(dc, node, paint, 1.0, 1);
             }
             Assert(dv != null, "RenderOverlay executes and renders on-canvas vector rollers cleanly");
+
+            // 8. Free Independent Handle Movement & Stretching (Not Stuck on Axis/Anchor)
+            var stretchNode = new LayerNode
+            {
+                Id = "stretch-box",
+                Type = ElementType.Rectangle,
+                X = 0,
+                Y = 0,
+                Width = 200,
+                Height = 200
+            };
+            var stretchPaint = new Paint
+            {
+                Type = PaintType.LinearGradient,
+                GradientAngle = 90.0,
+                GradientStops = new List<GradientStopData>
+                {
+                    new GradientStopData(0.0, "#FFFFFF", 1.0),
+                    new GradientStopData(1.0, "#000000", 1.0)
+                }
+            };
+
+            // Drag End handle freely to (200, 400) - stretching vertically far past bottom edge
+            GradientRollerEngine.UpdateEndHandleFromDrag(stretchNode, stretchPaint, new Point(200, 400), false);
+            Assert(stretchPaint.GradientEnd.HasValue, "GradientEnd is set after drag");
+            Assert(Math.Abs(stretchPaint.GradientEnd.Value.X - 1.0) < 0.01 && Math.Abs(stretchPaint.GradientEnd.Value.Y - 2.0) < 0.01,
+                string.Format("End handle moved to (1.0, 2.0), got ({0}, {1})", stretchPaint.GradientEnd.Value.X, stretchPaint.GradientEnd.Value.Y));
+            // Verify Start handle remained at top center (0.5, 0.0) and was NOT forcibly moved across center
+            Assert(stretchPaint.GradientStart.HasValue, "GradientStart is initialized");
+            Assert(Math.Abs(stretchPaint.GradientStart.Value.X - 0.5) < 0.01 && Math.Abs(stretchPaint.GradientStart.Value.Y - 0.0) < 0.01,
+                string.Format("Start handle stayed pinned at (0.5, 0.0), got ({0}, {1})", stretchPaint.GradientStart.Value.X, stretchPaint.GradientStart.Value.Y));
+
+            // Drag Start handle freely to (-100, 50) - stretching horizontally outside the left boundary
+            GradientRollerEngine.UpdateStartHandleFromDrag(stretchNode, stretchPaint, new Point(-100, 50), false);
+            Assert(Math.Abs(stretchPaint.GradientStart.Value.X - (-0.5)) < 0.01 && Math.Abs(stretchPaint.GradientStart.Value.Y - 0.25) < 0.01,
+                string.Format("Start handle moved freely outside layer to (-0.5, 0.25), got ({0}, {1})", stretchPaint.GradientStart.Value.X, stretchPaint.GradientStart.Value.Y));
+            // Verify End handle remained at (1.0, 2.0)
+            Assert(Math.Abs(stretchPaint.GradientEnd.Value.X - 1.0) < 0.01 && Math.Abs(stretchPaint.GradientEnd.Value.Y - 2.0) < 0.01,
+                "End handle remained pinned while Start handle moved");
+
+            // Verify midpoint is not stuck on (0.5, 0.5) anchor
+            double midX = (stretchPaint.GradientStart.Value.X + stretchPaint.GradientEnd.Value.X) / 2.0;
+            double midY = (stretchPaint.GradientStart.Value.Y + stretchPaint.GradientEnd.Value.Y) / 2.0;
+            Assert(Math.Abs(midX - 0.5) > 0.1 || Math.Abs(midY - 0.5) > 0.1,
+                string.Format("Gradient midpoint moved freely away from center anchor (0.5, 0.5), currently at ({0}, {1})", midX, midY));
+
+            // Verify line stretched distance on canvas is accurately reflected in GetGradientPoints
+            Point sp1, sp2;
+            List<Point> sStops;
+            GradientRollerEngine.GetGradientPoints(stretchNode, stretchPaint, out sp1, out sp2, out sStops);
+            double lineLength = Math.Sqrt((sp2.X - sp1.X) * (sp2.X - sp1.X) + (sp2.Y - sp1.Y) * (sp2.Y - sp1.Y));
+            Assert(lineLength > 300.0, string.Format("Gradient line length stretched to {0:F1}px", lineLength));
         }
 
         private static void TestBatch6Requirements_RealLiquidGlassAndSmoothSliders()

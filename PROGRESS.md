@@ -620,7 +620,30 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 32 cr
 
 ---
 
-## 16. Automated Test Suite Status
+## 16. Free Gradient Handle Movement & Independent 2D Stretching (Unanchored from Axis)
+
+### Context & Root Cause
+- **Problem Statement:** Gradient handles only rotated symmetrically around layer center (0.5, 0.5) like a rigid see-saw anchor; dragging one handle forcibly mirrored the opposite handle across (0.5, 0.5). The gradient could not be freely stretched or compressed in 2D space, nor could the start and end handles be positioned independently.
+- **Root Cause in GradientRollerEngine.cs:**
+  - UpdateEndHandleFromDrag computed du = u - 0.5, dv = v - 0.5 and forcibly set paint.GradientStart = (0.5 - du, 0.5 - dv).
+  - UpdateStartHandleFromDrag computed du = 0.5 - u, dv = 0.5 - v and forcibly set paint.GradientEnd = (0.5 + du, 0.5 + dv).
+  - This hard-locked the midpoint of every gradient line to (0.5, 0.5).
+
+### Architecture & Fix Details
+1. **Independent Start & End Dragging (GradientRollerEngine.cs):**
+   - **UpdateEndHandleFromDrag:** Retrieves existing Start handle normalized coordinates paint.GradientStart (or initial angle-derived point (0.5 - 0.5*cos, 0.5 - 0.5*sin)), sets paint.GradientEnd = (u, v) freely, and leaves paint.GradientStart firmly anchored.
+   - **UpdateStartHandleFromDrag:** Retrieves existing End handle normalized coordinates paint.GradientEnd (or initial angle-derived point (0.5 + 0.5*cos, 0.5 + 0.5*sin)), sets paint.GradientStart = (u, v) freely, and leaves paint.GradientEnd firmly anchored.
+   - **Angle & Dimension Recalculation:** Dynamically recalculates paint.GradientAngle = atan2(dy, dx) * 180 / PI from Start to End vector in pixel dimensions.
+2. **Dynamic 2D Line Stretching & Compression:**
+   - Handles can be dragged anywhere in 2D space, including far outside the layer bounds (, v < 0$ or $> 1$), freely stretching or compressing the linear gradient line length.
+   - LinearGradientBrush.StartPoint and EndPoint natively stretch the visual gradient progression across the layer.
+   - Shift key modifier support (snapToAngles = true) snaps moving handles to 45° radial rays (°, 45°, 90°, 135°, \dots$).
+3. **Automated Verification:**
+   - Added automated unit test suite in TestRunner.cs verifying unanchored midpoint displacement away from (0.5, 0.5), independent coordinate updates, and line lengths stretching past 300px.
+
+---
+
+## 17. Automated Test Suite Status
 
 **Total Tests:** 33  
 **Passing:** 33 (100%)  

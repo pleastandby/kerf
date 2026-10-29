@@ -197,10 +197,15 @@ namespace Kerf.Tools
             return result;
         }
 
+        /// <summary>
+        /// Freely drags the Start handle on canvas. The End handle remains anchored in its position,
+        /// allowing free stretching, resizing, and arbitrary positioning of the gradient line in 2D space.
+        /// </summary>
         public static void UpdateStartHandleFromDrag(
             LayerNode node,
             Paint paint,
-            Point currentCanvasPt)
+            Point currentCanvasPt,
+            bool snapToAngles = false)
         {
             if (node == null || paint == null) return;
             double w = Math.Max(1.0, node.Width);
@@ -218,31 +223,63 @@ namespace Kerf.Tools
                 double u = (localMouse.X - node.X) / w;
                 double v = (localMouse.Y - node.Y) / h;
 
-                // Center is (0.5, 0.5) in UV coordinates. Start handle direction points from start to center
-                double du = 0.5 - u;
-                double dv = 0.5 - v;
-                if (Math.Abs(du) > 0.0001 || Math.Abs(dv) > 0.0001)
+                // Determine existing End handle position in UV space (or default from GradientAngle)
+                Point endNorm;
+                if (paint.GradientEnd.HasValue)
                 {
-                    double deg = Math.Atan2(dv, du) * 180.0 / Math.PI;
+                    endNorm = paint.GradientEnd.Value;
+                }
+                else
+                {
+                    double rad = (paint.GradientAngle * Math.PI) / 180.0;
+                    endNorm = new Point(Math.Round(0.5 + 0.5 * Math.Cos(rad), 4), Math.Round(0.5 + 0.5 * Math.Sin(rad), 4));
+                }
+
+                // Vector from moving Start handle to fixed End handle in pixel space
+                double dx = (endNorm.X - u) * w;
+                double dy = (endNorm.Y - v) * h;
+
+                if (snapToAngles && (dx * dx + dy * dy > 0.0001))
+                {
+                    double deg = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+                    if (deg < 0) deg += 360.0;
+                    double snapped = Math.Round(deg / 45.0) * 45.0;
+                    double dist = Math.Sqrt(dx * dx + dy * dy);
+                    double snapRad = (snapped * Math.PI) / 180.0;
+                    u = endNorm.X - (dist * Math.Cos(snapRad)) / w;
+                    v = endNorm.Y - (dist * Math.Sin(snapRad)) / h;
+                    dx = (endNorm.X - u) * w;
+                    dy = (endNorm.Y - v) * h;
+                }
+
+                if (dx * dx + dy * dy > 0.0001)
+                {
+                    double deg = Math.Atan2(dy, dx) * 180.0 / Math.PI;
                     if (deg < 0) deg += 360.0;
                     paint.GradientAngle = Math.Round(deg, 1);
                 }
 
+                // Start handle moves freely; End handle stays fixed
                 paint.GradientStart = new Point(Math.Round(u, 4), Math.Round(v, 4));
-                paint.GradientEnd = new Point(Math.Round(0.5 + du, 4), Math.Round(0.5 + dv, 4));
+                paint.GradientEnd = endNorm;
             }
             else // RadialGradient
             {
                 double u = (localMouse.X - node.X) / w;
                 double v = (localMouse.Y - node.Y) / h;
-                paint.GradientCenter = new Point(Math.Max(0.0, Math.Min(1.0, u)), Math.Max(0.0, Math.Min(1.0, v)));
+                paint.GradientCenter = new Point(Math.Round(u, 4), Math.Round(v, 4));
             }
         }
 
+        /// <summary>
+        /// Freely drags the End handle on canvas. The Start handle remains anchored in its position,
+        /// allowing free stretching, resizing, and arbitrary positioning of the gradient line in 2D space.
+        /// </summary>
         public static void UpdateEndHandleFromDrag(
             LayerNode node,
             Paint paint,
-            Point currentCanvasPt)
+            Point currentCanvasPt,
+            bool snapToAngles = false)
         {
             if (node == null || paint == null) return;
             double w = Math.Max(1.0, node.Width);
@@ -260,18 +297,45 @@ namespace Kerf.Tools
                 double u = (localMouse.X - node.X) / w;
                 double v = (localMouse.Y - node.Y) / h;
 
-                // Center is (0.5, 0.5) in UV coordinates. End handle direction points from center to end
-                double du = u - 0.5;
-                double dv = v - 0.5;
-                if (Math.Abs(du) > 0.0001 || Math.Abs(dv) > 0.0001)
+                // Determine existing Start handle position in UV space (or default from GradientAngle)
+                Point startNorm;
+                if (paint.GradientStart.HasValue)
                 {
-                    double deg = Math.Atan2(dv, du) * 180.0 / Math.PI;
+                    startNorm = paint.GradientStart.Value;
+                }
+                else
+                {
+                    double rad = (paint.GradientAngle * Math.PI) / 180.0;
+                    startNorm = new Point(Math.Round(0.5 - 0.5 * Math.Cos(rad), 4), Math.Round(0.5 - 0.5 * Math.Sin(rad), 4));
+                }
+
+                // Vector from fixed Start handle to moving End handle in pixel space
+                double dx = (u - startNorm.X) * w;
+                double dy = (v - startNorm.Y) * h;
+
+                if (snapToAngles && (dx * dx + dy * dy > 0.0001))
+                {
+                    double deg = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+                    if (deg < 0) deg += 360.0;
+                    double snapped = Math.Round(deg / 45.0) * 45.0;
+                    double dist = Math.Sqrt(dx * dx + dy * dy);
+                    double snapRad = (snapped * Math.PI) / 180.0;
+                    u = startNorm.X + (dist * Math.Cos(snapRad)) / w;
+                    v = startNorm.Y + (dist * Math.Sin(snapRad)) / h;
+                    dx = (u - startNorm.X) * w;
+                    dy = (v - startNorm.Y) * h;
+                }
+
+                if (dx * dx + dy * dy > 0.0001)
+                {
+                    double deg = Math.Atan2(dy, dx) * 180.0 / Math.PI;
                     if (deg < 0) deg += 360.0;
                     paint.GradientAngle = Math.Round(deg, 1);
                 }
 
+                // End handle moves freely; Start handle stays fixed
                 paint.GradientEnd = new Point(Math.Round(u, 4), Math.Round(v, 4));
-                paint.GradientStart = new Point(Math.Round(0.5 - du, 4), Math.Round(0.5 - dv, 4));
+                paint.GradientStart = startNorm;
             }
             else // RadialGradient
             {
@@ -283,16 +347,68 @@ namespace Kerf.Tools
             }
         }
 
+        /// <summary>
+        /// Updates gradient angle based on dragging around layer center (symmetric angle control).
+        /// </summary>
         public static void UpdateAngleFromDrag(
             LayerNode node,
             Paint paint,
             Point currentCanvasPt,
             bool isStartHandle)
         {
-            if (isStartHandle)
-                UpdateStartHandleFromDrag(node, paint, currentCanvasPt);
-            else
-                UpdateEndHandleFromDrag(node, paint, currentCanvasPt);
+            if (node == null || paint == null) return;
+            double w = Math.Max(1.0, node.Width);
+            double h = Math.Max(1.0, node.Height);
+            Point center = new Point(node.X + w / 2.0, node.Y + h / 2.0);
+
+            Point localMouse = currentCanvasPt;
+            if (Math.Abs(node.Rotation) > 0.001)
+            {
+                localMouse = RotatePoint(localMouse, center, -node.Rotation);
+            }
+
+            if (paint.Type == PaintType.LinearGradient)
+            {
+                double u = (localMouse.X - node.X) / w;
+                double v = (localMouse.Y - node.Y) / h;
+
+                double du = isStartHandle ? (0.5 - u) : (u - 0.5);
+                double dv = isStartHandle ? (0.5 - v) : (v - 0.5);
+                if (Math.Abs(du) > 0.0001 || Math.Abs(dv) > 0.0001)
+                {
+                    double deg = Math.Atan2(dv, du) * 180.0 / Math.PI;
+                    if (deg < 0) deg += 360.0;
+                    paint.GradientAngle = Math.Round(deg, 1);
+                }
+
+                if (isStartHandle)
+                {
+                    paint.GradientStart = new Point(Math.Round(u, 4), Math.Round(v, 4));
+                    paint.GradientEnd = new Point(Math.Round(0.5 + du, 4), Math.Round(0.5 + dv, 4));
+                }
+                else
+                {
+                    paint.GradientEnd = new Point(Math.Round(u, 4), Math.Round(v, 4));
+                    paint.GradientStart = new Point(Math.Round(0.5 - du, 4), Math.Round(0.5 - dv, 4));
+                }
+            }
+            else // RadialGradient
+            {
+                if (isStartHandle)
+                {
+                    double u = (localMouse.X - node.X) / w;
+                    double v = (localMouse.Y - node.Y) / h;
+                    paint.GradientCenter = new Point(Math.Round(u, 4), Math.Round(v, 4));
+                }
+                else
+                {
+                    Point cNorm = paint.GradientCenter;
+                    Point pCenter = new Point(node.X + w * cNorm.X, node.Y + h * cNorm.Y);
+                    double dist = Distance(localMouse, pCenter);
+                    double r = dist / Math.Max(10.0, Math.Min(w, h));
+                    paint.GradientRadius = Math.Max(0.05, Math.Round(r, 3));
+                }
+            }
         }
 
         public static double ProjectOntoSegment(Point pt, Point p1, Point p2)

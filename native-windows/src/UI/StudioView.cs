@@ -4754,16 +4754,17 @@ namespace Kerf.UI
             // Gradient On-Canvas Roller Dragging (Figma-style)
             if (_isDraggingGradientHandle && _activeGradientLayer != null && _activeGradientPaint != null)
             {
+                bool isShift = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
                 if (_activeGradientHandle == GradientHandleType.Start)
                 {
-                    GradientRollerEngine.UpdateStartHandleFromDrag(_activeGradientLayer, _activeGradientPaint, canvasPt);
+                    GradientRollerEngine.UpdateStartHandleFromDrag(_activeGradientLayer, _activeGradientPaint, canvasPt, isShift);
                     InvalidateAndRefresh(_activeGradientLayer);
                     if (_activeGradientRamp != null) _activeGradientRamp.UpdateTrackVisuals();
                     return;
                 }
                 if (_activeGradientHandle == GradientHandleType.End)
                 {
-                    GradientRollerEngine.UpdateEndHandleFromDrag(_activeGradientLayer, _activeGradientPaint, canvasPt);
+                    GradientRollerEngine.UpdateEndHandleFromDrag(_activeGradientLayer, _activeGradientPaint, canvasPt, isShift);
                     InvalidateAndRefresh(_activeGradientLayer);
                     if (_activeGradientRamp != null) _activeGradientRamp.UpdateTrackVisuals();
                     return;
