@@ -105,6 +105,8 @@ namespace Kerf.Engine
                 return;
             }
 
+            _renderer.CurrentPage = page;
+
             var currentIds = new HashSet<string>();
             CollectNodeIds(page.Layers, currentIds);
 

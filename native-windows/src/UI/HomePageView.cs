@@ -34,7 +34,7 @@ namespace Kerf.UI
 
         private void InitializeUI()
         {
-            Background = new SolidColorBrush(Color.FromRgb(15, 17, 24)); // #0F1118
+            Background = new SolidColorBrush(Color.FromRgb(30, 34, 48)); // #1E2230
 
             var mainGrid = new Grid();
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(64) }); // Header
@@ -87,8 +87,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(20, 23, 34)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(35, 40, 58)),
+                Background = new SolidColorBrush(Color.FromRgb(37, 41, 58)), // #25293A
+                BorderBrush = new SolidColorBrush(Color.FromRgb(54, 62, 86)), // #363E56
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(32, 0, 32, 0)
             };

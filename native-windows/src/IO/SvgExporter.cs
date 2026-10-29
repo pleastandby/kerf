@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Security;
 using System.Text;
+using System.Windows.Media;
+using Kerf.Engine;
 using Kerf.Model;
 using Kerf.Tools;
 
@@ -91,21 +93,37 @@ namespace Kerf.IO
                         if (defIds.Add(id))
                         {
                             double rad = (fill.GradientAngle * Math.PI) / 180.0;
-                            double x1 = 0.5 - 0.5 * Math.Cos(rad);
-                            double y1 = 0.5 - 0.5 * Math.Sin(rad);
-                            double x2 = 0.5 + 0.5 * Math.Cos(rad);
-                            double y2 = 0.5 + 0.5 * Math.Sin(rad);
+                            double x1 = fill.GradientStart.HasValue ? fill.GradientStart.Value.X : (0.5 - 0.5 * Math.Cos(rad));
+                            double y1 = fill.GradientStart.HasValue ? fill.GradientStart.Value.Y : (0.5 - 0.5 * Math.Sin(rad));
+                            double x2 = fill.GradientEnd.HasValue ? fill.GradientEnd.Value.X : (0.5 + 0.5 * Math.Cos(rad));
+                            double y2 = fill.GradientEnd.HasValue ? fill.GradientEnd.Value.Y : (0.5 + 0.5 * Math.Sin(rad));
 
                             sb.AppendFormat(CultureInfo.InvariantCulture,
                                 "    <linearGradient id=\"{0}\" x1=\"{1:F2}\" y1=\"{2:F2}\" x2=\"{3:F2}\" y2=\"{4:F2}\">\n",
                                 id, x1, y1, x2, y2);
-                            if (fill.GradientStops != null)
+                            if (fill.GradientStops != null && fill.GradientStops.Count > 0)
                             {
-                                foreach (var stop in fill.GradientStops)
+                                var sorted = new List<GradientStopData>(fill.GradientStops);
+                                sorted.Sort((a, b) => a.Position.CompareTo(b.Position));
+                                for (int sIdx = 0; sIdx < sorted.Count; sIdx++)
                                 {
+                                    var stop = sorted[sIdx];
                                     sb.AppendFormat(CultureInfo.InvariantCulture,
-                                        "      <stop offset=\"{0:P0}\" stop-color=\"{1}\" stop-opacity=\"{2:F2}\" />\n",
-                                        stop.Position, stop.ColorHex, stop.Opacity * fill.Opacity);
+                                        "      <stop offset=\"{0:0.##}%\" stop-color=\"{1}\" stop-opacity=\"{2:F2}\" />\n",
+                                        stop.Position * 100.0, stop.ColorHex, stop.Opacity * fill.Opacity);
+                                    if (sIdx < sorted.Count - 1 && Math.Abs(stop.Midpoint - 0.5) > 0.01 && stop.Midpoint > 0.05 && stop.Midpoint < 0.95)
+                                    {
+                                        var nextStop = sorted[sIdx + 1];
+                                        double midPos = stop.Position + stop.Midpoint * (nextStop.Position - stop.Position);
+                                        Color c1 = GpuRenderer.ParseHexColor(stop.ColorHex, stop.Opacity * fill.Opacity);
+                                        Color c2 = GpuRenderer.ParseHexColor(nextStop.ColorHex, nextStop.Opacity * fill.Opacity);
+                                        Color midColor = GpuRenderer.InterpolateColor(c1, c2, 0.5);
+                                        string midHex = string.Format("#{0:X2}{1:X2}{2:X2}", midColor.R, midColor.G, midColor.B);
+                                        double midOp = midColor.A / 255.0;
+                                        sb.AppendFormat(CultureInfo.InvariantCulture,
+                                            "      <stop offset=\"{0:0.##}%\" stop-color=\"{1}\" stop-opacity=\"{2:F2}\" />\n",
+                                            midPos * 100.0, midHex, midOp);
+                                    }
                                 }
                             }
                             sb.AppendLine("    </linearGradient>");
@@ -119,13 +137,29 @@ namespace Kerf.IO
                             sb.AppendFormat(CultureInfo.InvariantCulture,
                                 "    <radialGradient id=\"{0}\" cx=\"{1:F2}\" cy=\"{2:F2}\" r=\"{3:F2}\">\n",
                                 id, fill.GradientCenter.X, fill.GradientCenter.Y, fill.GradientRadius);
-                            if (fill.GradientStops != null)
+                            if (fill.GradientStops != null && fill.GradientStops.Count > 0)
                             {
-                                foreach (var stop in fill.GradientStops)
+                                var sorted = new List<GradientStopData>(fill.GradientStops);
+                                sorted.Sort((a, b) => a.Position.CompareTo(b.Position));
+                                for (int sIdx = 0; sIdx < sorted.Count; sIdx++)
                                 {
+                                    var stop = sorted[sIdx];
                                     sb.AppendFormat(CultureInfo.InvariantCulture,
-                                        "      <stop offset=\"{0:P0}\" stop-color=\"{1}\" stop-opacity=\"{2:F2}\" />\n",
-                                        stop.Position, stop.ColorHex, stop.Opacity * fill.Opacity);
+                                        "      <stop offset=\"{0:0.##}%\" stop-color=\"{1}\" stop-opacity=\"{2:F2}\" />\n",
+                                        stop.Position * 100.0, stop.ColorHex, stop.Opacity * fill.Opacity);
+                                    if (sIdx < sorted.Count - 1 && Math.Abs(stop.Midpoint - 0.5) > 0.01 && stop.Midpoint > 0.05 && stop.Midpoint < 0.95)
+                                    {
+                                        var nextStop = sorted[sIdx + 1];
+                                        double midPos = stop.Position + stop.Midpoint * (nextStop.Position - stop.Position);
+                                        Color c1 = GpuRenderer.ParseHexColor(stop.ColorHex, stop.Opacity * fill.Opacity);
+                                        Color c2 = GpuRenderer.ParseHexColor(nextStop.ColorHex, nextStop.Opacity * fill.Opacity);
+                                        Color midColor = GpuRenderer.InterpolateColor(c1, c2, 0.5);
+                                        string midHex = string.Format("#{0:X2}{1:X2}{2:X2}", midColor.R, midColor.G, midColor.B);
+                                        double midOp = midColor.A / 255.0;
+                                        sb.AppendFormat(CultureInfo.InvariantCulture,
+                                            "      <stop offset=\"{0:0.##}%\" stop-color=\"{1}\" stop-opacity=\"{2:F2}\" />\n",
+                                            midPos * 100.0, midHex, midOp);
+                                    }
                                 }
                             }
                             sb.AppendLine("    </radialGradient>");

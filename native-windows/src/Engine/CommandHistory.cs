@@ -651,5 +651,146 @@ namespace Kerf.Engine
             if (_onRender != null) _onRender();
         }
     }
+
+    public class ReorderLayerCommand : ICommand
+    {
+        public string Description { get { return "Reorder Layer " + _source.Name; } }
+        private readonly Page _page;
+        private readonly LayerNode _source;
+        private readonly string _oldParentId;
+        private readonly int _oldIndex;
+        private readonly string _newParentId;
+        private readonly int _newIndex;
+        private readonly Action _onRender;
+
+        public ReorderLayerCommand(Page page, LayerNode source, string oldParentId, int oldIndex, string newParentId, int newIndex, Action onRender)
+        {
+            _page = page;
+            _source = source;
+            _oldParentId = oldParentId;
+            _oldIndex = oldIndex;
+            _newParentId = newParentId;
+            _newIndex = newIndex;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            MoveTo(_newParentId, _newIndex);
+        }
+
+        public void Unexecute()
+        {
+            MoveTo(_oldParentId, _oldIndex);
+        }
+
+        private void MoveTo(string parentId, int index)
+        {
+            _page.RemoveLayerEverywhere(_source);
+            List<LayerNode> targetList;
+            if (string.IsNullOrEmpty(parentId))
+            {
+                targetList = _page.Layers;
+                _source.ParentId = null;
+            }
+            else
+            {
+                var parent = _page.FindLayerById(parentId);
+                if (parent != null)
+                {
+                    if (parent.Children == null) parent.Children = new List<LayerNode>();
+                    targetList = parent.Children;
+                    _source.ParentId = parent.Id;
+                }
+                else
+                {
+                    targetList = _page.Layers;
+                    _source.ParentId = null;
+                }
+            }
+
+            int insertIdx = Math.Max(0, Math.Min(index, targetList.Count));
+            targetList.Insert(insertIdx, _source);
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class FrameSelectionCommand : ICommand
+    {
+        public string Description { get { return "Frame Selection"; } }
+        private readonly Page _page;
+        private readonly LayerNode _frame;
+        private readonly List<LayerNode> _children;
+        private readonly string _origParentId;
+        private readonly int _origIndex;
+        private readonly Action _onRender;
+
+        public FrameSelectionCommand(Page page, LayerNode frame, IEnumerable<LayerNode> children, string origParentId, int origIndex, Action onRender)
+        {
+            _page = page;
+            _frame = frame;
+            _children = new List<LayerNode>(children);
+            _origParentId = origParentId;
+            _origIndex = origIndex;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            List<LayerNode> container;
+            if (string.IsNullOrEmpty(_origParentId))
+            {
+                container = _page.Layers;
+            }
+            else
+            {
+                var p = _page.FindLayerById(_origParentId);
+                container = (p != null && p.Children != null) ? p.Children : _page.Layers;
+            }
+
+            foreach (var child in _children)
+            {
+                _page.RemoveLayerEverywhere(child);
+                child.ParentId = _frame.Id;
+                if (_frame.Children == null) _frame.Children = new List<LayerNode>();
+                if (!_frame.Children.Contains(child)) _frame.Children.Add(child);
+            }
+
+            int idx = Math.Max(0, Math.Min(_origIndex, container.Count));
+            if (!container.Contains(_frame))
+            {
+                container.Insert(idx, _frame);
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            List<LayerNode> container;
+            if (string.IsNullOrEmpty(_origParentId))
+            {
+                container = _page.Layers;
+            }
+            else
+            {
+                var p = _page.FindLayerById(_origParentId);
+                container = (p != null && p.Children != null) ? p.Children : _page.Layers;
+            }
+
+            _page.RemoveLayerEverywhere(_frame);
+
+            int idx = Math.Max(0, Math.Min(_origIndex, container.Count));
+            for (int i = 0; i < _children.Count; i++)
+            {
+                var child = _children[i];
+                child.ParentId = _origParentId;
+                container.Insert(Math.Min(idx + i, container.Count), child);
+            }
+
+            _frame.Children.Clear();
+            if (_onRender != null) _onRender();
+        }
+    }
 }
+
 

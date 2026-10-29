@@ -1,5 +1,6 @@
 pub mod bezier;
 pub mod geometry;
+pub mod liquid_glass;
 pub mod simd;
 
 use std::ffi::CString;
@@ -240,4 +241,124 @@ pub extern "C" fn kerf_convex_hull(
     }
     1
 }
+
+#[no_mangle]
+pub extern "C" fn kerf_render_liquid_glass_v2(
+    bg_ptr: *const u8,
+    bg_w: i32,
+    bg_h: i32,
+    bg_stride: i32,
+    out_ptr: *mut u8,
+    out_w: i32,
+    out_h: i32,
+    out_stride: i32,
+    margin_x: f32,
+    margin_y: f32,
+    radius: f32,
+    bezel: f32,
+    bezel_height: f32,
+    glass_thickness: f32,
+    frost_sigma: f32,
+    dispersion: f32,
+    light_x: f32,
+    light_y: f32,
+    tint_r: f32,
+    tint_g: f32,
+    tint_b: f32,
+    tint_alpha: f32,
+    specular_intensity: f32,
+    is_bgra: i32,
+) -> i32 {
+    if bg_ptr.is_null() || out_ptr.is_null() || bg_w <= 0 || bg_h <= 0 || bg_stride <= 0 || out_w <= 0 || out_h <= 0 || out_stride <= 0 {
+        return 0;
+    }
+    let bg_total = (bg_h as usize) * (bg_stride as usize);
+    let out_total = (out_h as usize) * (out_stride as usize);
+    let bg_buf = unsafe { std::slice::from_raw_parts(bg_ptr, bg_total) };
+    let out_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_total) };
+
+    liquid_glass::render_liquid_glass_v2(
+        bg_buf,
+        bg_w,
+        bg_h,
+        bg_stride,
+        out_buf,
+        out_w,
+        out_h,
+        out_stride,
+        margin_x,
+        margin_y,
+        radius,
+        bezel,
+        bezel_height,
+        glass_thickness,
+        frost_sigma,
+        dispersion,
+        [light_x, light_y],
+        [tint_r, tint_g, tint_b],
+        tint_alpha,
+        specular_intensity,
+        is_bgra != 0,
+    );
+
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn kerf_render_liquid_glass(
+    bg_ptr: *const u8,
+    width: i32,
+    height: i32,
+    stride: i32,
+    out_ptr: *mut u8,
+    cx: f32,
+    cy: f32,
+    hw: f32,
+    hh: f32,
+    radius: f32,
+    bezel: f32,
+    bezel_height: f32,
+    glass_thickness: f32,
+    frost_sigma: f32,
+    light_x: f32,
+    light_y: f32,
+    tint_r: f32,
+    tint_g: f32,
+    tint_b: f32,
+    tint_alpha: f32,
+    specular_intensity: f32,
+    is_bgra: i32,
+) -> i32 {
+    if bg_ptr.is_null() || out_ptr.is_null() || width <= 0 || height <= 0 || stride <= 0 {
+        return 0;
+    }
+    let total_bytes = (height as usize) * (stride as usize);
+    let bg_buf = unsafe { std::slice::from_raw_parts(bg_ptr, total_bytes) };
+    let out_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, total_bytes) };
+
+    liquid_glass::render_liquid_glass(
+        bg_buf,
+        width,
+        height,
+        stride,
+        out_buf,
+        cx,
+        cy,
+        hw,
+        hh,
+        radius,
+        bezel,
+        bezel_height,
+        glass_thickness,
+        frost_sigma,
+        [light_x, light_y],
+        [tint_r, tint_g, tint_b],
+        tint_alpha,
+        specular_intensity,
+        is_bgra != 0,
+    );
+
+    1
+}
+
 

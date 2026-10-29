@@ -2,8 +2,10 @@ using System;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 
 namespace Kerf.UI
 {
@@ -161,6 +163,57 @@ namespace Kerf.UI
             return dock;
         }
 
+        private static Style _sharedSliderStyle;
+        public static Style GetSharedSliderStyle()
+        {
+            if (_sharedSliderStyle != null) return _sharedSliderStyle;
+
+            string xaml = @"
+<Style xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
+       xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""
+       TargetType=""Slider"">
+    <Setter Property=""IsMoveToPointEnabled"" Value=""True""/>
+    <Setter Property=""Cursor"" Value=""Hand""/>
+    <Setter Property=""Template"">
+        <Setter.Value>
+            <ControlTemplate TargetType=""Slider"">
+                <Grid VerticalAlignment=""Center"">
+                    <Border Height=""5"" CornerRadius=""2.5"" Background=""#202636"" BorderBrush=""#303A50"" BorderThickness=""1"" VerticalAlignment=""Center""/>
+                    <Track x:Name=""PART_Track"">
+                        <Track.Thumb>
+                            <Thumb Cursor=""Hand"">
+                                <Thumb.Template>
+                                    <ControlTemplate TargetType=""Thumb"">
+                                        <Border Width=""14"" Height=""14"" CornerRadius=""7"" Background=""#F8FAFC"" BorderBrush=""#38BDF8"" BorderThickness=""2"">
+                                            <Border.Effect>
+                                                <DropShadowEffect Color=""#000000"" BlurRadius=""4"" ShadowDepth=""1"" Opacity=""0.5""/>
+                                            </Border.Effect>
+                                        </Border>
+                                    </ControlTemplate>
+                                </Thumb.Template>
+                            </Thumb>
+                        </Track.Thumb>
+                    </Track>
+                </Grid>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>";
+
+            try
+            {
+                _sharedSliderStyle = (Style)System.Windows.Markup.XamlReader.Parse(xaml);
+            }
+            catch
+            {
+                _sharedSliderStyle = new Style(typeof(Slider));
+                _sharedSliderStyle.Setters.Add(new Setter(Slider.IsMoveToPointEnabledProperty, true));
+                _sharedSliderStyle.Setters.Add(new Setter(FrameworkElement.CursorProperty, Cursors.Hand));
+            }
+
+            return _sharedSliderStyle;
+        }
+
         /// <summary>
         /// Creates a smooth, Figma-grade slider with real-time numeric badge and glowing track.
         /// </summary>
@@ -207,6 +260,9 @@ namespace Kerf.UI
                 Minimum = min,
                 Maximum = max,
                 Value = initialValue,
+                IsMoveToPointEnabled = true,
+                Cursor = Cursors.Hand,
+                Style = GetSharedSliderStyle(),
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(4, 0, 4, 0)
             };

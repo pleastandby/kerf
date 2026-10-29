@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using Kerf.Engine;
@@ -127,40 +128,6 @@ namespace Kerf.UI
             var logoElement = KerfLogo.CreateLogoElement(165, withGlow: true);
             logoStack.Children.Add(logoElement);
 
-            // Tech pill badge under the logo
-            var techPill = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(18, 22, 34)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(40, 48, 70)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(10, 4, 10, 4),
-                Margin = new Thickness(0, 18, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-
-            var techStack = new StackPanel { Orientation = Orientation.Horizontal };
-            var pulseDot = new Ellipse
-            {
-                Width = 7,
-                Height = 7,
-                Fill = new SolidColorBrush(Color.FromRgb(56, 189, 248)),
-                Margin = new Thickness(0, 0, 7, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            var techText = new TextBlock
-            {
-                Text = "DIRECTX 11 + RUST SIMD",
-                FontSize = 9.5,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184)),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            techStack.Children.Add(pulseDot);
-            techStack.Children.Add(techText);
-            techPill.Child = techStack;
-            logoStack.Children.Add(techPill);
-
             leftHeroPanel.Children.Add(logoStack);
             Grid.SetColumn(leftHeroPanel, 0);
             contentGrid.Children.Add(leftHeroPanel);
@@ -186,14 +153,14 @@ namespace Kerf.UI
             contentGrid.Children.Add(divider);
 
             // ==========================================
-            // RIGHT COLUMN: Subsystem & After Effects Splash
+            // RIGHT COLUMN: Artwork & Loading
             // ==========================================
             var rightCol = new Grid
             {
-                Margin = new Thickness(26, 26, 26, 22)
+                Margin = new Thickness(26, 22, 26, 20)
             };
             rightCol.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Header / Titles
-            rightCol.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Telemetry list
+            rightCol.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Image Artwork
             rightCol.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Progress & Status
             rightCol.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Footer
 
@@ -204,7 +171,7 @@ namespace Kerf.UI
             var titleKerf = new TextBlock
             {
                 Text = "KERF",
-                FontSize = 34,
+                FontSize = 32,
                 FontWeight = FontWeights.Bold,
                 Foreground = Brushes.White,
                 VerticalAlignment = VerticalAlignment.Center
@@ -212,11 +179,11 @@ namespace Kerf.UI
             var titleStudio = new TextBlock
             {
                 Text = " STUDIO",
-                FontSize = 22,
+                FontSize = 21,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)),
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(4, 5, 0, 0)
+                Margin = new Thickness(4, 4, 0, 0)
             };
             var versionBadge = new Border
             {
@@ -243,37 +210,66 @@ namespace Kerf.UI
 
             var subtitleText = new TextBlock
             {
-                Text = "GPU-Accelerated Vector Graphics & Procedural Design Suite",
+                Text = "Vector Graphics & Procedural Design Suite",
                 FontSize = 11.5,
                 Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
-                Margin = new Thickness(0, 3, 0, 14)
+                Margin = new Thickness(0, 2, 0, 12)
             };
             headerStack.Children.Add(subtitleText);
 
             Grid.SetRow(headerStack, 0);
             rightCol.Children.Add(headerStack);
 
-            // 2. Subsystem Telemetry List (AE-style technical initialization details)
-            var telemetryBox = new Border
+            // 2. Artwork image (Loading screen.png)
+            var imageContainer = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(14, 17, 26)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(30, 36, 52)),
+                Background = new SolidColorBrush(Color.FromRgb(18, 22, 34)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 50, 72)),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(12, 8, 12, 8),
-                Margin = new Thickness(0, 0, 0, 14)
+                CornerRadius = new CornerRadius(10),
+                ClipToBounds = true,
+                Margin = new Thickness(0, 0, 0, 14),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
             };
 
-            var telStack = new StackPanel();
+            var artworkImage = new Image
+            {
+                Stretch = Stretch.UniformToFill,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
 
-            telStack.Children.Add(CreateTelemetryRow("Rendering Pipeline", "Direct3D 11 Retained Visual Composition"));
-            telStack.Children.Add(CreateTelemetryRow("Geometry Kernel", "Native Rust kerf_core.dll (MSVC C-ABI)"));
-            telStack.Children.Add(CreateTelemetryRow("Extrema Solver", "Analytical B'(t) = 0 Quadratic Roots"));
-            telStack.Children.Add(CreateTelemetryRow("Coordinate Space", "Infinite Subpixel Vector Canvas"));
+            string[] candidatePaths = new string[]
+            {
+                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "Loading screen.png"),
+                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "assets", "Loading screen.png"),
+                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "assets", "Loading screen.png"),
+                "assets/Loading screen.png"
+            };
 
-            telemetryBox.Child = telStack;
-            Grid.SetRow(telemetryBox, 1);
-            rightCol.Children.Add(telemetryBox);
+            foreach (var p in candidatePaths)
+            {
+                if (System.IO.File.Exists(p))
+                {
+                    try
+                    {
+                        var bmp = new BitmapImage();
+                        bmp.BeginInit();
+                        bmp.CacheOption = BitmapCacheOption.OnLoad;
+                        bmp.UriSource = new Uri(System.IO.Path.GetFullPath(p), UriKind.Absolute);
+                        bmp.EndInit();
+                        bmp.Freeze();
+                        artworkImage.Source = bmp;
+                        break;
+                    }
+                    catch { }
+                }
+            }
+
+            imageContainer.Child = artworkImage;
+            Grid.SetRow(imageContainer, 1);
+            rightCol.Children.Add(imageContainer);
 
             // 3. Progress Bar & Real-Time Status Text
             var progressStack = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
@@ -281,7 +277,7 @@ namespace Kerf.UI
             var statusRow = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 6) };
             _statusText = new TextBlock
             {
-                Text = "Initializing Direct3D hardware context...",
+                Text = "Starting Kerf Studio...",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Color.FromRgb(186, 200, 222))
             };
@@ -336,20 +332,20 @@ namespace Kerf.UI
             Grid.SetRow(progressStack, 2);
             rightCol.Children.Add(progressStack);
 
-            // 4. Footer & Copyright
+            // 4. Footer
             var footerDock = new DockPanel { LastChildFill = false };
             _simdText = new TextBlock
             {
-                Text = string.Format("Architecture: x64 | {0}", RustEngineInterop.SimdDescription),
+                Text = "Kerf Studio © 2026. All rights reserved.",
                 FontSize = 9.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(90, 105, 135))
+                Foreground = new SolidColorBrush(Color.FromRgb(100, 115, 145))
             };
             DockPanel.SetDock(_simdText, Dock.Left);
             footerDock.Children.Add(_simdText);
 
             var hintText = new TextBlock
             {
-                Text = "Click anywhere to skip",
+                Text = "Click anywhere to continue",
                 FontSize = 9.5,
                 Foreground = new SolidColorBrush(Color.FromRgb(115, 130, 160))
             };
@@ -365,43 +361,6 @@ namespace Kerf.UI
             outerCard.Child = contentGrid;
             rootGrid.Children.Add(outerCard);
             Content = rootGrid;
-        }
-
-        private UIElement CreateTelemetryRow(string label, string value)
-        {
-            var dock = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
-
-            var dot = new Ellipse
-            {
-                Width = 5,
-                Height = 5,
-                Fill = new SolidColorBrush(Color.FromRgb(34, 197, 94)),
-                Margin = new Thickness(0, 0, 6, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            DockPanel.SetDock(dot, Dock.Left);
-            dock.Children.Add(dot);
-
-            var lblBlock = new TextBlock
-            {
-                Text = label + ": ",
-                FontSize = 10,
-                Foreground = new SolidColorBrush(Color.FromRgb(110, 125, 155))
-            };
-            DockPanel.SetDock(lblBlock, Dock.Left);
-            dock.Children.Add(lblBlock);
-
-            var valBlock = new TextBlock
-            {
-                Text = value,
-                FontSize = 10,
-                FontWeight = FontWeights.Medium,
-                Foreground = new SolidColorBrush(Color.FromRgb(203, 213, 225)),
-                TextTrimming = TextTrimming.CharacterEllipsis
-            };
-            dock.Children.Add(valBlock);
-
-            return dock;
         }
 
         private void StartLoadingSequence()
@@ -438,30 +397,30 @@ namespace Kerf.UI
             int intPct = Math.Min(100, (int)_progress);
             _percentText.Text = string.Format("{0}%", intPct);
 
-            // Update real-time status messages according to progressive subsystem milestone
-            if (_progress < 18)
+            // Update real-time status messages according to progressive milestone
+            if (_progress < 20)
             {
-                _statusText.Text = "Initializing Direct3D 11 graphics context...";
+                _statusText.Text = "Starting Kerf Studio...";
             }
-            else if (_progress < 36)
+            else if (_progress < 40)
             {
-                _statusText.Text = "Loading native Rust graphics engine (kerf_core.dll)...";
+                _statusText.Text = "Loading workspace & tools...";
             }
-            else if (_progress < 54)
+            else if (_progress < 60)
             {
-                _statusText.Text = "Calibrating AVX2 + FMA analytical cubic solvers...";
+                _statusText.Text = "Preparing infinite vector canvas...";
             }
-            else if (_progress < 72)
+            else if (_progress < 80)
             {
-                _statusText.Text = "Mounting Canonical Document Engine & virtual filesystem...";
+                _statusText.Text = "Loading design presets & fonts...";
             }
-            else if (_progress < 90)
+            else if (_progress < 95)
             {
-                _statusText.Text = "Registering Vector Tools, Snap Guides & Pen Engine...";
+                _statusText.Text = "Finalizing studio environment...";
             }
             else
             {
-                _statusText.Text = "Ready. Launching Kerf Studio...";
+                _statusText.Text = "Ready";
             }
 
             if (_progress >= 100.0)

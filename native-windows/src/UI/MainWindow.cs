@@ -25,6 +25,14 @@ namespace Kerf.UI
             InitializeWindow();
             InitializeViews();
 
+            PreviewKeyDown += (s, e) =>
+            {
+                if (_studioView != null && _mainContainer != null && _mainContainer.Children.Contains(_studioView))
+                {
+                    _studioView.HandlePreviewKeyDown(e);
+                }
+            };
+
             if (!string.IsNullOrEmpty(launchFilePath) && File.Exists(launchFilePath))
             {
                 OpenDocumentFromPath(launchFilePath);
@@ -78,7 +86,7 @@ namespace Kerf.UI
             Left = Math.Max(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Left + (workW - Width) / 2);
             Top = Math.Max(SystemParameters.WorkArea.Top, SystemParameters.WorkArea.Top + Math.Max(10, (workH - Height) / 4));
 
-            Background = new SolidColorBrush(Color.FromRgb(15, 17, 24));
+            Background = new SolidColorBrush(Color.FromRgb(30, 34, 48)); // #1E2230
             Foreground = Brushes.White;
             Icon = KerfLogo.GetLogoImageSource();
 
@@ -159,8 +167,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(16, 18, 26)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(30, 35, 48)),
+                Background = new SolidColorBrush(Color.FromRgb(35, 39, 56)), // #232738
+                BorderBrush = new SolidColorBrush(Color.FromRgb(55, 63, 87)),
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(12, 0, 0, 0)
             };

@@ -5,10 +5,15 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using System.Windows.Interop;
 using Kerf.Engine;
 using Kerf.IO;
 using Kerf.Model;
@@ -21,9 +26,11 @@ namespace Kerf.UI
     public enum DropPosition
     {
         None,
-        Before,
-        After,
-        Inside
+        Above,
+        Below,
+        Inside,
+        Before = Above,
+        After = Below
     }
 
     public class StudioView : UserControl
@@ -43,10 +50,12 @@ namespace Kerf.UI
         // Viewport & Pan/Zoom
         private double _zoomScale = 1.0;
         private Point _panOffset = new Point(100, 80);
-        public double ZoomScale { get { return _zoomScale; } }
-        public Point PanOffset { get { return _panOffset; } }
+        public double ZoomScale { get { return _zoomScale; } set { _zoomScale = value; } }
+        public Point PanOffset { get { return _panOffset; } set { _panOffset = value; } }
         private bool _isPanning = false;
         private Point _lastMousePos;
+        private readonly List<LayerNode> _clipboardLayers = new List<LayerNode>();
+        private Point _lastRightClickCanvasPoint = new Point(100, 100);
 
         // Selection & Tools
         private ToolType _activeTool = ToolType.Select;
@@ -78,6 +87,32 @@ namespace Kerf.UI
 
         // Corner Radius interaction
         private double _startCornerRadius = 0.0;
+
+        // Figma-style Gradient On-Canvas Rollers & Handles State
+        private bool _isDraggingGradientHandle = false;
+        private GradientHandleType _activeGradientHandle = GradientHandleType.None;
+        private int _activeGradientStopIndex = -1;
+        private Paint _activeGradientPaint = null;
+        private LayerNode _activeGradientLayer = null;
+        private Paint _editingGradientPaint = null;
+        private LayerNode _editingGradientLayer = null;
+        private GradientRampControl _activeGradientRamp = null;
+
+        public void SetEditingGradient(LayerNode layer, Paint paint, GradientRampControl ramp = null)
+        {
+            _editingGradientLayer = layer;
+            _editingGradientPaint = paint;
+            _activeGradientRamp = ramp;
+            RefreshCanvas();
+        }
+
+        public void ClearEditingGradient()
+        {
+            _editingGradientLayer = null;
+            _editingGradientPaint = null;
+            _activeGradientRamp = null;
+            RefreshCanvas();
+        }
 
         // UI Controls
         private TextBlock _titleBlock;
@@ -175,7 +210,7 @@ namespace Kerf.UI
 
         private void InitializeStudioUI()
         {
-            Background = new SolidColorBrush(Color.FromRgb(18, 20, 29)); // #12141D
+            Background = new SolidColorBrush(Color.FromRgb(30, 34, 48)); // #1E2230
 
             var rootGrid = new Grid();
             rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) }); // Top Bar
@@ -227,8 +262,44 @@ namespace Kerf.UI
 
             // Keyboard Shortcuts
             KeyDown += OnStudioKeyDown;
+            PreviewKeyDown += OnStudioKeyDown;
             Focusable = true;
-            Loaded += (s, e) => Focus();
+            Loaded += (s, e) =>
+            {
+                Focus();
+                HookWindowMessages();
+            };
+        }
+
+        public void HandlePreviewKeyDown(KeyEventArgs e)
+        {
+            OnStudioKeyDown(this, e);
+        }
+
+        private void HookWindowMessages()
+        {
+            try
+            {
+                var source = PresentationSource.FromVisual(this) as HwndSource;
+                if (source != null)
+                {
+                    source.AddHook(HwndHook);
+                }
+            }
+            catch { }
+        }
+
+        private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            const int WM_MOUSEHWHEEL = 0x020E;
+            if (msg == WM_MOUSEHWHEEL)
+            {
+                int tilt = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                _panOffset.X -= tilt;
+                RefreshCanvas();
+                handled = true;
+            }
+            return IntPtr.Zero;
         }
 
         #region Top Bar & Telemetry
@@ -237,8 +308,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(22, 25, 37)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(36, 42, 60)),
+                Background = new SolidColorBrush(Color.FromRgb(37, 41, 58)), // #25293A
+                BorderBrush = new SolidColorBrush(Color.FromRgb(54, 62, 86)), // #363E56
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(16, 0, 16, 0)
             };
@@ -385,8 +456,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(235, 26, 30, 44)), // Frosted dark glass
-                BorderBrush = new SolidColorBrush(Color.FromArgb(160, 50, 60, 85)),
+                Background = new SolidColorBrush(Color.FromArgb(240, 42, 48, 68)), // #2A3044
+                BorderBrush = new SolidColorBrush(Color.FromArgb(180, 68, 78, 108)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(6, 4, 6, 4),
@@ -435,7 +506,8 @@ namespace Kerf.UI
                 Tag = tool
             };
 
-            var icon = VectorIcons.CreateIcon(iconGeo, new SolidColorBrush(Color.FromRgb(170, 185, 210)), null, 18);
+            bool isFilled = (tool == ToolType.Select);
+            var icon = VectorIcons.CreateIcon(iconGeo, new SolidColorBrush(Color.FromRgb(170, 185, 210)), isFilled ? new SolidColorBrush(Color.FromRgb(170, 185, 210)) : null, 18);
             btn.Content = icon;
 
             btn.Click += (s, e) => SetActiveTool(tool);
@@ -462,7 +534,12 @@ namespace Kerf.UI
                 var path = btn.Content as System.Windows.Shapes.Path;
                 if (path != null)
                 {
-                    path.Stroke = isActive ? Brushes.White : new SolidColorBrush(Color.FromRgb(170, 185, 210));
+                    var brush = isActive ? Brushes.White : new SolidColorBrush(Color.FromRgb(170, 185, 210));
+                    path.Stroke = brush;
+                    if (kvp.Key == ToolType.Select)
+                    {
+                        path.Fill = brush;
+                    }
                 }
             }
 
@@ -483,8 +560,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(20, 23, 34)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(34, 39, 56)),
+                Background = new SolidColorBrush(Color.FromRgb(33, 37, 52)), // #212534
+                BorderBrush = new SolidColorBrush(Color.FromRgb(50, 58, 80)), // #323A50
                 BorderThickness = new Thickness(0, 0, 1, 0)
             };
 
@@ -538,8 +615,8 @@ namespace Kerf.UI
 
             var searchBorder = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(14, 16, 24)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                Background = new SolidColorBrush(Color.FromRgb(42, 48, 66)), // #2A3042
+                BorderBrush = new SolidColorBrush(Color.FromRgb(62, 70, 96)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5),
                 Padding = new Thickness(6, 4, 6, 4),
@@ -646,6 +723,39 @@ namespace Kerf.UI
             }
 
             return true;
+        }
+
+        private Geometry GetIconForLayer(LayerNode layer)
+        {
+            if (layer != null)
+            {
+                if (layer.IsMasterComponent) return VectorIcons.ComponentGeometry;
+                if (layer.Type == ElementType.ComponentInstance || !string.IsNullOrEmpty(layer.ComponentId)) return VectorIcons.InstanceGeometry;
+                return GetIconForLayerType(layer.Type);
+            }
+            return VectorIcons.RectGeometry;
+        }
+
+        private Brush GetBadgeBrushForLayer(LayerNode layer)
+        {
+            if (layer != null)
+            {
+                if (layer.IsMasterComponent) return new SolidColorBrush(Color.FromRgb(123, 97, 255)); // Figma signature purple #7B61FF
+                if (layer.Type == ElementType.ComponentInstance || !string.IsNullOrEmpty(layer.ComponentId)) return new SolidColorBrush(Color.FromRgb(168, 85, 247));
+                return GetBadgeBrushForLayerType(layer.Type);
+            }
+            return new SolidColorBrush(Color.FromRgb(71, 85, 105));
+        }
+
+        private string GetTypeTagForLayer(LayerNode layer)
+        {
+            if (layer != null)
+            {
+                if (layer.IsMasterComponent) return "COMPONENT";
+                if (layer.Type == ElementType.ComponentInstance || !string.IsNullOrEmpty(layer.ComponentId)) return "INSTANCE";
+                return GetTypeTagText(layer.Type);
+            }
+            return "LAYER";
         }
 
         private Geometry GetIconForLayerType(ElementType type)
@@ -764,11 +874,11 @@ namespace Kerf.UI
             var card = new Border
             {
                 Background = isSelected
-                    ? new SolidColorBrush(Color.FromRgb(36, 44, 68))
-                    : new SolidColorBrush(Color.FromRgb(22, 26, 38)),
+                    ? new SolidColorBrush(Color.FromRgb(48, 58, 88))
+                    : new SolidColorBrush(Color.FromRgb(36, 42, 60)),
                 BorderBrush = isSelected
-                    ? new SolidColorBrush(Color.FromRgb(99, 102, 241))
-                    : new SolidColorBrush(Color.FromRgb(32, 38, 56)),
+                    ? new SolidColorBrush(Color.FromRgb(129, 140, 248))
+                    : new SolidColorBrush(Color.FromRgb(50, 58, 80)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5),
                 Padding = new Thickness(4 + depth * 14, 4, 6, 4),
@@ -815,15 +925,20 @@ namespace Kerf.UI
                 Width = 18,
                 Height = 18,
                 CornerRadius = new CornerRadius(4),
-                Background = GetBadgeBrushForLayerType(layer.Type),
+                Background = GetBadgeBrushForLayer(layer),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(2, 0, 2, 0)
             };
-            var iconGeo = GetIconForLayerType(layer.Type);
+            var iconGeo = GetIconForLayer(layer);
             badge.Child = VectorIcons.CreateIcon(iconGeo, Brushes.White, null, 11, 1.2);
             Grid.SetColumn(badge, 1);
             grid.Children.Add(badge);
+
+            bool isComp = layer.IsMasterComponent || !string.IsNullOrEmpty(layer.ComponentId);
+            Brush nameBrush = isComp
+                ? (isSelected ? new SolidColorBrush(Color.FromRgb(196, 181, 253)) : new SolidColorBrush(Color.FromRgb(167, 139, 250)))
+                : (isSelected ? Brushes.White : new SolidColorBrush(Color.FromRgb(190, 200, 220)));
 
             // 3. Name or Rename TextBox
             if (isRenaming)
@@ -872,8 +987,8 @@ namespace Kerf.UI
                 {
                     Text = layer.Name,
                     FontSize = 11,
-                    Foreground = isSelected ? Brushes.White : new SolidColorBrush(Color.FromRgb(190, 200, 220)),
-                    FontWeight = isSelected ? FontWeights.SemiBold : FontWeights.Normal,
+                    Foreground = nameBrush,
+                    FontWeight = (isSelected || isComp) ? FontWeights.SemiBold : FontWeights.Normal,
                     VerticalAlignment = VerticalAlignment.Center,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     Margin = new Thickness(6, 0, 4, 0)
@@ -885,7 +1000,7 @@ namespace Kerf.UI
             // 4. Type Tag
             var typeTag = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
+                Background = isComp ? new SolidColorBrush(Color.FromArgb(60, 123, 97, 255)) : new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
                 CornerRadius = new CornerRadius(3),
                 Padding = new Thickness(4, 1, 4, 1),
                 Margin = new Thickness(2, 0, 4, 0),
@@ -893,10 +1008,10 @@ namespace Kerf.UI
             };
             typeTag.Child = new TextBlock
             {
-                Text = GetTypeTagText(layer.Type),
+                Text = GetTypeTagForLayer(layer),
                 FontSize = 8,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(130, 140, 165))
+                Foreground = isComp ? new SolidColorBrush(Color.FromRgb(196, 181, 253)) : new SolidColorBrush(Color.FromRgb(130, 140, 165))
             };
             Grid.SetColumn(typeTag, 3);
             grid.Children.Add(typeTag);
@@ -975,6 +1090,7 @@ namespace Kerf.UI
             // Selection click
             card.MouseLeftButtonUp += (s, e) =>
             {
+                Focus();
                 if (_renamingLayerId == layer.Id) return;
                 bool isShift = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
                 bool isCtrl = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
@@ -1081,37 +1197,19 @@ namespace Kerf.UI
                 if (isContainer)
                 {
                     if (y > h * 0.25 && y < h * 0.75) pos = DropPosition.Inside;
-                    else if (y <= h * 0.25) pos = DropPosition.Before;
-                    else pos = DropPosition.After;
+                    else if (y <= h * 0.25) pos = DropPosition.Above;
+                    else pos = DropPosition.Below;
                 }
                 else
                 {
-                    pos = (y <= h * 0.5) ? DropPosition.Before : DropPosition.After;
+                    pos = (y <= h * 0.5) ? DropPosition.Above : DropPosition.Below;
                 }
 
                 MoveLayerHierarchy(dropped, layer, pos);
             };
 
             // Right-Click Context Menu
-            var cm = new ContextMenu
-            {
-                Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(40, 48, 70)),
-                BorderThickness = new Thickness(1)
-            };
-            cm.Items.Add(CreateContextMenuItem("Bring Forward", () => MoveSelectedLayerZ(true, false), "Ctrl + ]"));
-            cm.Items.Add(CreateContextMenuItem("Send Backward", () => MoveSelectedLayerZ(false, false), "Ctrl + ["));
-            cm.Items.Add(CreateContextMenuItem("Bring to Front", () => MoveSelectedLayerZ(true, true), "Ctrl + Shift + ]"));
-            cm.Items.Add(CreateContextMenuItem("Send to Back", () => MoveSelectedLayerZ(false, true), "Ctrl + Shift + ["));
-            cm.Items.Add(new Separator());
-            cm.Items.Add(CreateContextMenuItem("Duplicate Layer", () => DuplicateSelectedLayers(), "Ctrl + D"));
-            cm.Items.Add(CreateContextMenuItem("Rename", () => StartRename(layer.Id), "F2"));
-            cm.Items.Add(CreateContextMenuItem("Group Selection", () => GroupSelectedLayers(), "Ctrl + G"));
-            cm.Items.Add(CreateContextMenuItem("Ungroup", () => UngroupSelectedLayers(), "Ctrl + Shift + G"));
-            cm.Items.Add(new Separator());
-            cm.Items.Add(CreateContextMenuItem("Delete Layer", () => DeleteSelectedLayers(), "Delete"));
-            card.ContextMenu = cm;
+            card.ContextMenu = CreateLayerContextMenu(layer);
 
             card.MouseRightButtonUp += (s, e) =>
             {
@@ -1139,17 +1237,446 @@ namespace Kerf.UI
             return stack;
         }
 
-        private MenuItem CreateContextMenuItem(string header, Action onClick, string shortcut = null)
+        private static ControlTemplate _modernMenuTemplate;
+        private static ControlTemplate _modernMenuItemTemplate;
+
+        private static void ApplyModernContextMenuStyle(ContextMenu cm)
+        {
+            if (_modernMenuTemplate == null)
+            {
+                _modernMenuTemplate = new ControlTemplate(typeof(ContextMenu));
+                var borderFact = new FrameworkElementFactory(typeof(Border));
+                borderFact.SetValue(Border.CornerRadiusProperty, new CornerRadius(12));
+                borderFact.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(32, 37, 52)));
+                borderFact.SetValue(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(56, 66, 92)));
+                borderFact.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+                borderFact.SetValue(Border.PaddingProperty, new Thickness(5, 5, 5, 5));
+
+                var dropShadow = new DropShadowEffect
+                {
+                    BlurRadius = 24,
+                    ShadowDepth = 6,
+                    Direction = 270,
+                    Color = Colors.Black,
+                    Opacity = 0.5
+                };
+                borderFact.SetValue(UIElement.EffectProperty, dropShadow);
+
+                var itemsPresenter = new FrameworkElementFactory(typeof(ItemsPresenter));
+                borderFact.AppendChild(itemsPresenter);
+                _modernMenuTemplate.VisualTree = borderFact;
+            }
+
+            cm.Template = _modernMenuTemplate;
+        }
+
+        private static void ApplyModernMenuItemStyle(MenuItem mi)
+        {
+            if (_modernMenuItemTemplate == null)
+            {
+                _modernMenuItemTemplate = new ControlTemplate(typeof(MenuItem));
+                var itemBorder = new FrameworkElementFactory(typeof(Border), "ItemBorder");
+                itemBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
+                itemBorder.SetValue(Border.MarginProperty, new Thickness(1, 1, 1, 1));
+                itemBorder.SetValue(Border.PaddingProperty, new Thickness(8, 6, 10, 6));
+                itemBorder.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+
+                var grid = new FrameworkElementFactory(typeof(Grid));
+                var col0 = new FrameworkElementFactory(typeof(ColumnDefinition));
+                col0.SetValue(ColumnDefinition.WidthProperty, new GridLength(24));
+                var col1 = new FrameworkElementFactory(typeof(ColumnDefinition));
+                col1.SetValue(ColumnDefinition.WidthProperty, new GridLength(1, GridUnitType.Star));
+                var col2 = new FrameworkElementFactory(typeof(ColumnDefinition));
+                col2.SetValue(ColumnDefinition.WidthProperty, new GridLength(1, GridUnitType.Auto));
+                grid.AppendChild(col0);
+                grid.AppendChild(col1);
+                grid.AppendChild(col2);
+
+                var iconPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
+                iconPresenter.SetValue(Grid.ColumnProperty, 0);
+                iconPresenter.SetValue(ContentPresenter.ContentProperty, new TemplateBindingExtension(MenuItem.IconProperty));
+                iconPresenter.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                iconPresenter.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Left);
+                grid.AppendChild(iconPresenter);
+
+                var headerPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
+                headerPresenter.SetValue(Grid.ColumnProperty, 1);
+                headerPresenter.SetValue(ContentPresenter.ContentProperty, new TemplateBindingExtension(HeaderedItemsControl.HeaderProperty));
+                headerPresenter.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                headerPresenter.SetValue(FrameworkElement.MarginProperty, new Thickness(4, 0, 16, 0));
+                grid.AppendChild(headerPresenter);
+
+                var gestureBlock = new FrameworkElementFactory(typeof(TextBlock));
+                gestureBlock.SetValue(Grid.ColumnProperty, 2);
+                gestureBlock.SetValue(TextBlock.TextProperty, new TemplateBindingExtension(MenuItem.InputGestureTextProperty));
+                gestureBlock.SetValue(TextBlock.FontSizeProperty, 10.5);
+                gestureBlock.SetValue(TextBlock.ForegroundProperty, new SolidColorBrush(Color.FromRgb(148, 163, 184)));
+                gestureBlock.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                grid.AppendChild(gestureBlock);
+
+                itemBorder.AppendChild(grid);
+                _modernMenuItemTemplate.VisualTree = itemBorder;
+
+                var highlightTrigger = new Trigger { Property = MenuItem.IsHighlightedProperty, Value = true };
+                highlightTrigger.Setters.Add(new Setter(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(50, 58, 82)), "ItemBorder"));
+                _modernMenuItemTemplate.Triggers.Add(highlightTrigger);
+            }
+
+            mi.Template = _modernMenuItemTemplate;
+            mi.Foreground = new SolidColorBrush(Color.FromRgb(241, 245, 249));
+            mi.FontSize = 12.0;
+            mi.FontWeight = FontWeights.Normal;
+            mi.Cursor = Cursors.Hand;
+        }
+
+        private static Separator CreateModernSeparator()
+        {
+            var sep = new Separator
+            {
+                Margin = new Thickness(6, 4, 6, 4),
+                Background = new SolidColorBrush(Color.FromRgb(48, 56, 78)),
+                Height = 1
+            };
+            return sep;
+        }
+
+        private static ControlTemplate _modernComboTemplate;
+        private static Style _modernComboItemStyle;
+
+        public static void ApplyModernComboBoxStyle(ComboBox combo)
+        {
+            if (_modernComboTemplate == null)
+            {
+                // 1. ToggleButton Template
+                var tbTemplate = new ControlTemplate(typeof(ToggleButton));
+                var tbBorder = new FrameworkElementFactory(typeof(Border), "tbBorder");
+                tbBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
+                tbBorder.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(33, 38, 52)));
+                tbBorder.SetValue(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(56, 66, 92)));
+                tbBorder.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+
+                var tbGrid = new FrameworkElementFactory(typeof(Grid));
+                var c0 = new FrameworkElementFactory(typeof(ColumnDefinition));
+                c0.SetValue(ColumnDefinition.WidthProperty, new GridLength(1, GridUnitType.Star));
+                var c1 = new FrameworkElementFactory(typeof(ColumnDefinition));
+                c1.SetValue(ColumnDefinition.WidthProperty, new GridLength(20));
+                tbGrid.AppendChild(c0);
+                tbGrid.AppendChild(c1);
+
+                var arrow = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
+                arrow.SetValue(Grid.ColumnProperty, 1);
+                arrow.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse("M 0 0 L 3.5 3.5 L 7 0"));
+                arrow.SetValue(System.Windows.Shapes.Path.StrokeProperty, new SolidColorBrush(Color.FromRgb(148, 163, 184)));
+                arrow.SetValue(System.Windows.Shapes.Path.StrokeThicknessProperty, 1.5);
+                arrow.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+                arrow.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                tbGrid.AppendChild(arrow);
+
+                tbBorder.AppendChild(tbGrid);
+                tbTemplate.VisualTree = tbBorder;
+
+                var tbHover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+                tbHover.Setters.Add(new Setter(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(99, 102, 241)), "tbBorder"));
+                tbHover.Setters.Add(new Setter(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(40, 46, 64)), "tbBorder"));
+                tbTemplate.Triggers.Add(tbHover);
+
+                var tbChecked = new Trigger { Property = ToggleButton.IsCheckedProperty, Value = true };
+                tbChecked.Setters.Add(new Setter(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(56, 189, 248)), "tbBorder"));
+                tbTemplate.Triggers.Add(tbChecked);
+
+                // 2. ComboBox Template
+                _modernComboTemplate = new ControlTemplate(typeof(ComboBox));
+                var grid = new FrameworkElementFactory(typeof(Grid));
+
+                var toggleBtn = new FrameworkElementFactory(typeof(ToggleButton), "toggleButton");
+                toggleBtn.SetValue(ToggleButton.ClickModeProperty, ClickMode.Press);
+                toggleBtn.SetValue(UIElement.FocusableProperty, false);
+                toggleBtn.SetValue(ToggleButton.IsCheckedProperty, new Binding("IsDropDownOpen")
+                {
+                    RelativeSource = new RelativeSource(RelativeSourceMode.TemplatedParent),
+                    Mode = BindingMode.TwoWay
+                });
+                toggleBtn.SetValue(Control.TemplateProperty, tbTemplate);
+                grid.AppendChild(toggleBtn);
+
+                var contentPresenter = new FrameworkElementFactory(typeof(ContentPresenter), "ContentSite");
+                contentPresenter.SetValue(UIElement.IsHitTestVisibleProperty, false);
+                contentPresenter.SetValue(ContentPresenter.ContentProperty, new TemplateBindingExtension(ComboBox.SelectionBoxItemProperty));
+                contentPresenter.SetValue(ContentPresenter.ContentTemplateProperty, new TemplateBindingExtension(ComboBox.SelectionBoxItemTemplateProperty));
+                contentPresenter.SetValue(ContentPresenter.ContentTemplateSelectorProperty, new TemplateBindingExtension(ComboBox.ItemTemplateSelectorProperty));
+                contentPresenter.SetValue(FrameworkElement.MarginProperty, new Thickness(8, 0, 22, 0));
+                contentPresenter.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                contentPresenter.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Left);
+                grid.AppendChild(contentPresenter);
+
+                var popup = new FrameworkElementFactory(typeof(Popup), "PART_Popup");
+                popup.SetValue(Popup.PlacementProperty, PlacementMode.Bottom);
+                popup.SetValue(Popup.IsOpenProperty, new TemplateBindingExtension(ComboBox.IsDropDownOpenProperty));
+                popup.SetValue(Popup.AllowsTransparencyProperty, true);
+                popup.SetValue(UIElement.FocusableProperty, false);
+                popup.SetValue(Popup.PopupAnimationProperty, PopupAnimation.Slide);
+
+                var popBorder = new FrameworkElementFactory(typeof(Border), "DropDownBorder");
+                popBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
+                popBorder.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(30, 34, 48)));
+                popBorder.SetValue(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(56, 66, 92)));
+                popBorder.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+                popBorder.SetValue(Border.PaddingProperty, new Thickness(3, 4, 3, 4));
+                popBorder.SetValue(FrameworkElement.MaxHeightProperty, 240.0);
+                popBorder.SetValue(FrameworkElement.MinWidthProperty, new Binding("ActualWidth")
+                {
+                    RelativeSource = new RelativeSource(RelativeSourceMode.TemplatedParent)
+                });
+
+                var popShadow = new DropShadowEffect
+                {
+                    BlurRadius = 16,
+                    ShadowDepth = 5,
+                    Direction = 270,
+                    Color = Colors.Black,
+                    Opacity = 0.55
+                };
+                popBorder.SetValue(UIElement.EffectProperty, popShadow);
+
+                var scrollViewer = new FrameworkElementFactory(typeof(ScrollViewer));
+                scrollViewer.SetValue(ScrollViewer.CanContentScrollProperty, true);
+                scrollViewer.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+                scrollViewer.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+
+                var itemsPresenter = new FrameworkElementFactory(typeof(ItemsPresenter));
+                itemsPresenter.SetValue(KeyboardNavigation.DirectionalNavigationProperty, KeyboardNavigationMode.Contained);
+                scrollViewer.AppendChild(itemsPresenter);
+                popBorder.AppendChild(scrollViewer);
+                popup.AppendChild(popBorder);
+
+                grid.AppendChild(popup);
+                _modernComboTemplate.VisualTree = grid;
+
+                // 3. ComboBoxItem Style
+                _modernComboItemStyle = new Style(typeof(ComboBoxItem));
+                _modernComboItemStyle.Setters.Add(new Setter(Control.ForegroundProperty, new SolidColorBrush(Color.FromRgb(241, 245, 249))));
+                _modernComboItemStyle.Setters.Add(new Setter(Control.FontSizeProperty, 11.5));
+                _modernComboItemStyle.Setters.Add(new Setter(FrameworkElement.CursorProperty, Cursors.Hand));
+
+                var itemTemplate = new ControlTemplate(typeof(ComboBoxItem));
+                var itemBorder = new FrameworkElementFactory(typeof(Border), "ItemBorder");
+                itemBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
+                itemBorder.SetValue(Border.MarginProperty, new Thickness(2, 1, 2, 1));
+                itemBorder.SetValue(Border.PaddingProperty, new Thickness(8, 5, 8, 5));
+                itemBorder.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+
+                var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+                cp.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                itemBorder.AppendChild(cp);
+                itemTemplate.VisualTree = itemBorder;
+
+                var hoverTrigger = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+                hoverTrigger.Setters.Add(new Setter(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(50, 58, 82)), "ItemBorder"));
+                hoverTrigger.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
+                itemTemplate.Triggers.Add(hoverTrigger);
+
+                var selTrigger = new Trigger { Property = ComboBoxItem.IsSelectedProperty, Value = true };
+                selTrigger.Setters.Add(new Setter(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(79, 70, 229)), "ItemBorder"));
+                selTrigger.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
+                itemTemplate.Triggers.Add(selTrigger);
+
+                _modernComboItemStyle.Setters.Add(new Setter(Control.TemplateProperty, itemTemplate));
+            }
+
+            combo.Template = _modernComboTemplate;
+            combo.ItemContainerStyle = _modernComboItemStyle;
+            combo.Foreground = new SolidColorBrush(Color.FromRgb(241, 245, 249));
+            combo.Background = new SolidColorBrush(Color.FromRgb(33, 38, 52));
+            combo.BorderBrush = new SolidColorBrush(Color.FromRgb(56, 66, 92));
+            combo.Cursor = Cursors.Hand;
+        }
+
+        public static ComboBox CreateModernComboBox(double height = 26, double width = double.NaN)
+        {
+            var combo = new ComboBox
+            {
+                Height = height,
+                FontSize = 11.5,
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            if (!double.IsNaN(width))
+            {
+                combo.Width = width;
+            }
+            ApplyModernComboBoxStyle(combo);
+            return combo;
+        }
+
+        public static ComboBoxItem CreateModernComboBoxItem(object content, object tag = null)
+        {
+            return new ComboBoxItem
+            {
+                Content = content,
+                Tag = tag,
+                Foreground = new SolidColorBrush(Color.FromRgb(241, 245, 249)),
+                Background = Brushes.Transparent,
+                FontSize = 11.5,
+                Cursor = Cursors.Hand
+            };
+        }
+
+        public static Button CreatePresetPill(string label, Action onClick)
+        {
+            var btn = new Button
+            {
+                Content = label,
+                Height = 22,
+                FontSize = 10,
+                FontWeight = FontWeights.Medium,
+                Background = new SolidColorBrush(Color.FromRgb(36, 42, 58)),
+                Foreground = new SolidColorBrush(Color.FromRgb(203, 213, 225)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(56, 66, 92)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(8, 2, 8, 2),
+                Margin = new Thickness(0, 0, 4, 4),
+                Cursor = Cursors.Hand
+            };
+            var t = new ControlTemplate(typeof(Button));
+            var b = new FrameworkElementFactory(typeof(Border), "btnBorder");
+            b.SetValue(Border.CornerRadiusProperty, new CornerRadius(11));
+            b.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Button.BackgroundProperty));
+            b.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Button.BorderBrushProperty));
+            b.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Button.BorderThicknessProperty));
+            b.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Button.PaddingProperty));
+            var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+            cp.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            cp.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            b.AppendChild(cp);
+            t.VisualTree = b;
+
+            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            hover.Setters.Add(new Setter(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(50, 58, 82)), "btnBorder"));
+            hover.Setters.Add(new Setter(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(99, 102, 241)), "btnBorder"));
+            t.Triggers.Add(hover);
+            btn.Template = t;
+
+            btn.Click += (s, e) => onClick();
+            return btn;
+        }
+
+        private MenuItem CreateContextMenuItem(string header, Action onClick, string shortcut = null, Geometry iconGeo = null, Brush iconBrush = null)
         {
             var mi = new MenuItem
             {
                 Header = header,
-                InputGestureText = shortcut,
-                Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
-                Foreground = Brushes.White
+                InputGestureText = shortcut
             };
+            ApplyModernMenuItemStyle(mi);
+            if (iconGeo != null)
+            {
+                var brush = iconBrush ?? new SolidColorBrush(Color.FromRgb(203, 213, 225));
+                mi.Icon = VectorIcons.CreateIcon(iconGeo, brush, null, 14, 1.4);
+            }
             mi.Click += (s, e) => onClick();
             return mi;
+        }
+
+        private ContextMenu CreateLayerContextMenu(LayerNode layer = null)
+        {
+            var cm = new ContextMenu();
+            ApplyModernContextMenuStyle(cm);
+
+            var targetLayer = layer ?? _selectedLayers.FirstOrDefault();
+            var purpleBrush = new SolidColorBrush(Color.FromRgb(167, 139, 250));
+            var redBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+            var blueBrush = new SolidColorBrush(Color.FromRgb(96, 165, 250));
+
+            cm.Items.Add(CreateContextMenuItem("Cut", () => CutSelectedLayers(), "Ctrl + X", VectorIcons.CutGeometry));
+            cm.Items.Add(CreateContextMenuItem("Copy", () => CopySelectedLayers(), "Ctrl + C", VectorIcons.CopyGeometry));
+            cm.Items.Add(CreateContextMenuItem("Paste", () => PasteLayers(), "Ctrl + V", VectorIcons.PasteGeometry));
+            cm.Items.Add(CreateContextMenuItem("Paste Here", () => PasteLayersHere(_lastRightClickCanvasPoint), "Ctrl + Shift + V", VectorIcons.PasteGeometry));
+            cm.Items.Add(CreateContextMenuItem("Duplicate Layer", () => DuplicateSelectedLayers(), "Ctrl + D", VectorIcons.DuplicateGeometry));
+            if (targetLayer != null)
+            {
+                cm.Items.Add(CreateContextMenuItem("Rename", () => StartRename(targetLayer.Id), "F2", VectorIcons.PenGeometry));
+            }
+            cm.Items.Add(CreateContextMenuItem("Delete Layer", () => DeleteSelectedLayers(), "Delete", VectorIcons.TrashGeometry, redBrush));
+            cm.Items.Add(CreateModernSeparator());
+
+            cm.Items.Add(CreateContextMenuItem("Frame Selection", () => FrameSelectedLayers(), "Ctrl + Alt + G", VectorIcons.FrameGeometry, blueBrush));
+            cm.Items.Add(CreateContextMenuItem("Group Selection", () => GroupSelectedLayers(), "Ctrl + G", VectorIcons.GroupGeometry));
+            cm.Items.Add(CreateContextMenuItem("Ungroup", () => UngroupSelectedLayers(), "Ctrl + Shift + G", VectorIcons.UngroupGeometry));
+
+            if (targetLayer != null && targetLayer.IsMasterComponent)
+            {
+                cm.Items.Add(CreateContextMenuItem("❖ Create Instance", () => CreateComponentInstance(targetLayer), null, VectorIcons.ComponentGeometry, purpleBrush));
+                cm.Items.Add(CreateContextMenuItem("Detach Component", () => DetachComponentInstance(targetLayer), null, VectorIcons.InstanceGeometry));
+            }
+            else if (targetLayer != null && (targetLayer.Type == ElementType.ComponentInstance || !string.IsNullOrEmpty(targetLayer.ComponentId)))
+            {
+                cm.Items.Add(CreateContextMenuItem("Go to Main Component", () => GoToMasterComponent(targetLayer.ComponentId), null, VectorIcons.ComponentGeometry, purpleBrush));
+                cm.Items.Add(CreateContextMenuItem("Reset Overrides", () => ResetComponentOverrides(targetLayer), null, VectorIcons.UndoGeometry));
+                cm.Items.Add(CreateContextMenuItem("Detach Instance", () => DetachComponentInstance(targetLayer), "Ctrl + Alt + B", VectorIcons.InstanceGeometry));
+            }
+            else
+            {
+                cm.Items.Add(CreateContextMenuItem("❖ Create Component", () => CreateComponentFromSelection(), "Ctrl + Alt + K", VectorIcons.ComponentGeometry, purpleBrush));
+            }
+
+            cm.Items.Add(CreateContextMenuItem("Add Auto Layout", () => AutoAlignSelectedLayers(), "Shift + A", VectorIcons.AutoLayoutGeometry, blueBrush));
+            cm.Items.Add(CreateModernSeparator());
+
+            cm.Items.Add(CreateContextMenuItem("Bring Forward", () => MoveSelectedLayerZ(true, false), "Ctrl + ]", VectorIcons.LayerUpGeometry));
+            cm.Items.Add(CreateContextMenuItem("Send Backward", () => MoveSelectedLayerZ(false, false), "Ctrl + [", VectorIcons.LayerDownGeometry));
+            cm.Items.Add(CreateContextMenuItem("Bring to Front", () => MoveSelectedLayerZ(true, true), "Ctrl + Shift + ]", VectorIcons.LayerUpGeometry));
+            cm.Items.Add(CreateContextMenuItem("Send to Back", () => MoveSelectedLayerZ(false, true), "Ctrl + Shift + [", VectorIcons.LayerDownGeometry));
+            cm.Items.Add(CreateModernSeparator());
+
+            var alignSub = new MenuItem
+            {
+                Header = "Align"
+            };
+            ApplyModernMenuItemStyle(alignSub);
+            alignSub.Icon = VectorIcons.CreateIcon(VectorIcons.AlignCenterGeometry, new SolidColorBrush(Color.FromRgb(203, 213, 225)), null, 14, 1.4);
+            alignSub.Items.Add(CreateContextMenuItem("Align Left", () => AlignSelected(0), "Alt + A", VectorIcons.AlignLeftGeometry));
+            alignSub.Items.Add(CreateContextMenuItem("Align Horizontal Center", () => AlignSelected(1), "Alt + H", VectorIcons.AlignCenterGeometry));
+            alignSub.Items.Add(CreateContextMenuItem("Align Right", () => AlignSelected(2), "Alt + D", VectorIcons.AlignRightGeometry));
+            alignSub.Items.Add(CreateContextMenuItem("Align Top", () => AlignSelected(3), "Alt + W", VectorIcons.AlignTopGeometry));
+            alignSub.Items.Add(CreateContextMenuItem("Align Vertical Center", () => AlignSelected(4), "Alt + V", VectorIcons.AlignMiddleGeometry));
+            alignSub.Items.Add(CreateContextMenuItem("Align Bottom", () => AlignSelected(5), "Alt + S", VectorIcons.AlignBottomGeometry));
+            cm.Items.Add(alignSub);
+
+            cm.Items.Add(CreateContextMenuItem("Flip Horizontal", () => FlipSelectedLayers(true), "Shift + H", VectorIcons.FlipHGeometry));
+            cm.Items.Add(CreateContextMenuItem("Flip Vertical", () => FlipSelectedLayers(false), "Shift + V", VectorIcons.FlipVGeometry));
+            cm.Items.Add(CreateModernSeparator());
+
+            cm.Items.Add(CreateContextMenuItem("Lock / Unlock", () => ToggleLockSelectedLayers(), "Ctrl + Shift + L", VectorIcons.LockGeometry));
+            cm.Items.Add(CreateContextMenuItem("Hide / Show", () => ToggleVisibilitySelectedLayers(), "Ctrl + Shift + H", VectorIcons.EyeGeometry));
+            cm.Items.Add(CreateModernSeparator());
+            cm.Items.Add(CreateContextMenuItem("Export Selection...", () => ShowExportDialog(), "Ctrl + Shift + E", VectorIcons.ExportGeometry));
+
+            return cm;
+        }
+
+        private ContextMenu CreateCanvasContextMenu(Point canvasPt)
+        {
+            var cm = new ContextMenu();
+            ApplyModernContextMenuStyle(cm);
+
+            cm.Items.Add(CreateContextMenuItem("Paste", () => PasteLayers(), "Ctrl + V", VectorIcons.PasteGeometry));
+            cm.Items.Add(CreateContextMenuItem("Paste Here", () => PasteLayersHere(canvasPt), "Ctrl + Shift + V", VectorIcons.PasteGeometry));
+            cm.Items.Add(CreateContextMenuItem("Select All", () => SelectAllLayers(), "Ctrl + A", VectorIcons.SelectGeometry));
+            cm.Items.Add(CreateModernSeparator());
+
+            cm.Items.Add(CreateContextMenuItem("Zoom to 100%", () => ZoomTo100(), "Shift + 0", VectorIcons.ZoomGeometry));
+            cm.Items.Add(CreateContextMenuItem("Zoom to Fit", () => ZoomToFit(), "Shift + 1", VectorIcons.ZoomGeometry));
+            cm.Items.Add(CreateContextMenuItem("Zoom to Selection", () => ZoomToSelection(), "Shift + 2", VectorIcons.ZoomGeometry));
+            cm.Items.Add(CreateModernSeparator());
+
+            cm.Items.Add(CreateContextMenuItem("Add Frame", () => SetActiveTool(ToolType.Frame), "F", VectorIcons.FrameGeometry));
+            cm.Items.Add(CreateContextMenuItem("Add Rectangle", () => SetActiveTool(ToolType.Rect), "R", VectorIcons.RectangleGeometry));
+            cm.Items.Add(CreateContextMenuItem("Add Ellipse", () => SetActiveTool(ToolType.Ellipse), "O", VectorIcons.EllipseGeometry));
+            cm.Items.Add(CreateContextMenuItem("Add Text", () => SetActiveTool(ToolType.Text), "T", VectorIcons.TextGeometry));
+            cm.Items.Add(CreateContextMenuItem("Add Pen / Path", () => SetActiveTool(ToolType.Pen), "P", VectorIcons.PenGeometry));
+            cm.Items.Add(CreateModernSeparator());
+            cm.Items.Add(CreateContextMenuItem("Export Document...", () => ShowExportDialog(), "Ctrl + Shift + E", VectorIcons.ExportGeometry));
+
+            return cm;
         }
 
         #endregion
@@ -1160,8 +1687,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(20, 23, 34)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(34, 39, 56)),
+                Background = new SolidColorBrush(Color.FromRgb(33, 37, 52)), // #212534
+                BorderBrush = new SolidColorBrush(Color.FromRgb(50, 58, 80)), // #323A50
                 BorderThickness = new Thickness(1, 0, 0, 0)
             };
 
@@ -1218,7 +1745,83 @@ namespace Kerf.UI
 
             var primary = _selectedLayers[0];
 
-            // If Frame, offer Frame Content Clipping
+            // If Master Component or Instance, show dedicated Component Inspector Card
+            if (primary.IsMasterComponent)
+            {
+                _propertyInspectorStack.Children.Add(CreateInspectorSection("Master Component"));
+                var compCard = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(40, 123, 97, 255)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(123, 97, 255)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(10, 8, 10, 8),
+                    Margin = new Thickness(0, 0, 0, 10)
+                };
+                var compStack = new StackPanel();
+                var headerText = new TextBlock
+                {
+                    Text = "❖ Main Component",
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 12,
+                    Foreground = new SolidColorBrush(Color.FromRgb(162, 89, 255)),
+                    Margin = new Thickness(0, 0, 0, 6)
+                };
+                compStack.Children.Add(headerText);
+
+                var instBtn = CreateSmallButton("❖ Create Instance", "Create linked component instance", () => CreateComponentInstance(primary));
+                instBtn.Height = 26;
+                compStack.Children.Add(instBtn);
+                compCard.Child = compStack;
+                _propertyInspectorStack.Children.Add(compCard);
+            }
+            else if (primary.Type == ElementType.ComponentInstance || !string.IsNullOrEmpty(primary.ComponentId))
+            {
+                _propertyInspectorStack.Children.Add(CreateInspectorSection("Component Instance"));
+                var instCard = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(40, 162, 89, 255)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(162, 89, 255)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(10, 8, 10, 8),
+                    Margin = new Thickness(0, 0, 0, 10)
+                };
+                var instStack = new StackPanel();
+                var headerText = new TextBlock
+                {
+                    Text = "◇ Instance",
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 12,
+                    Foreground = new SolidColorBrush(Color.FromRgb(196, 150, 255)),
+                    Margin = new Thickness(0, 0, 0, 6)
+                };
+                instStack.Children.Add(headerText);
+
+                var btnRow = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var goMasterBtn = CreateSmallButton("Go to Main", "Select master component", () => GoToMasterComponent(primary.ComponentId));
+                goMasterBtn.Height = 24;
+                Grid.SetColumn(goMasterBtn, 0);
+                btnRow.Children.Add(goMasterBtn);
+
+                var resetBtn = CreateSmallButton("Reset Overrides", "Reset all overrides to master", () => ResetComponentOverrides(primary));
+                resetBtn.Height = 24;
+                Grid.SetColumn(resetBtn, 2);
+                btnRow.Children.Add(resetBtn);
+                instStack.Children.Add(btnRow);
+
+                var detachBtn = CreateSmallButton("Detach Instance (Ctrl+Alt+B)", "Detach instance into regular layer", () => DetachComponentInstance(primary));
+                detachBtn.Height = 24;
+                detachBtn.Margin = new Thickness(0, 4, 0, 0);
+                instStack.Children.Add(detachBtn);
+
+                instCard.Child = instStack;
+                _propertyInspectorStack.Children.Add(instCard);
+            }
             if (primary.Type == ElementType.Frame)
             {
                 _propertyInspectorStack.Children.Add(CreateInspectorSection("Frame Properties"));
@@ -1393,6 +1996,18 @@ namespace Kerf.UI
                 _propertyInspectorStack.Children.Add(CreateAutoLayoutCard(primary));
             }
 
+            var activePage = Document != null ? Document.GetActivePage() : null;
+            LayerNode parentNode = null;
+            if (activePage != null)
+            {
+                activePage.FindContainer(primary, out parentNode);
+            }
+            if (parentNode != null && parentNode.AutoLayout != null && parentNode.AutoLayout.Mode != AutoLayoutMode.None)
+            {
+                _propertyInspectorStack.Children.Add(CreateInspectorSection("Auto Layout Child"));
+                _propertyInspectorStack.Children.Add(CreateAutoLayoutChildCard(primary, parentNode));
+            }
+
             // 3. Multiple Fills Section (Rive / Figma style)
             BuildFillsSection(primary);
 
@@ -1400,74 +2015,8 @@ namespace Kerf.UI
             BuildStrokesSection(primary);
 
             // 5. Effects Section (Drop Shadow & Blur)
-            _propertyInspectorStack.Children.Add(CreateInspectorSection("Effects"));
-            if (primary.Effects == null) primary.Effects = new List<EffectData>();
-            var dropShadow = primary.Effects.FirstOrDefault(e => e.Type == EffectType.DropShadow);
-
-            var shadowToggle = new CheckBox
-            {
-                Content = "Drop Shadow",
-                IsChecked = (dropShadow != null && dropShadow.Enabled),
-                Foreground = Brushes.White,
-                FontSize = 12,
-                Margin = new Thickness(0, 0, 0, 8),
-                Cursor = Cursors.Hand
-            };
-            shadowToggle.Checked += (s, e) =>
-            {
-                if (dropShadow == null)
-                {
-                    dropShadow = new EffectData { Type = EffectType.DropShadow, Enabled = true, ColorHex = "#000000", Opacity = 0.25, Blur = 8, OffsetY = 4 };
-                    primary.Effects.Add(dropShadow);
-                }
-                else dropShadow.Enabled = true;
-                InvalidateAndRefresh(primary);
-                RefreshPropertyInspector();
-            };
-            shadowToggle.Unchecked += (s, e) =>
-            {
-                if (dropShadow != null) dropShadow.Enabled = false;
-                InvalidateAndRefresh(primary);
-                RefreshPropertyInspector();
-            };
-            _propertyInspectorStack.Children.Add(shadowToggle);
-
-            if (dropShadow != null && dropShadow.Enabled)
-            {
-                string sColor = string.IsNullOrEmpty(dropShadow.ColorHex) ? "#000000" : dropShadow.ColorHex;
-                _propertyInspectorStack.Children.Add(CreateColorRow("Color", sColor, hex =>
-                {
-                    dropShadow.ColorHex = hex;
-                    InvalidateAndRefresh(primary);
-                }));
-
-                var shadowGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
-                shadowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                shadowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-                shadowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                var blurBox = ScrubControls.CreateScrubField("Blur", dropShadow.Blur, val =>
-                {
-                    dropShadow.Blur = Math.Max(0, val);
-                    InvalidateAndRefresh(primary);
-                }, min: 0, max: 200, suffix: "px");
-
-                var offYBox = ScrubControls.CreateScrubField("Offset Y", dropShadow.OffsetY, val =>
-                {
-                    dropShadow.OffsetY = val;
-                    InvalidateAndRefresh(primary);
-                }, suffix: "px");
-
-                Grid.SetColumn(blurBox, 0); Grid.SetColumn(offYBox, 2);
-                shadowGrid.Children.Add(blurBox); shadowGrid.Children.Add(offYBox);
-                _propertyInspectorStack.Children.Add(shadowGrid);
-
-                _propertyInspectorStack.Children.Add(ScrubControls.CreateSmoothSlider("Shadow Opacity", Math.Round(dropShadow.Opacity * 100), 0, 100, val =>
-                {
-                    dropShadow.Opacity = val / 100.0;
-                    InvalidateAndRefresh(primary);
-                }, "%"));
-            }
+            // 5. Effects Section (Drop Shadow, Inner Shadow, Layer Blur, Liquid Glass, Grain, Background Blur)
+            BuildEffectsSection(primary);
 
             // 6. Typography Section (if Text - System Fonts, Alignments, Resizing, Style)
             if (primary.Type == ElementType.Text)
@@ -1678,18 +2227,13 @@ namespace Kerf.UI
             frame.AutoLayout = layout;
 
             // Mode dropdown
-            var modeCombo = new ComboBox
-            {
-                Background = new SolidColorBrush(Color.FromRgb(28, 33, 48)),
-                Foreground = Brushes.Black,
-                Height = 28,
-                Margin = new Thickness(0, 0, 0, 8)
-            };
-            modeCombo.Items.Add("None");
-            modeCombo.Items.Add("Horizontal");
-            modeCombo.Items.Add("Vertical");
-            modeCombo.Items.Add("Wrap");
-            modeCombo.Items.Add("Grid");
+            var modeCombo = CreateModernComboBox(28);
+            modeCombo.Margin = new Thickness(0, 0, 0, 8);
+            modeCombo.Items.Add(CreateModernComboBoxItem("None"));
+            modeCombo.Items.Add(CreateModernComboBoxItem("Horizontal"));
+            modeCombo.Items.Add(CreateModernComboBoxItem("Vertical"));
+            modeCombo.Items.Add(CreateModernComboBoxItem("Wrap"));
+            modeCombo.Items.Add(CreateModernComboBoxItem("Grid"));
             modeCombo.SelectedIndex = (int)layout.Mode;
 
             modeCombo.SelectionChanged += (s, e) =>
@@ -1697,6 +2241,7 @@ namespace Kerf.UI
                 layout.Mode = (AutoLayoutMode)modeCombo.SelectedIndex;
                 AutoLayoutEngine.Reflow(frame);
                 InvalidateAndRefresh(frame);
+                RefreshPropertyInspector();
             };
             stack.Children.Add(modeCombo);
 
@@ -1704,7 +2249,7 @@ namespace Kerf.UI
             {
                 stack.Children.Add(CreateNumberField("Gap", layout.Gap, val =>
                 {
-                    layout.Gap = Math.Max(0, val);
+                    layout.Gap = Math.Max(-500.0, val);
                     AutoLayoutEngine.Reflow(frame);
                     InvalidateAndRefresh(frame);
                 }));
@@ -1718,7 +2263,96 @@ namespace Kerf.UI
                     AutoLayoutEngine.Reflow(frame);
                     InvalidateAndRefresh(frame);
                 }));
+
+                var alignCombo = CreateModernComboBox(28);
+                alignCombo.Margin = new Thickness(0, 0, 0, 8);
+                alignCombo.Items.Add(CreateModernComboBoxItem("Align: Start"));
+                alignCombo.Items.Add(CreateModernComboBoxItem("Align: Center"));
+                alignCombo.Items.Add(CreateModernComboBoxItem("Align: End"));
+                alignCombo.Items.Add(CreateModernComboBoxItem("Align: Baseline"));
+                alignCombo.SelectedIndex = (int)layout.AlignItems;
+                alignCombo.SelectionChanged += (s, e) =>
+                {
+                    layout.AlignItems = (AlignItems)alignCombo.SelectedIndex;
+                    AutoLayoutEngine.Reflow(frame);
+                    InvalidateAndRefresh(frame);
+                };
+                stack.Children.Add(alignCombo);
+
+                var justifyCombo = CreateModernComboBox(28);
+                justifyCombo.Margin = new Thickness(0, 0, 0, 8);
+                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Start"));
+                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Center"));
+                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: End"));
+                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Space Between"));
+                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Space Around"));
+                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Space Evenly"));
+                justifyCombo.SelectedIndex = (int)layout.JustifyContent;
+                justifyCombo.SelectionChanged += (s, e) =>
+                {
+                    layout.JustifyContent = (JustifyContent)justifyCombo.SelectedIndex;
+                    AutoLayoutEngine.Reflow(frame);
+                    InvalidateAndRefresh(frame);
+                };
+                stack.Children.Add(justifyCombo);
             }
+
+            return stack;
+        }
+
+        private FrameworkElement CreateAutoLayoutChildCard(LayerNode child, LayerNode parent)
+        {
+            var stack = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+
+            var ignoreBox = new CheckBox
+            {
+                Content = "Ignore Auto Layout (Independent)",
+                IsChecked = child.IgnoreAutoLayout,
+                Foreground = Brushes.White,
+                FontSize = 11,
+                Margin = new Thickness(0, 0, 0, 8),
+                Cursor = Cursors.Hand
+            };
+            ignoreBox.Click += (s, e) =>
+            {
+                child.IgnoreAutoLayout = (ignoreBox.IsChecked == true);
+                AutoLayoutEngine.Reflow(parent);
+                InvalidateAndRefresh(parent);
+                RefreshCanvas();
+            };
+            stack.Children.Add(ignoreBox);
+
+            var sizingPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+
+            var sizingHCombo = CreateModernComboBox(26, 90);
+            sizingHCombo.Margin = new Thickness(0, 0, 6, 0);
+            sizingHCombo.Items.Add(CreateModernComboBoxItem("Fixed W"));
+            sizingHCombo.Items.Add(CreateModernComboBoxItem("Hug W"));
+            sizingHCombo.Items.Add(CreateModernComboBoxItem("Fill W"));
+            sizingHCombo.SelectedIndex = (int)child.LayoutSizingH;
+            sizingHCombo.SelectionChanged += (s, e) =>
+            {
+                child.LayoutSizingH = (SizingMode)sizingHCombo.SelectedIndex;
+                AutoLayoutEngine.Reflow(parent);
+                InvalidateAndRefresh(parent);
+                RefreshCanvas();
+            };
+            sizingPanel.Children.Add(sizingHCombo);
+
+            var sizingVCombo = CreateModernComboBox(26, 90);
+            sizingVCombo.Items.Add(CreateModernComboBoxItem("Fixed H"));
+            sizingVCombo.Items.Add(CreateModernComboBoxItem("Hug H"));
+            sizingVCombo.Items.Add(CreateModernComboBoxItem("Fill H"));
+            sizingVCombo.SelectedIndex = (int)child.LayoutSizingV;
+            sizingVCombo.SelectionChanged += (s, e) =>
+            {
+                child.LayoutSizingV = (SizingMode)sizingVCombo.SelectedIndex;
+                AutoLayoutEngine.Reflow(parent);
+                InvalidateAndRefresh(parent);
+                RefreshCanvas();
+            };
+            sizingPanel.Children.Add(sizingVCombo);
+            stack.Children.Add(sizingPanel);
 
             return stack;
         }
@@ -1959,16 +2593,17 @@ namespace Kerf.UI
         private FrameworkElement CreateAlignmentToolbar()
         {
             var stack = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
-            stack.Children.Add(CreateSmallButton("⇦", "Align Left", () => AlignSelected(0)));
-            stack.Children.Add(CreateSmallButton("↔", "Align Center", () => AlignSelected(1)));
-            stack.Children.Add(CreateSmallButton("⇨", "Align Right", () => AlignSelected(2)));
-            stack.Children.Add(CreateSmallButton("⇧", "Align Top", () => AlignSelected(3)));
-            stack.Children.Add(CreateSmallButton("↕", "Align Middle", () => AlignSelected(4)));
-            stack.Children.Add(CreateSmallButton("⇩", "Align Bottom", () => AlignSelected(5)));
+            stack.Children.Add(CreateSmallButton("⇦", "Align Left (Alt+A)", () => AlignSelected(0)));
+            stack.Children.Add(CreateSmallButton("↔", "Align Center (Alt+H)", () => AlignSelected(1)));
+            stack.Children.Add(CreateSmallButton("⇨", "Align Right (Alt+D)", () => AlignSelected(2)));
+            stack.Children.Add(CreateSmallButton("⇧", "Align Top (Alt+W)", () => AlignSelected(3)));
+            stack.Children.Add(CreateSmallButton("↕", "Align Middle (Alt+V)", () => AlignSelected(4)));
+            stack.Children.Add(CreateSmallButton("⇩", "Align Bottom (Alt+S)", () => AlignSelected(5)));
+            stack.Children.Add(CreateSmallButton("⊞", "Auto Layout / Auto Align (Shift+A)", () => AutoAlignSelectedLayers()));
             return stack;
         }
 
-        private void AlignSelected(int alignType)
+        public void AlignSelected(int alignType)
         {
             if (_selectedLayers.Count == 0) return;
             var union = TransformEngine.UnionBounds(_selectedLayers);
@@ -2177,26 +2812,23 @@ namespace Kerf.UI
                 else if (fill.Type == PaintType.LinearGradient)
                 {
                     var lgb = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
-                    if (fill.GradientStops != null && fill.GradientStops.Count > 0)
-                    {
-                        foreach (var st in fill.GradientStops)
-                            lgb.GradientStops.Add(new GradientStop(GpuRenderer.ParseHexColor(st.ColorHex, st.Opacity), st.Position));
-                    }
-                    else
-                    {
-                        lgb.GradientStops.Add(new GradientStop(Color.FromRgb(217, 217, 217), 0));
-                        lgb.GradientStops.Add(new GradientStop(Color.FromRgb(100, 100, 100), 1));
-                    }
+                    GpuRenderer.PopulateGradientStops(lgb.GradientStops, fill);
                     swatch.Background = lgb;
                 }
                 else
                 {
-                    swatch.Background = new RadialGradientBrush(Color.FromRgb(217, 217, 217), Color.FromRgb(70, 70, 70));
+                    var rgb = new RadialGradientBrush { Center = new Point(0.5, 0.5), GradientOrigin = new Point(0.5, 0.5), RadiusX = 0.5, RadiusY = 0.5 };
+                    GpuRenderer.PopulateGradientStops(rgb.GradientStops, fill);
+                    swatch.Background = rgb;
                 }
 
                 swatch.MouseLeftButtonUp += (s, e) =>
                 {
                     e.Handled = true;
+                    if (fill.Type != PaintType.Solid)
+                    {
+                        SetEditingGradient(primary, fill);
+                    }
                     string initialColor = fill.ColorHex ?? "#D9D9D9";
                     if (fill.Type == PaintType.LinearGradient && fill.GradientStops != null && fill.GradientStops.Count > 0)
                         initialColor = fill.GradientStops[0].ColorHex;
@@ -2216,18 +2848,11 @@ namespace Kerf.UI
                 topRow.Children.Add(swatch);
 
                 // Type combo
-                var typeCombo = new ComboBox
-                {
-                    Height = 22,
-                    FontSize = 10,
-                    Background = new SolidColorBrush(Color.FromRgb(30, 36, 52)),
-                    Foreground = Brushes.White,
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(50, 60, 85)),
-                    Margin = new Thickness(0, 0, 4, 0)
-                };
-                typeCombo.Items.Add("Solid");
-                typeCombo.Items.Add("Linear Gradient");
-                typeCombo.Items.Add("Radial Gradient");
+                var typeCombo = CreateModernComboBox(22);
+                typeCombo.Margin = new Thickness(0, 0, 4, 0);
+                typeCombo.Items.Add(CreateModernComboBoxItem("Solid"));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Linear Gradient"));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Radial Gradient"));
                 typeCombo.SelectedIndex = (fill.Type == PaintType.LinearGradient) ? 1 : (fill.Type == PaintType.RadialGradient ? 2 : 0);
                 typeCombo.SelectionChanged += (s, e) =>
                 {
@@ -2242,6 +2867,7 @@ namespace Kerf.UI
                                 new GradientStopData(1.0, "#4B5563", 1.0)
                             };
                         }
+                        SetEditingGradient(primary, fill);
                     }
                     else if (typeCombo.SelectedIndex == 2)
                     {
@@ -2254,10 +2880,12 @@ namespace Kerf.UI
                                 new GradientStopData(1.0, "#1F2937", 1.0)
                             };
                         }
+                        SetEditingGradient(primary, fill);
                     }
                     else
                     {
                         fill.Type = PaintType.Solid;
+                        if (_editingGradientPaint == fill) ClearEditingGradient();
                     }
                     InvalidateAndRefresh(primary);
                     RefreshPropertyInspector();
@@ -2274,38 +2902,61 @@ namespace Kerf.UI
                 }, "%");
                 cardStack.Children.Add(opRow);
 
-                // If Linear Gradient: Angle scrub field & stops
-                if (fill.Type == PaintType.LinearGradient)
+                // If Linear Gradient or Radial Gradient: Mount Figma-style Gradient Ramp & Controls
+                if (fill.Type == PaintType.LinearGradient || fill.Type == PaintType.RadialGradient)
                 {
-                    var angleField = ScrubControls.CreateScrubField("Angle", fill.GradientAngle, val =>
-                    {
-                        fill.GradientAngle = val;
-                        InvalidateAndRefresh(primary);
-                    }, min: 0, max: 360, suffix: "°");
-                    cardStack.Children.Add(angleField);
+                    bool isEditingThis = (_editingGradientPaint == fill && _editingGradientLayer == primary);
 
-                    // Stop 2 swatch
-                    if (fill.GradientStops != null && fill.GradientStops.Count > 1)
+                    // Header row with "On-Canvas Roller" toggle button
+                    var toggleRow = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
+                    var rollerBtn = new Button
                     {
-                        var stop2Row = CreateColorRow("End Color", fill.GradientStops[1].ColorHex, hex =>
-                        {
-                            fill.GradientStops[1].ColorHex = hex;
-                            InvalidateAndRefresh(primary);
-                        });
-                        cardStack.Children.Add(stop2Row);
-                    }
-                }
-                else if (fill.Type == PaintType.RadialGradient)
-                {
-                    if (fill.GradientStops != null && fill.GradientStops.Count > 1)
+                        Content = isEditingThis ? "● Canvas Roller Active [Done]" : "✏ Edit on Canvas",
+                        FontSize = 10,
+                        FontWeight = FontWeights.SemiBold,
+                        Height = 22,
+                        Background = isEditingThis ? new SolidColorBrush(Color.FromRgb(20, 50, 110)) : new SolidColorBrush(Color.FromRgb(30, 36, 52)),
+                        Foreground = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(150, 165, 195)),
+                        BorderBrush = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(48, 58, 80)),
+                        BorderThickness = new Thickness(1),
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(6, 0, 6, 0),
+                        ToolTip = isEditingThis ? "Click to exit on-canvas gradient editing (or press Esc)" : "Activate Figma on-canvas gradient handles & rollers"
+                    };
+
+                    GradientRampControl rampCtrl = null;
+                    rollerBtn.Click += (s, e) =>
                     {
-                        var stop2Row = CreateColorRow("Outer Color", fill.GradientStops[1].ColorHex, hex =>
+                        if (_editingGradientPaint == fill)
+                            ClearEditingGradient();
+                        else
+                            SetEditingGradient(primary, fill, rampCtrl);
+                        RefreshPropertyInspector();
+                    };
+                    toggleRow.Children.Add(rollerBtn);
+                    cardStack.Children.Add(toggleRow);
+
+                    rampCtrl = new GradientRampControl(fill, () =>
+                    {
+                        SetEditingGradient(primary, fill, rampCtrl);
+                        InvalidateAndRefresh(primary);
+                    }, () =>
+                    {
+                        SetEditingGradient(primary, fill, rampCtrl);
+                        InvalidateAndRefresh(primary);
+                        RefreshPropertyInspector();
+                    });
+
+                    rampCtrl.PreviewMouseDown += (s, e) =>
+                    {
+                        if (_editingGradientPaint != fill)
                         {
-                            fill.GradientStops[1].ColorHex = hex;
-                            InvalidateAndRefresh(primary);
-                        });
-                        cardStack.Children.Add(stop2Row);
-                    }
+                            SetEditingGradient(primary, fill, rampCtrl);
+                            RefreshPropertyInspector();
+                        }
+                    };
+
+                    cardStack.Children.Add(rampCtrl);
                 }
 
                 card.Child = cardStack;
@@ -2407,25 +3058,95 @@ namespace Kerf.UI
                     Width = 24,
                     Height = 22,
                     CornerRadius = new CornerRadius(3),
-                    Background = new SolidColorBrush(GpuRenderer.ParseHexColor(stroke.Paint.ColorHex, stroke.Paint.Opacity)),
                     BorderBrush = new SolidColorBrush(Color.FromRgb(60, 70, 95)),
                     BorderThickness = new Thickness(1),
                     Margin = new Thickness(4, 0, 6, 0),
                     Cursor = Cursors.Hand,
-                    ToolTip = "Choose stroke color"
+                    ToolTip = "Choose stroke color/gradient"
                 };
+                if (stroke.Paint.Type == PaintType.Solid)
+                {
+                    swatch.Background = new SolidColorBrush(GpuRenderer.ParseHexColor(stroke.Paint.ColorHex, stroke.Paint.Opacity));
+                }
+                else if (stroke.Paint.Type == PaintType.LinearGradient)
+                {
+                    var lgb = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
+                    GpuRenderer.PopulateGradientStops(lgb.GradientStops, stroke.Paint);
+                    swatch.Background = lgb;
+                }
+                else
+                {
+                    var rgb = new RadialGradientBrush { Center = new Point(0.5, 0.5), GradientOrigin = new Point(0.5, 0.5), RadiusX = 0.5, RadiusY = 0.5 };
+                    GpuRenderer.PopulateGradientStops(rgb.GradientStops, stroke.Paint);
+                    swatch.Background = rgb;
+                }
+
                 swatch.MouseLeftButtonUp += (s, e) =>
                 {
                     e.Handled = true;
-                    ColorPickerPopup.ShowAt(swatch, stroke.Paint.ColorHex, newHex =>
+                    string initialColor = stroke.Paint.ColorHex ?? "#000000";
+                    if (stroke.Paint.GradientStops != null && stroke.Paint.GradientStops.Count > 0)
+                        initialColor = stroke.Paint.GradientStops[0].ColorHex;
+
+                    ColorPickerPopup.ShowAt(swatch, initialColor, newHex =>
                     {
                         stroke.Paint.ColorHex = newHex;
-                        swatch.Background = new SolidColorBrush(GpuRenderer.ParseHexColor(newHex, stroke.Paint.Opacity));
+                        if (stroke.Paint.GradientStops != null && stroke.Paint.GradientStops.Count > 0)
+                        {
+                            stroke.Paint.GradientStops[0].ColorHex = newHex;
+                        }
                         InvalidateAndRefresh(primary);
+                        RefreshPropertyInspector();
                     });
                 };
                 DockPanel.SetDock(swatch, Dock.Left);
                 topRow.Children.Add(swatch);
+
+                // Stroke Type Combo
+                var strokeTypeCombo = CreateModernComboBox(22, 65);
+                strokeTypeCombo.Margin = new Thickness(0, 0, 4, 0);
+                strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Solid"));
+                strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Linear"));
+                strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Radial"));
+                strokeTypeCombo.SelectedIndex = (stroke.Paint.Type == PaintType.LinearGradient) ? 1 : (stroke.Paint.Type == PaintType.RadialGradient ? 2 : 0);
+                strokeTypeCombo.SelectionChanged += (s, e) =>
+                {
+                    if (strokeTypeCombo.SelectedIndex == 1)
+                    {
+                        stroke.Paint.Type = PaintType.LinearGradient;
+                        if (stroke.Paint.GradientStops == null || stroke.Paint.GradientStops.Count == 0)
+                        {
+                            stroke.Paint.GradientStops = new List<GradientStopData>
+                            {
+                                new GradientStopData(0.0, stroke.Paint.ColorHex ?? "#000000", 1.0),
+                                new GradientStopData(1.0, "#6366F1", 1.0)
+                            };
+                        }
+                        SetEditingGradient(primary, stroke.Paint);
+                    }
+                    else if (strokeTypeCombo.SelectedIndex == 2)
+                    {
+                        stroke.Paint.Type = PaintType.RadialGradient;
+                        if (stroke.Paint.GradientStops == null || stroke.Paint.GradientStops.Count == 0)
+                        {
+                            stroke.Paint.GradientStops = new List<GradientStopData>
+                            {
+                                new GradientStopData(0.0, stroke.Paint.ColorHex ?? "#000000", 1.0),
+                                new GradientStopData(1.0, "#38BDF8", 1.0)
+                            };
+                        }
+                        SetEditingGradient(primary, stroke.Paint);
+                    }
+                    else
+                    {
+                        stroke.Paint.Type = PaintType.Solid;
+                        if (_editingGradientPaint == stroke.Paint) ClearEditingGradient();
+                    }
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                };
+                DockPanel.SetDock(strokeTypeCombo, Dock.Left);
+                topRow.Children.Add(strokeTypeCombo);
 
                 var widthField = ScrubControls.CreateScrubField("Width", stroke.Width, val =>
                 {
@@ -2437,23 +3158,72 @@ namespace Kerf.UI
 
                 cardStack.Children.Add(topRow);
 
+                // If Linear or Radial Gradient: Mount Figma-style Gradient Ramp & Controls
+                if (stroke.Paint.Type == PaintType.LinearGradient || stroke.Paint.Type == PaintType.RadialGradient)
+                {
+                    bool isEditingThis = (_editingGradientPaint == stroke.Paint && _editingGradientLayer == primary);
+
+                    var toggleRow = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
+                    var rollerBtn = new Button
+                    {
+                        Content = isEditingThis ? "● Canvas Roller Active [Done]" : "✏ Edit on Canvas",
+                        FontSize = 10,
+                        FontWeight = FontWeights.SemiBold,
+                        Height = 22,
+                        Background = isEditingThis ? new SolidColorBrush(Color.FromRgb(20, 50, 110)) : new SolidColorBrush(Color.FromRgb(30, 36, 52)),
+                        Foreground = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(150, 165, 195)),
+                        BorderBrush = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(48, 58, 80)),
+                        BorderThickness = new Thickness(1),
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(6, 0, 6, 0),
+                        ToolTip = isEditingThis ? "Click to exit on-canvas gradient editing (or press Esc)" : "Activate Figma on-canvas gradient handles & rollers"
+                    };
+
+                    GradientRampControl strokeRamp = null;
+                    rollerBtn.Click += (s, e) =>
+                    {
+                        if (_editingGradientPaint == stroke.Paint)
+                            ClearEditingGradient();
+                        else
+                            SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                        RefreshPropertyInspector();
+                    };
+                    toggleRow.Children.Add(rollerBtn);
+                    cardStack.Children.Add(toggleRow);
+
+                    strokeRamp = new GradientRampControl(stroke.Paint, () =>
+                    {
+                        SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                        InvalidateAndRefresh(primary);
+                    }, () =>
+                    {
+                        SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                        InvalidateAndRefresh(primary);
+                        RefreshPropertyInspector();
+                    });
+
+                    strokeRamp.PreviewMouseDown += (s, e) =>
+                    {
+                        if (_editingGradientPaint != stroke.Paint)
+                        {
+                            SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                            RefreshPropertyInspector();
+                        }
+                    };
+
+                    cardStack.Children.Add(strokeRamp);
+                }
+
                 // Alignment & Cap row
                 var alignRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
                 alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
                 alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                var alignCombo = new ComboBox
-                {
-                    Height = 22,
-                    FontSize = 10,
-                    Background = new SolidColorBrush(Color.FromRgb(30, 36, 52)),
-                    Foreground = Brushes.White,
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(50, 60, 85))
-                };
-                alignCombo.Items.Add("Center");
-                alignCombo.Items.Add("Inside");
-                alignCombo.Items.Add("Outside");
+                var alignCombo = CreateModernComboBox(22);
+                alignCombo.Items.Add(CreateModernComboBoxItem("Center"));
+                alignCombo.Items.Add(CreateModernComboBoxItem("Inside"));
+                alignCombo.Items.Add(CreateModernComboBoxItem("Outside"));
                 alignCombo.SelectedIndex = (stroke.Alignment == StrokeAlignment.Inside) ? 1 : (stroke.Alignment == StrokeAlignment.Outside ? 2 : 0);
                 alignCombo.SelectionChanged += (s, e) =>
                 {
@@ -2465,17 +3235,10 @@ namespace Kerf.UI
                 Grid.SetColumn(alignCombo, 0);
                 alignRow.Children.Add(alignCombo);
 
-                var capCombo = new ComboBox
-                {
-                    Height = 22,
-                    FontSize = 10,
-                    Background = new SolidColorBrush(Color.FromRgb(30, 36, 52)),
-                    Foreground = Brushes.White,
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(50, 60, 85))
-                };
-                capCombo.Items.Add("Flat Cap");
-                capCombo.Items.Add("Round Cap");
-                capCombo.Items.Add("Square Cap");
+                var capCombo = CreateModernComboBox(22);
+                capCombo.Items.Add(CreateModernComboBoxItem("Flat Cap"));
+                capCombo.Items.Add(CreateModernComboBoxItem("Round Cap"));
+                capCombo.Items.Add(CreateModernComboBoxItem("Square Cap"));
                 capCombo.SelectedIndex = (stroke.Cap == StrokeCap.Round) ? 1 : (stroke.Cap == StrokeCap.Square ? 2 : 0);
                 capCombo.SelectionChanged += (s, e) =>
                 {
@@ -2488,6 +3251,488 @@ namespace Kerf.UI
                 alignRow.Children.Add(capCombo);
 
                 cardStack.Children.Add(alignRow);
+
+                card.Child = cardStack;
+                _propertyInspectorStack.Children.Add(card);
+            }
+        }
+
+        private void BuildEffectsSection(LayerNode primary)
+        {
+            if (primary.Effects == null) primary.Effects = new List<EffectData>();
+
+            _propertyInspectorStack.Children.Add(CreateInspectorSectionWithAdd("Effects", () =>
+            {
+                var newFx = new EffectData
+                {
+                    Type = EffectType.DropShadow,
+                    Enabled = true,
+                    ColorHex = "#000000",
+                    Opacity = 0.25,
+                    Direction = 90.0,
+                    Distance = 4.0,
+                    Blur = 8,
+                    Spread = 0
+                };
+                newFx.UpdateOffsetsFromPolar();
+                primary.Effects.Add(newFx);
+                History.MarkDirty();
+                InvalidateAndRefresh(primary);
+                RefreshPropertyInspector();
+            }));
+
+            if (primary.Effects.Count == 0)
+            {
+                var emptyBtn = CreateSmallButton("+ Add Effect", "Add drop shadow, inner shadow, liquid glass, grain, or blur", () =>
+                {
+                    var newFx = new EffectData
+                    {
+                        Type = EffectType.DropShadow,
+                        Enabled = true,
+                        ColorHex = "#000000",
+                        Opacity = 0.25,
+                        Direction = 90.0,
+                        Distance = 4.0,
+                        Blur = 8,
+                        Spread = 0
+                    };
+                    newFx.UpdateOffsetsFromPolar();
+                    primary.Effects.Add(newFx);
+                    History.MarkDirty();
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                });
+                _propertyInspectorStack.Children.Add(emptyBtn);
+                return;
+            }
+
+            for (int i = 0; i < primary.Effects.Count; i++)
+            {
+                int fxIndex = i;
+                var fx = primary.Effects[fxIndex];
+
+                var card = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(40, 45, 63)), // #282D3F
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(57, 65, 90)), // #39415A
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8),
+                    Margin = new Thickness(0, 0, 0, 8)
+                };
+
+                var cardStack = new StackPanel();
+
+                // Top row: Eye toggle, Type Dropdown, Delete button
+                var topRow = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 6) };
+
+                var eyeBtn = new Button
+                {
+                    Content = fx.Enabled ? "👁" : "—",
+                    FontSize = 10,
+                    Width = 22,
+                    Height = 22,
+                    Background = fx.Enabled ? new SolidColorBrush(Color.FromRgb(50, 58, 80)) : Brushes.Transparent,
+                    Foreground = fx.Enabled ? Brushes.White : new SolidColorBrush(Color.FromRgb(120, 130, 150)),
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    ToolTip = fx.Enabled ? "Disable effect" : "Enable effect"
+                };
+                eyeBtn.Click += (s, e) =>
+                {
+                    fx.Enabled = !fx.Enabled;
+                    History.MarkDirty();
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                };
+                DockPanel.SetDock(eyeBtn, Dock.Left);
+                topRow.Children.Add(eyeBtn);
+
+                var delBtn = new Button
+                {
+                    Content = "✕",
+                    FontSize = 10,
+                    Width = 22,
+                    Height = 22,
+                    Background = Brushes.Transparent,
+                    Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113)),
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Remove effect",
+                    Margin = new Thickness(4, 0, 0, 0)
+                };
+                delBtn.Click += (s, e) =>
+                {
+                    if (fxIndex < primary.Effects.Count)
+                    {
+                        primary.Effects.RemoveAt(fxIndex);
+                        History.MarkDirty();
+                        InvalidateAndRefresh(primary);
+                        RefreshPropertyInspector();
+                    }
+                };
+                DockPanel.SetDock(delBtn, Dock.Right);
+                topRow.Children.Add(delBtn);
+
+                // Type ComboBox
+                var typeCombo = CreateModernComboBox(22);
+                typeCombo.Margin = new Thickness(6, 0, 0, 0);
+                typeCombo.Items.Add(CreateModernComboBoxItem("Drop Shadow", EffectType.DropShadow));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Inner Shadow", EffectType.InnerShadow));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Layer Blur", EffectType.LayerBlur));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Liquid Glass", EffectType.LiquidGlass));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Film Grain", EffectType.Grain));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Background Blur", EffectType.BackgroundBlur));
+
+                // Select current
+                for (int c = 0; c < typeCombo.Items.Count; c++)
+                {
+                    var item = typeCombo.Items[c] as ComboBoxItem;
+                    if (item != null && (EffectType)item.Tag == fx.Type)
+                    {
+                        typeCombo.SelectedIndex = c;
+                        break;
+                    }
+                }
+                if (typeCombo.SelectedIndex < 0) typeCombo.SelectedIndex = 0;
+
+                typeCombo.SelectionChanged += (s, e) =>
+                {
+                    var sel = typeCombo.SelectedItem as ComboBoxItem;
+                    if (sel != null && sel.Tag is EffectType)
+                    {
+                        var newType = (EffectType)sel.Tag;
+                        if (fx.Type != newType)
+                        {
+                            fx.Type = newType;
+                            // Set suitable Apple pro defaults for specific types
+                            if (newType == EffectType.LiquidGlass)
+                            {
+                                fx.Intensity = 0.85;
+                                fx.Direction = 315;
+                                fx.Spread = 2.2;
+                                fx.Blur = 16;
+                                fx.ColorHex = "#FFFFFF";
+                                fx.Opacity = 0.15;
+                                fx.Scale = 1.0;
+                                fx.Distance = 60.0;
+                                fx.UpdateOffsetsFromPolar();
+                            }
+                            else if (newType == EffectType.Grain)
+                            {
+                                fx.Intensity = 0.25;
+                                fx.Scale = 1.0;
+                                fx.Blur = 0.0;
+                                fx.ColorHex = "#FFFFFF";
+                            }
+                            else if (newType == EffectType.LayerBlur || newType == EffectType.BackgroundBlur)
+                            {
+                                if (fx.Blur <= 0) fx.Blur = 8;
+                            }
+                            History.MarkDirty();
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        }
+                    }
+                };
+                topRow.Children.Add(typeCombo);
+                cardStack.Children.Add(topRow);
+
+                if (fx.Enabled)
+                {
+                    switch (fx.Type)
+                    {
+                        case EffectType.DropShadow:
+                        case EffectType.InnerShadow:
+                        {
+                            // Color Row
+                            string sColor = string.IsNullOrEmpty(fx.ColorHex) ? "#000000" : fx.ColorHex;
+                            cardStack.Children.Add(CreateColorRow("Shadow Color", sColor, hex =>
+                            {
+                                fx.ColorHex = hex;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }));
+
+                            // Direction & Distance (Polar controls)
+                            var polarGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                            polarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                            polarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                            polarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                            var dirBox = ScrubControls.CreateScrubField("Direction", fx.Direction, val =>
+                            {
+                                double deg = (val % 360.0);
+                                if (deg < 0) deg += 360.0;
+                                fx.Direction = Math.Round(deg, 1);
+                                fx.UpdateOffsetsFromPolar();
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0, max: 360, suffix: "°");
+
+                            var distBox = ScrubControls.CreateScrubField("Distance", fx.Distance, val =>
+                            {
+                                fx.Distance = Math.Max(0, val);
+                                fx.UpdateOffsetsFromPolar();
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0, max: 500, suffix: "px");
+
+                            Grid.SetColumn(dirBox, 0); Grid.SetColumn(distBox, 2);
+                            polarGrid.Children.Add(dirBox); polarGrid.Children.Add(distBox);
+                            cardStack.Children.Add(polarGrid);
+
+                            // Offset X & Offset Y (Cartesian controls)
+                            var cartGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                            cartGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                            cartGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                            cartGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                            var offXBox = ScrubControls.CreateScrubField("Offset X", fx.OffsetX, val =>
+                            {
+                                fx.OffsetX = val;
+                                fx.UpdatePolarFromOffsets();
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, suffix: "px");
+
+                            var offYBox = ScrubControls.CreateScrubField("Offset Y", fx.OffsetY, val =>
+                            {
+                                fx.OffsetY = val;
+                                fx.UpdatePolarFromOffsets();
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, suffix: "px");
+
+                            Grid.SetColumn(offXBox, 0); Grid.SetColumn(offYBox, 2);
+                            cartGrid.Children.Add(offXBox); cartGrid.Children.Add(offYBox);
+                            cardStack.Children.Add(cartGrid);
+
+                            // Blur & Spread
+                            var blurGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                            blurGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                            blurGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                            blurGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                            var blurBox = ScrubControls.CreateScrubField("Blur", fx.Blur, val =>
+                            {
+                                fx.Blur = Math.Max(0, val);
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0, max: 200, suffix: "px");
+
+                            var spreadBox = ScrubControls.CreateScrubField("Spread", fx.Spread, val =>
+                            {
+                                fx.Spread = val;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: -50, max: 100, suffix: "px");
+
+                            Grid.SetColumn(blurBox, 0); Grid.SetColumn(spreadBox, 2);
+                            blurGrid.Children.Add(blurBox); blurGrid.Children.Add(spreadBox);
+                            cardStack.Children.Add(blurGrid);
+
+                            // Opacity Slider
+                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("Opacity", Math.Round(fx.Opacity * 100), 0, 100, val =>
+                            {
+                                fx.Opacity = val / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, "%"));
+                            break;
+                        }
+
+                        case EffectType.LiquidGlass:
+                        {
+                            // 1. Quick Presets Bar
+                            var presetWrap = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+                            Action<string, double, double, double, double, string, double, double, double> applyPreset = 
+                                (name, intensity, dir, rim, blur, color, opacity, bulge, dispersion) =>
+                            {
+                                fx.Intensity = intensity;
+                                fx.Direction = dir;
+                                fx.Spread = rim;
+                                fx.Blur = blur;
+                                fx.ColorHex = color;
+                                fx.Opacity = opacity;
+                                fx.Scale = bulge;
+                                fx.Distance = dispersion;
+                                fx.UpdateOffsetsFromPolar();
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                                RefreshPropertyInspector();
+                            };
+
+                            presetWrap.Children.Add(CreatePresetPill("VisionOS", () => applyPreset("VisionOS", 0.85, 315, 2.2, 16, "#FFFFFF", 0.15, 1.0, 60.0)));
+                            presetWrap.Children.Add(CreatePresetPill("Frosted", () => applyPreset("Frosted", 0.65, 300, 2.0, 32, "#F1F5F9", 0.35, 1.2, 40.0)));
+                            presetWrap.Children.Add(CreatePresetPill("Smoked", () => applyPreset("Smoked", 0.90, 315, 2.5, 20, "#0F172A", 0.65, 1.0, 35.0)));
+                            presetWrap.Children.Add(CreatePresetPill("Crystal", () => applyPreset("Crystal", 1.00, 270, 3.0, 4, "#E0F2FE", 0.08, 1.4, 95.0)));
+                            cardStack.Children.Add(presetWrap);
+
+                            // 2. Glass Tint Color Row
+                            string glassColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
+                            cardStack.Children.Add(CreateColorRow("Glass Tint", glassColor, hex =>
+                            {
+                                fx.ColorHex = hex;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }));
+
+                            // 3. Glass Body Translucency / Opacity Slider
+                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("Glass Opacity", Math.Round(fx.Opacity * 100), 0, 100, val =>
+                            {
+                                fx.Opacity = val / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, "%"));
+
+                            // 4. Direction & Caustic Rim Width Grid
+                            var lightGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                            lightGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                            lightGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                            lightGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                            var dirBox = ScrubControls.CreateScrubField("Light Angle", fx.Direction, val =>
+                            {
+                                double deg = (val % 360.0);
+                                if (deg < 0) deg += 360.0;
+                                fx.Direction = Math.Round(deg, 1);
+                                fx.UpdateOffsetsFromPolar();
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0, max: 360, suffix: "°");
+
+                            var rimBox = ScrubControls.CreateScrubField("Caustic Rim", fx.Spread > 0 ? fx.Spread : 2.2, val =>
+                            {
+                                fx.Spread = Math.Max(0.5, Math.Min(15.0, val));
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0.5, max: 15.0, suffix: "px");
+
+                            Grid.SetColumn(dirBox, 0); Grid.SetColumn(rimBox, 2);
+                            lightGrid.Children.Add(dirBox); lightGrid.Children.Add(rimBox);
+                            cardStack.Children.Add(lightGrid);
+
+                            // 5. Specular Lens Highlight Intensity Slider
+                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("Specular Highlight", Math.Round(fx.Intensity * 100), 0, 100, val =>
+                            {
+                                fx.Intensity = val / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, "%"));
+
+                            // 6. Curvature & Frost Diffusion Grid
+                            var optGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                            optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                            optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                            optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                            var curveBox = ScrubControls.CreateScrubField("Lens Bulge", fx.Scale > 0 ? fx.Scale : 1.0, val =>
+                            {
+                                fx.Scale = Math.Max(0.2, Math.Min(3.0, val));
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0.2, max: 3.0, suffix: "x");
+
+                            var blurBox = ScrubControls.CreateScrubField("Frost Blur", fx.Blur > 0 ? fx.Blur : 16, val =>
+                            {
+                                fx.Blur = Math.Max(0, val);
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0, max: 100, suffix: "px");
+
+                            Grid.SetColumn(curveBox, 0); Grid.SetColumn(blurBox, 2);
+                            optGrid.Children.Add(curveBox); optGrid.Children.Add(blurBox);
+                            cardStack.Children.Add(optGrid);
+
+                            // 7. Chromatic Aberration Dispersion Slider
+                            double currentDisp = fx.Distance > 0 ? fx.Distance : 60.0;
+                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("Chromatic Aberration", currentDisp, 0, 100, val =>
+                            {
+                                fx.Distance = val;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, "%"));
+                            break;
+                        }
+
+                        case EffectType.Grain:
+                        {
+                            // Color Row (Monochrome vs Tinted Grain)
+                            string gColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
+                            cardStack.Children.Add(CreateColorRow("Grain Tint", gColor, hex =>
+                            {
+                                fx.ColorHex = hex;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }));
+
+                            // Grain Intensity Slider
+                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("Grain Intensity", Math.Round(fx.Intensity * 100), 0, 100, val =>
+                            {
+                                fx.Intensity = val / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, "%"));
+
+                            // Grain Scale & Softness Grid
+                            var gGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                            gGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                            gGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                            gGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                            var scaleBox = ScrubControls.CreateScrubField("Grain Scale", fx.Scale > 0 ? fx.Scale : 1.0, val =>
+                            {
+                                fx.Scale = Math.Max(0.2, Math.Min(6.0, val));
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0.2, max: 6.0, suffix: "x");
+
+                            var softBox = ScrubControls.CreateScrubField("Softness", fx.Blur, val =>
+                            {
+                                fx.Blur = Math.Max(0, Math.Min(10.0, val));
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0, max: 10.0, suffix: "px");
+
+                            Grid.SetColumn(scaleBox, 0); Grid.SetColumn(softBox, 2);
+                            gGrid.Children.Add(scaleBox); gGrid.Children.Add(softBox);
+                            cardStack.Children.Add(gGrid);
+                            break;
+                        }
+
+                        case EffectType.LayerBlur:
+                        case EffectType.BackgroundBlur:
+                        {
+                            if (fx.Type == EffectType.BackgroundBlur)
+                            {
+                                string bColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
+                                cardStack.Children.Add(CreateColorRow("Backdrop Tint", bColor, hex =>
+                                {
+                                    fx.ColorHex = hex;
+                                    History.MarkDirty();
+                                    InvalidateAndRefresh(primary);
+                                }));
+
+                                cardStack.Children.Add(ScrubControls.CreateSmoothSlider("Tint Opacity", Math.Round(fx.Opacity * 100), 0, 100, val =>
+                                {
+                                    fx.Opacity = val / 100.0;
+                                    History.MarkDirty();
+                                    InvalidateAndRefresh(primary);
+                                }, "%"));
+                            }
+
+                            var blurBox = ScrubControls.CreateScrubField("Blur Radius", fx.Blur > 0 ? fx.Blur : 8, val =>
+                            {
+                                fx.Blur = Math.Max(0, val);
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }, min: 0, max: 200, suffix: "px");
+                            cardStack.Children.Add(blurBox);
+                            break;
+                        }
+                    }
+                }
 
                 card.Child = cardStack;
                 _propertyInspectorStack.Children.Add(card);
@@ -2518,15 +3763,8 @@ namespace Kerf.UI
             };
             _propertyInspectorStack.Children.Add(fontLabel);
 
-            var fontCombo = new ComboBox
-            {
-                Height = 24,
-                FontSize = 11,
-                Background = new SolidColorBrush(Color.FromRgb(28, 33, 48)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78)),
-                Margin = new Thickness(0, 0, 0, 6)
-            };
+            var fontCombo = CreateModernComboBox(26);
+            fontCombo.Margin = new Thickness(0, 0, 0, 6);
 
             // Populate with system font families
             try
@@ -2569,14 +3807,7 @@ namespace Kerf.UI
             styleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
             styleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
 
-            var weightCombo = new ComboBox
-            {
-                Height = 24,
-                FontSize = 11,
-                Background = new SolidColorBrush(Color.FromRgb(28, 33, 48)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78))
-            };
+            var weightCombo = CreateModernComboBox(26);
             var weights = new int[] { 100, 300, 400, 500, 600, 700, 800, 900 };
             var weightNames = new string[] { "Thin (100)", "Light (300)", "Regular (400)", "Medium (500)", "SemiBold (600)", "Bold (700)", "ExtraBold (800)", "Black (900)" };
             for (int wi = 0; wi < weights.Length; wi++) weightCombo.Items.Add(weightNames[wi]);
@@ -2786,17 +4017,10 @@ namespace Kerf.UI
             decorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
             decorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var decorCombo = new ComboBox
-            {
-                Height = 24,
-                FontSize = 10,
-                Background = new SolidColorBrush(Color.FromRgb(28, 33, 48)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78))
-            };
-            decorCombo.Items.Add("None");
-            decorCombo.Items.Add("Underline");
-            decorCombo.Items.Add("Strikethrough");
+            var decorCombo = CreateModernComboBox(24);
+            decorCombo.Items.Add(CreateModernComboBoxItem("None"));
+            decorCombo.Items.Add(CreateModernComboBoxItem("Underline"));
+            decorCombo.Items.Add(CreateModernComboBoxItem("Strikethrough"));
             decorCombo.SelectedIndex = (typo.Decoration == TextDecorationMode.Underline) ? 1 : (typo.Decoration == TextDecorationMode.Strikethrough ? 2 : 0);
             decorCombo.SelectionChanged += (s, e) =>
             {
@@ -2808,18 +4032,11 @@ namespace Kerf.UI
             Grid.SetColumn(decorCombo, 0);
             decorRow.Children.Add(decorCombo);
 
-            var caseCombo = new ComboBox
-            {
-                Height = 24,
-                FontSize = 10,
-                Background = new SolidColorBrush(Color.FromRgb(28, 33, 48)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78))
-            };
-            caseCombo.Items.Add("As-Is");
-            caseCombo.Items.Add("UPPERCASE");
-            caseCombo.Items.Add("lowercase");
-            caseCombo.Items.Add("Title Case");
+            var caseCombo = CreateModernComboBox(24);
+            caseCombo.Items.Add(CreateModernComboBoxItem("As-Is"));
+            caseCombo.Items.Add(CreateModernComboBoxItem("UPPERCASE"));
+            caseCombo.Items.Add(CreateModernComboBoxItem("lowercase"));
+            caseCombo.Items.Add(CreateModernComboBoxItem("Title Case"));
             caseCombo.SelectedIndex = (typo.Case == TextCase.Upper) ? 1 : (typo.Case == TextCase.Lower ? 2 : (typo.Case == TextCase.Title ? 3 : 0));
             caseCombo.SelectionChanged += (s, e) =>
             {
@@ -3205,6 +4422,8 @@ namespace Kerf.UI
 
         public void HandleCanvasMouseDown(Point screenPt, MouseButton button, int clickCount)
         {
+            ColorPickerPopup.CloseActive();
+            Focus();
             _lastMousePos = screenPt;
             Point canvasPt = ScreenToCanvas(screenPt);
 
@@ -3217,6 +4436,11 @@ namespace Kerf.UI
             if (button == MouseButton.Middle || (button == MouseButton.Left && Keyboard.IsKeyDown(Key.Space)) || _activeTool == ToolType.Hand)
             {
                 _isPanning = true;
+                if (_canvasHost != null)
+                {
+                    _canvasHost.CaptureMouse();
+                }
+                Cursor = Cursors.ScrollAll;
                 return;
             }
 
@@ -3299,6 +4523,48 @@ namespace Kerf.UI
                             _transformStartBounds = primary.GetBounds();
                             return;
                         }
+                    }
+                }
+
+                // 2.5 Figma-style Gradient On-Canvas Rollers & Handles Hit-Test (active ONLY when gradient is being edited!)
+                if (_editingGradientPaint != null && _editingGradientLayer != null && _selectedLayers.Contains(_editingGradientLayer) && _activeTool == ToolType.Select)
+                {
+                    var primary = _editingGradientLayer;
+                    var gradPaint = _editingGradientPaint;
+                    var gHit = GradientRollerEngine.HitTest(canvasPt, primary, gradPaint, _zoomScale);
+                    if (gHit.Type != GradientHandleType.None)
+                    {
+                        if (gHit.Type == GradientHandleType.Line)
+                        {
+                            Color sampled = GpuRenderer.SampleGradientColor(gradPaint.GradientStops, gHit.ParameterT);
+                            string hex = string.Format("#{0:X2}{1:X2}{2:X2}", sampled.R, sampled.G, sampled.B);
+                            double op = sampled.A / 255.0;
+                            var newStop = new GradientStopData(Math.Round(gHit.ParameterT, 3), hex, Math.Round(op, 2));
+                            gradPaint.GradientStops.Add(newStop);
+                            gradPaint.GradientStops.Sort((a, b) => a.Position.CompareTo(b.Position));
+                            _activeGradientStopIndex = gradPaint.GradientStops.IndexOf(newStop);
+                            _activeGradientHandle = GradientHandleType.StopNode;
+                        }
+                        else
+                        {
+                            _activeGradientHandle = gHit.Type;
+                            _activeGradientStopIndex = gHit.StopIndex;
+                        }
+
+                        _isDraggingGradientHandle = true;
+                        _activeGradientPaint = gradPaint;
+                        _activeGradientLayer = primary;
+                        if (_canvasHost != null)
+                        {
+                            _canvasHost.CaptureMouse();
+                        }
+                        InvalidateAndRefresh(primary);
+                        if (_activeGradientRamp != null)
+                        {
+                            _activeGradientRamp.UpdateTrackVisuals();
+                        }
+                        RefreshPropertyInspector();
+                        return;
                     }
                 }
 
@@ -3483,6 +4749,38 @@ namespace Kerf.UI
                 _lastMousePos = screenPt;
                 RefreshCanvas();
                 return;
+            }
+
+            // Gradient On-Canvas Roller Dragging (Figma-style)
+            if (_isDraggingGradientHandle && _activeGradientLayer != null && _activeGradientPaint != null)
+            {
+                if (_activeGradientHandle == GradientHandleType.Start)
+                {
+                    GradientRollerEngine.UpdateStartHandleFromDrag(_activeGradientLayer, _activeGradientPaint, canvasPt);
+                    InvalidateAndRefresh(_activeGradientLayer);
+                    if (_activeGradientRamp != null) _activeGradientRamp.UpdateTrackVisuals();
+                    return;
+                }
+                if (_activeGradientHandle == GradientHandleType.End)
+                {
+                    GradientRollerEngine.UpdateEndHandleFromDrag(_activeGradientLayer, _activeGradientPaint, canvasPt);
+                    InvalidateAndRefresh(_activeGradientLayer);
+                    if (_activeGradientRamp != null) _activeGradientRamp.UpdateTrackVisuals();
+                    return;
+                }
+                if (_activeGradientHandle == GradientHandleType.StopNode && _activeGradientStopIndex >= 0 && _activeGradientStopIndex < _activeGradientPaint.GradientStops.Count)
+                {
+                    Point p1, p2;
+                    List<Point> stops;
+                    if (GradientRollerEngine.GetGradientPoints(_activeGradientLayer, _activeGradientPaint, out p1, out p2, out stops))
+                    {
+                        double t = GradientRollerEngine.ProjectOntoSegment(canvasPt, p1, p2);
+                        _activeGradientPaint.GradientStops[_activeGradientStopIndex].Position = Math.Round(t, 3);
+                        InvalidateAndRefresh(_activeGradientLayer);
+                        if (_activeGradientRamp != null) _activeGradientRamp.UpdateTrackVisuals();
+                    }
+                    return;
+                }
             }
 
             // Vector Edit Mode: Dragging anchor node or tangent handle
@@ -3850,14 +5148,87 @@ namespace Kerf.UI
                 RefreshPropertyInspector();
             }
 
+            // Hover cursor for Figma-style Gradient Rollers & Handles (ONLY when editing gradient!)
+            if (_editingGradientPaint != null && _editingGradientLayer != null && _selectedLayers.Contains(_editingGradientLayer) && _activeTool == ToolType.Select && !_isTransforming && !_isPanning && !_isDrawingNew && !_isDraggingGradientHandle)
+            {
+                var gHit = GradientRollerEngine.HitTest(canvasPt, _editingGradientLayer, _editingGradientPaint, _zoomScale);
+                if (gHit.Type != GradientHandleType.None)
+                {
+                    _canvasHost.Cursor = Cursors.Hand;
+                    _lastMousePos = screenPt;
+                    return;
+                }
+                else if (_canvasHost.Cursor == Cursors.Hand && _activeTool == ToolType.Select)
+                {
+                    _canvasHost.Cursor = Cursors.Arrow;
+                }
+            }
+
             _lastMousePos = screenPt;
         }
 
         public void HandleCanvasMouseUp(Point screenPt, MouseButton button)
         {
+            if (button == MouseButton.Right)
+            {
+                if (_isPanning) _isPanning = false;
+                if (_isDrawingNew) { _isDrawingNew = false; _drawingNode = null; }
+                Point canvasPt = ScreenToCanvas(screenPt);
+                _lastRightClickCanvasPoint = canvasPt;
+                var hit = _sceneGraph.HitTest(canvasPt);
+                if (hit != null)
+                {
+                    if (!_selectedLayers.Contains(hit))
+                    {
+                        _selectedLayers.Clear();
+                        _selectedLayers.Add(hit);
+                        OnSelectionChanged();
+                        RefreshCanvas();
+                    }
+                    var cm = CreateLayerContextMenu(hit);
+                    cm.PlacementTarget = _canvasHost;
+                    cm.Placement = PlacementMode.MousePoint;
+                    cm.IsOpen = true;
+                }
+                else
+                {
+                    var cm = CreateCanvasContextMenu(canvasPt);
+                    cm.PlacementTarget = _canvasHost;
+                    cm.Placement = PlacementMode.MousePoint;
+                    cm.IsOpen = true;
+                }
+                return;
+            }
+
+            if (_isDraggingGradientHandle)
+            {
+                _isDraggingGradientHandle = false;
+                _activeGradientHandle = GradientHandleType.None;
+                if (_canvasHost != null && _canvasHost.IsMouseCaptured)
+                {
+                    _canvasHost.ReleaseMouseCapture();
+                }
+                if (_activeGradientPaint != null && _activeGradientPaint.GradientStops != null)
+                {
+                    _activeGradientPaint.GradientStops.Sort((a, b) => a.Position.CompareTo(b.Position));
+                }
+                if (_activeGradientLayer != null)
+                {
+                    InvalidateAndRefresh(_activeGradientLayer);
+                    RefreshPropertyInspector();
+                }
+                _activeGradientLayer = null;
+                _activeGradientPaint = null;
+            }
+
             if (_isPanning)
             {
                 _isPanning = false;
+                if (_canvasHost != null && _canvasHost.IsMouseCaptured)
+                {
+                    _canvasHost.ReleaseMouseCapture();
+                }
+                Cursor = (_activeTool == ToolType.Hand) ? Cursors.Hand : Cursors.Arrow;
             }
 
             if (_isMarqueeSelecting)
@@ -4073,16 +5444,62 @@ namespace Kerf.UI
 
         public void HandleCanvasMouseWheel(Point screenPt, int delta)
         {
-            double zoomFactor = (delta > 0) ? 1.15 : 0.85;
-            double newZoom = Math.Max(0.05, Math.Min(32.0, _zoomScale * zoomFactor));
+            bool isCtrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+            bool isShift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
 
-            // Centered zoom on mouse cursor
-            _panOffset.X = screenPt.X - (screenPt.X - _panOffset.X) * (newZoom / _zoomScale);
-            _panOffset.Y = screenPt.Y - (screenPt.Y - _panOffset.Y) * (newZoom / _zoomScale);
-            _zoomScale = newZoom;
+            if (isCtrl)
+            {
+                double zoomFactor = (delta > 0) ? 1.15 : 0.85;
+                double newZoom = Math.Max(0.05, Math.Min(32.0, _zoomScale * zoomFactor));
 
-            _zoomPercentBlock.Text = string.Format("{0:P0}", _zoomScale);
+                // Centered zoom on mouse cursor
+                _panOffset.X = screenPt.X - (screenPt.X - _panOffset.X) * (newZoom / _zoomScale);
+                _panOffset.Y = screenPt.Y - (screenPt.Y - _panOffset.Y) * (newZoom / _zoomScale);
+                _zoomScale = newZoom;
+
+                if (_zoomPercentBlock != null)
+                {
+                    _zoomPercentBlock.Text = string.Format("{0:P0}", _zoomScale);
+                }
+                RefreshCanvas();
+            }
+            else if (isShift)
+            {
+                // Shift + Wheel / Slide = Horizontal Pan
+                _panOffset.X += delta;
+                RefreshCanvas();
+            }
+            else
+            {
+                // Double finger slide / standard wheel = Smooth Vertical Pan
+                _panOffset.Y += delta;
+                RefreshCanvas();
+            }
+        }
+
+        public void HandleCanvasManipulationDelta(ManipulationDeltaEventArgs e)
+        {
+            if (e == null) return;
+            if (e.DeltaManipulation.Translation.X != 0 || e.DeltaManipulation.Translation.Y != 0)
+            {
+                _panOffset.X += e.DeltaManipulation.Translation.X;
+                _panOffset.Y += e.DeltaManipulation.Translation.Y;
+            }
+            if (e.DeltaManipulation.Scale.X != 1.0 && e.DeltaManipulation.Scale.X > 0)
+            {
+                double factor = e.DeltaManipulation.Scale.X;
+                double newZoom = Math.Max(0.05, Math.Min(32.0, _zoomScale * factor));
+                Point origin = e.ManipulationOrigin;
+                _panOffset.X = origin.X - (origin.X - _panOffset.X) * (newZoom / _zoomScale);
+                _panOffset.Y = origin.Y - (origin.Y - _panOffset.Y) * (newZoom / _zoomScale);
+                _zoomScale = newZoom;
+                if (_zoomPercentBlock != null)
+                {
+                    _zoomPercentBlock.Text = string.Format("{0:P0}", _zoomScale);
+                }
+            }
             RefreshCanvas();
+            e.Handled = true;
         }
 
         private void StartCreatingShape(ToolType tool, Point canvasPt)
@@ -4448,6 +5865,12 @@ namespace Kerf.UI
             {
                 RenderBezierNodesOverlay(dc, _selectedLayers[0].Geometry);
             }
+
+            // Figma-style Gradient On-Canvas Rollers & Handles (active ONLY when editing/selected from effects bar)
+            if (_editingGradientPaint != null && _editingGradientLayer != null && _selectedLayers.Contains(_editingGradientLayer))
+            {
+                GradientRollerEngine.RenderOverlay(dc, _editingGradientLayer, _editingGradientPaint, _zoomScale, _activeGradientStopIndex);
+            }
         }
 
         private void RenderVectorEditModeOverlay(DrawingContext dc, VectorGeometry geo)
@@ -4693,6 +6116,11 @@ namespace Kerf.UI
         {
             if (_canvasHost == null) return;
 
+            if (_renderer != null)
+            {
+                _renderer.CurrentPage = Document != null ? Document.GetActivePage() : null;
+            }
+
             // Invalidate viewport
             Rect viewport = new Rect(-_panOffset.X / _zoomScale, -_panOffset.Y / _zoomScale,
                                      _canvasHost.ActualWidth / _zoomScale, _canvasHost.ActualHeight / _zoomScale);
@@ -4711,6 +6139,11 @@ namespace Kerf.UI
 
         private void OnSelectionChanged()
         {
+            ColorPickerPopup.CloseActive();
+            if (_editingGradientLayer != null && !_selectedLayers.Contains(_editingGradientLayer))
+            {
+                ClearEditingGradient();
+            }
             _booleanToolbar.Visibility = (_selectedLayers.Count >= 2) ? Visibility.Visible : Visibility.Collapsed;
             RefreshCanvas();
             RefreshLayersList();
@@ -4986,35 +6419,500 @@ namespace Kerf.UI
             // Prevent cyclic hierarchy
             if (Kerf.Model.Page.IsDescendant(source, target)) return;
 
-            // Remove source from current parent
-            page.RemoveLayerEverywhere(source);
+            LayerNode oldParent;
+            var oldContainer = page.FindContainer(source, out oldParent);
+            if (oldContainer == null) oldContainer = page.Layers;
+            int oldIdx = oldContainer.IndexOf(source);
+            string oldParentId = oldParent != null ? oldParent.Id : null;
 
             if (position == DropPosition.Inside && (target.Type == ElementType.Frame || target.Type == ElementType.Group))
             {
-                source.ParentId = target.Id;
-                if (target.Children == null) target.Children = new List<LayerNode>();
-                target.Children.Add(source);
+                string newParentId = target.Id;
+                int newIdx = (target.Children != null) ? target.Children.Count : 0;
+                var cmd = new ReorderLayerCommand(page, source, oldParentId, oldIdx, newParentId, newIdx, () =>
+                {
+                    _sceneGraph.Synchronize(page);
+                    RefreshCanvas();
+                    RefreshLayersList();
+                });
+                History.Execute(cmd);
                 target.IsCollapsed = false;
             }
             else
             {
                 LayerNode targetParent;
-                var container = page.FindContainer(target, out targetParent);
-                if (container == null) container = page.Layers;
-                int targetIdx = container.IndexOf(target);
-                if (targetIdx < 0) targetIdx = container.Count;
+                var targetContainer = page.FindContainer(target, out targetParent);
+                if (targetContainer == null) targetContainer = page.Layers;
+                int targetIdx = targetContainer.IndexOf(target);
+                string targetParentId = targetParent != null ? targetParent.Id : null;
 
-                source.ParentId = targetParent != null ? targetParent.Id : null;
-                int insertIdx = (position == DropPosition.Before) ? targetIdx : targetIdx + 1;
-                if (insertIdx > container.Count) insertIdx = container.Count;
-                if (insertIdx < 0) insertIdx = 0;
-                container.Insert(insertIdx, source);
+                int newIdx;
+                bool isVisuallyAbove = (position == DropPosition.Before || position == DropPosition.Above);
+
+                if (isVisuallyAbove)
+                {
+                    // In UI, dropping on top half means visually ABOVE target in list, which is HIGHER z-index (after target in container).
+                    if (oldContainer == targetContainer && oldIdx >= 0)
+                    {
+                        newIdx = (oldIdx < targetIdx) ? targetIdx : targetIdx + 1;
+                    }
+                    else
+                    {
+                        newIdx = targetIdx + 1;
+                    }
+                }
+                else
+                {
+                    // In UI, dropping on bottom half means visually BELOW target in list, which is LOWER z-index (before target in container).
+                    if (oldContainer == targetContainer && oldIdx >= 0)
+                    {
+                        newIdx = (oldIdx < targetIdx) ? Math.Max(0, targetIdx - 1) : targetIdx;
+                    }
+                    else
+                    {
+                        newIdx = targetIdx;
+                    }
+                }
+
+                var cmd = new ReorderLayerCommand(page, source, oldParentId, oldIdx, targetParentId, newIdx, () =>
+                {
+                    _sceneGraph.Synchronize(page);
+                    RefreshCanvas();
+                    RefreshLayersList();
+                });
+                History.Execute(cmd);
             }
 
             _sceneGraph.Synchronize(page);
             RefreshCanvas();
             RefreshLayersList();
             History.MarkDirty();
+        }
+
+        public void FrameSelectedLayers()
+        {
+            if (_selectedLayers.Count == 0 || Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+
+            var bounds = TransformEngine.UnionBounds(_selectedLayers);
+            var first = _selectedLayers[0];
+            LayerNode parent;
+            var container = page.FindContainer(first, out parent);
+            if (container == null) container = page.Layers;
+            int insertIdx = container.IndexOf(first);
+            if (insertIdx < 0) insertIdx = container.Count;
+            string parentId = parent != null ? parent.Id : null;
+
+            int nextNum = page.GetAllLayersFlat().Count(l => l.Type == ElementType.Frame) + 1;
+
+            var frame = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                Name = "Frame " + nextNum,
+                Type = ElementType.Frame,
+                X = bounds.X,
+                Y = bounds.Y,
+                Width = Math.Max(20, bounds.Width),
+                Height = Math.Max(20, bounds.Height),
+                ClipContent = false,
+                Fills = new List<Paint> { Paint.Solid("#FFFFFF") },
+                Children = new List<LayerNode>()
+            };
+
+            var toFrame = _selectedLayers.ToArray();
+            var cmd = new FrameSelectionCommand(page, frame, toFrame, parentId, insertIdx, () =>
+            {
+                _sceneGraph.Synchronize(page);
+                RefreshCanvas();
+                RefreshLayersList();
+            });
+            History.Execute(cmd);
+
+            _selectedLayers.Clear();
+            _selectedLayers.Add(frame);
+            _sceneGraph.Synchronize(page);
+            OnSelectionChanged();
+            RefreshCanvas();
+            RefreshLayersList();
+        }
+
+        public void CreateComponentFromSelection()
+        {
+            if (_selectedLayers.Count == 0 || Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+
+            if (_selectedLayers.Count > 1)
+            {
+                FrameSelectedLayers();
+            }
+
+            if (_selectedLayers.Count == 1)
+            {
+                var node = _selectedLayers[0];
+                node.IsMasterComponent = true;
+                node.ComponentId = Guid.NewGuid().ToString().Substring(0, 8);
+                if (!node.Name.StartsWith("Component") && node.Name.StartsWith("Frame"))
+                {
+                    node.Name = "Component " + node.Name.Substring(5).Trim();
+                }
+                else if (!node.Name.Contains("Component"))
+                {
+                    node.Name = node.Name + " (Component)";
+                }
+                History.MarkDirty();
+                RefreshLayersList();
+                RefreshPropertyInspector();
+            }
+        }
+
+        public void CreateComponentInstance(LayerNode master = null)
+        {
+            if (master == null)
+            {
+                if (_selectedLayers.Count == 0) return;
+                master = _selectedLayers[0];
+            }
+
+            var page = Document.GetActivePage();
+            if (page == null) return;
+
+            if (!master.IsMasterComponent)
+            {
+                if (!string.IsNullOrEmpty(master.ComponentId))
+                {
+                    master = page.FindMasterComponent(master.ComponentId) ?? master;
+                }
+                else
+                {
+                    CreateComponentFromSelection();
+                    master = _selectedLayers[0];
+                }
+            }
+
+            var instance = master.Clone();
+            instance.Id = Guid.NewGuid().ToString().Substring(0, 8);
+            instance.Type = ElementType.ComponentInstance;
+            instance.IsMasterComponent = false;
+            instance.ComponentId = master.ComponentId;
+            instance.Name = master.Name;
+            instance.X = master.X + 40;
+            instance.Y = master.Y + 40;
+            if (instance.Type == ElementType.Path && instance.Geometry != null)
+            {
+                BezierVectorEngine.OffsetGeometry(instance.Geometry, 40, 40);
+            }
+            instance.ParentId = null;
+
+            page.Layers.Add(instance);
+            History.Execute(new AddLayerCommand(page, instance));
+
+            _selectedLayers.Clear();
+            _selectedLayers.Add(instance);
+            _sceneGraph.Synchronize(page);
+            OnSelectionChanged();
+            RefreshCanvas();
+            RefreshLayersList();
+        }
+
+        public void DetachComponentInstance(LayerNode instance)
+        {
+            if (instance == null) return;
+            instance.ComponentId = null;
+            instance.IsMasterComponent = false;
+            instance.Type = (instance.Children != null && instance.Children.Count > 0) ? ElementType.Frame : ElementType.Rectangle;
+            History.MarkDirty();
+            RefreshLayersList();
+            RefreshPropertyInspector();
+        }
+
+        public void ResetComponentOverrides(LayerNode instance)
+        {
+            if (instance == null || string.IsNullOrEmpty(instance.ComponentId) || Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+
+            var master = page.FindMasterComponent(instance.ComponentId);
+            if (master == null) return;
+
+            double curX = instance.X;
+            double curY = instance.Y;
+            var clone = master.Clone();
+
+            instance.Width = clone.Width;
+            instance.Height = clone.Height;
+            instance.CornerRadius = clone.CornerRadius;
+            instance.Opacity = clone.Opacity;
+            instance.Fills = clone.Fills;
+            instance.Strokes = clone.Strokes;
+            instance.Effects = clone.Effects;
+            instance.Typography = clone.Typography;
+            instance.AutoLayout = clone.AutoLayout;
+            instance.Children = clone.Children;
+            instance.X = curX;
+            instance.Y = curY;
+
+            _sceneGraph.InvalidateNode(instance.Id);
+            History.MarkDirty();
+            RefreshCanvas();
+            RefreshLayersList();
+            RefreshPropertyInspector();
+        }
+
+        public void GoToMasterComponent(string componentId)
+        {
+            if (string.IsNullOrEmpty(componentId) || Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+
+            var master = page.FindMasterComponent(componentId);
+            if (master != null)
+            {
+                _selectedLayers.Clear();
+                _selectedLayers.Add(master);
+                OnSelectionChanged();
+                ZoomToSelection();
+                RefreshCanvas();
+                RefreshLayersList();
+            }
+        }
+
+        public void AutoAlignSelectedLayers()
+        {
+            if (_selectedLayers.Count == 0 || Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+
+            var frame = AutoLayoutEngine.AutoAlignSelection(page, _selectedLayers);
+            if (frame != null)
+            {
+                _selectedLayers.Clear();
+                _selectedLayers.Add(frame);
+                _sceneGraph.Synchronize(page);
+                OnSelectionChanged();
+                RefreshCanvas();
+                RefreshLayersList();
+                RefreshPropertyInspector();
+                History.MarkDirty();
+            }
+        }
+
+        public void CopySelectedLayers()
+        {
+            if (_selectedLayers.Count == 0) return;
+            _clipboardLayers.Clear();
+            foreach (var l in _selectedLayers)
+            {
+                _clipboardLayers.Add(l.Clone());
+            }
+        }
+
+        public void CutSelectedLayers()
+        {
+            CopySelectedLayers();
+            DeleteSelectedLayers();
+        }
+
+        public void PasteLayers()
+        {
+            if (_clipboardLayers.Count == 0 || Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+
+            var pasted = new List<LayerNode>();
+            foreach (var orig in _clipboardLayers)
+            {
+                var clone = orig.Clone();
+                clone.X += 24;
+                clone.Y += 24;
+                if (clone.Type == ElementType.Path && clone.Geometry != null)
+                {
+                    BezierVectorEngine.OffsetGeometry(clone.Geometry, 24, 24);
+                }
+                clone.ParentId = null;
+                page.Layers.Add(clone);
+                pasted.Add(clone);
+            }
+
+            _selectedLayers.Clear();
+            _selectedLayers.AddRange(pasted);
+            History.Execute(new AddLayersCommand(page, pasted));
+            _sceneGraph.Synchronize(page);
+            OnSelectionChanged();
+            RefreshCanvas();
+            RefreshLayersList();
+        }
+
+        public void PasteLayersHere(Point canvasPt)
+        {
+            if (_clipboardLayers.Count == 0 || Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+
+            var bounds = TransformEngine.UnionBounds(_clipboardLayers);
+            double offsetX = canvasPt.X - bounds.X;
+            double offsetY = canvasPt.Y - bounds.Y;
+
+            var pasted = new List<LayerNode>();
+            foreach (var orig in _clipboardLayers)
+            {
+                var clone = orig.Clone();
+                clone.X += offsetX;
+                clone.Y += offsetY;
+                if (clone.Type == ElementType.Path && clone.Geometry != null)
+                {
+                    BezierVectorEngine.OffsetGeometry(clone.Geometry, offsetX, offsetY);
+                }
+                clone.ParentId = null;
+                page.Layers.Add(clone);
+                pasted.Add(clone);
+            }
+
+            _selectedLayers.Clear();
+            _selectedLayers.AddRange(pasted);
+            History.Execute(new AddLayersCommand(page, pasted));
+            _sceneGraph.Synchronize(page);
+            OnSelectionChanged();
+            RefreshCanvas();
+            RefreshLayersList();
+        }
+
+        public void ZoomTo100()
+        {
+            if (_canvasHost == null) return;
+            Point center = new Point(_canvasHost.ActualWidth / 2.0, _canvasHost.ActualHeight / 2.0);
+            double oldZoom = _zoomScale;
+            _zoomScale = 1.0;
+            _panOffset.X = center.X - (center.X - _panOffset.X) * (1.0 / oldZoom);
+            _panOffset.Y = center.Y - (center.Y - _panOffset.Y) * (1.0 / oldZoom);
+            if (_zoomPercentBlock != null) _zoomPercentBlock.Text = "100%";
+            RefreshCanvas();
+        }
+
+        public void ZoomToFit()
+        {
+            if (Document == null || _canvasHost == null) return;
+            var page = Document.GetActivePage();
+            if (page == null || page.Layers == null || page.Layers.Count == 0) return;
+
+            var all = page.GetAllLayersFlat().ToList();
+            if (all.Count == 0) return;
+            var bounds = TransformEngine.UnionBounds(all);
+            ZoomToBounds(bounds);
+        }
+
+        public void ZoomToSelection()
+        {
+            if (_selectedLayers == null || _selectedLayers.Count == 0)
+            {
+                ZoomToFit();
+                return;
+            }
+            var bounds = TransformEngine.UnionBounds(_selectedLayers);
+            ZoomToBounds(bounds);
+        }
+
+        private void ZoomToBounds(Rect bounds)
+        {
+            if (_canvasHost == null || bounds.Width <= 0 || bounds.Height <= 0) return;
+            double availW = Math.Max(100, _canvasHost.ActualWidth - 120);
+            double availH = Math.Max(100, _canvasHost.ActualHeight - 120);
+
+            double scaleX = availW / bounds.Width;
+            double scaleY = availH / bounds.Height;
+            double fitZoom = Math.Max(0.1, Math.Min(4.0, Math.Min(scaleX, scaleY)));
+
+            _zoomScale = fitZoom;
+            _panOffset.X = (_canvasHost.ActualWidth / 2.0) - (bounds.X + bounds.Width / 2.0) * fitZoom;
+            _panOffset.Y = (_canvasHost.ActualHeight / 2.0) - (bounds.Y + bounds.Height / 2.0) * fitZoom;
+
+            if (_zoomPercentBlock != null) _zoomPercentBlock.Text = string.Format("{0:P0}", _zoomScale);
+            RefreshCanvas();
+        }
+
+        public void ZoomIn()
+        {
+            if (_canvasHost == null) return;
+            HandleCanvasMouseWheel(new Point(_canvasHost.ActualWidth / 2.0, _canvasHost.ActualHeight / 2.0), 120);
+        }
+
+        public void ZoomOut()
+        {
+            if (_canvasHost == null) return;
+            HandleCanvasMouseWheel(new Point(_canvasHost.ActualWidth / 2.0, _canvasHost.ActualHeight / 2.0), -120);
+        }
+
+        public void FlipSelectedLayers(bool horizontal)
+        {
+            if (_selectedLayers.Count == 0) return;
+            foreach (var l in _selectedLayers)
+            {
+                if (horizontal) l.FlipH = !l.FlipH;
+                else l.FlipV = !l.FlipV;
+
+                if (l.Type == ElementType.Path && l.Geometry != null)
+                {
+                    var bounds = BezierVectorEngine.CalculateBounds(l.Geometry);
+                    double midX = bounds.X + bounds.Width / 2.0;
+                    double midY = bounds.Y + bounds.Height / 2.0;
+                    foreach (var node in l.Geometry.Nodes)
+                    {
+                        if (horizontal)
+                        {
+                            node.Anchor = new Point(2 * midX - node.Anchor.X, node.Anchor.Y);
+                            node.InHandle = new Point(2 * midX - node.InHandle.X, node.InHandle.Y);
+                            node.OutHandle = new Point(2 * midX - node.OutHandle.X, node.OutHandle.Y);
+                        }
+                        else
+                        {
+                            node.Anchor = new Point(node.Anchor.X, 2 * midY - node.Anchor.Y);
+                            node.InHandle = new Point(node.InHandle.X, 2 * midY - node.InHandle.Y);
+                            node.OutHandle = new Point(node.OutHandle.X, 2 * midY - node.OutHandle.Y);
+                        }
+                    }
+                }
+                _sceneGraph.InvalidateNode(l.Id);
+            }
+            History.MarkDirty();
+            RefreshCanvas();
+            RefreshPropertyInspector();
+        }
+
+        public void ToggleLockSelectedLayers()
+        {
+            if (_selectedLayers.Count == 0) return;
+            bool anyUnlocked = _selectedLayers.Any(l => !l.IsLocked);
+            foreach (var l in _selectedLayers)
+            {
+                l.IsLocked = anyUnlocked;
+            }
+            History.MarkDirty();
+            RefreshLayersList();
+        }
+
+        public void ToggleVisibilitySelectedLayers()
+        {
+            if (_selectedLayers.Count == 0) return;
+            bool anyVisible = _selectedLayers.Any(l => l.IsVisible);
+            foreach (var l in _selectedLayers)
+            {
+                l.IsVisible = !anyVisible;
+                InvalidateAndRefresh(l);
+            }
+            History.MarkDirty();
+            RefreshLayersList();
+        }
+
+        public void SelectAllLayers()
+        {
+            if (Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+            _selectedLayers.Clear();
+            _selectedLayers.AddRange(page.GetAllLayersFlat());
+            OnSelectionChanged();
+            RefreshCanvas();
         }
 
         public void StartRename(string layerId)
@@ -5114,10 +7012,22 @@ namespace Kerf.UI
         private void ShowExportDialog()
         {
             var page = Document.GetActivePage();
+            if (page == null) return;
+
+            string defaultName = Document.Name;
+            if (_selectedLayers != null && _selectedLayers.Count == 1 && !string.IsNullOrEmpty(_selectedLayers[0].Name))
+            {
+                defaultName = _selectedLayers[0].Name;
+            }
+            else if (_selectedLayers != null && _selectedLayers.Count > 1)
+            {
+                defaultName = _selectedLayers[0].Name + "_selection";
+            }
+
             var dlg = new SaveFileDialog
             {
                 Filter = "PNG Image (*.png)|*.png|Vector SVG (*.svg)|*.svg|JPEG Image (*.jpg)|*.jpg",
-                FileName = Document.Name,
+                FileName = defaultName,
                 InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
             };
 
@@ -5126,6 +7036,10 @@ namespace Kerf.UI
                 string ext = IOPath.GetExtension(dlg.FileName).ToLowerInvariant();
                 try
                 {
+                    var targets = (_selectedLayers != null && _selectedLayers.Count > 0)
+                        ? (IEnumerable<LayerNode>)_selectedLayers
+                        : null;
+
                     if (ext == ".svg")
                     {
                         string svg = SvgExporter.ExportPage(page);
@@ -5133,11 +7047,11 @@ namespace Kerf.UI
                     }
                     else if (ext == ".jpg" || ext == ".jpeg")
                     {
-                        RasterExporter.ExportToFile(page, _selectedLayers.FirstOrDefault(), dlg.FileName, RasterFormat.Jpeg, 2.0);
+                        HighQualityImageRenderer.ExportToFile(page, targets, dlg.FileName, RasterFormat.Jpeg, 2.0);
                     }
                     else
                     {
-                        RasterExporter.ExportToFile(page, _selectedLayers.FirstOrDefault(), dlg.FileName, RasterFormat.Png, 2.0);
+                        HighQualityImageRenderer.ExportToFile(page, targets, dlg.FileName, RasterFormat.Png, 2.0);
                     }
 
                     MessageBox.Show("Exported successfully to: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -5165,63 +7079,105 @@ namespace Kerf.UI
             bool isShift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
             bool isAlt = (Keyboard.Modifiers & ModifierKeys.Alt) == ModifierKeys.Alt || Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt);
 
-            if (isCtrl && !isShift)
+            // 1. Delete / Backspace instant layer deletion
+            if (!isCtrl && !isAlt && (e.Key == Key.Delete || e.Key == Key.Back))
+            {
+                if (_activeTool == ToolType.Pen && _activePenGeometry != null && _activePenGeometry.Nodes.Count > 0)
+                {
+                    UndoLastPenNode();
+                    e.Handled = true;
+                    return;
+                }
+                if (_isVectorEditing && _editingVectorNode != null && _editingVectorNode.Geometry != null)
+                {
+                    if (_selectedNodeIndex >= 0 && _selectedNodeIndex < _editingVectorNode.Geometry.Nodes.Count)
+                    {
+                        BezierVectorEngine.RemoveNode(_editingVectorNode.Geometry, _selectedNodeIndex);
+                        if (_editingVectorNode.Geometry.Nodes.Count == 0)
+                        {
+                            DeleteSelectedLayers();
+                            ExitVectorEditMode();
+                        }
+                        else
+                        {
+                            _selectedNodeIndex = Math.Min(_selectedNodeIndex, _editingVectorNode.Geometry.Nodes.Count - 1);
+                            InvalidateAndRefresh(_editingVectorNode);
+                            RefreshPropertyInspector();
+                        }
+                    }
+                    e.Handled = true;
+                    return;
+                }
+                DeleteSelectedLayers();
+                e.Handled = true;
+                return;
+            }
+
+            if (isCtrl && !isShift && !isAlt)
             {
                 if (e.Key == Key.Z) { Undo(); e.Handled = true; }
                 else if (e.Key == Key.Y) { Redo(); e.Handled = true; }
                 else if (e.Key == Key.S) { SaveCurrentDocument(); e.Handled = true; }
                 else if (e.Key == Key.D) { DuplicateSelectedLayers(); e.Handled = true; }
+                else if (e.Key == Key.E) { ShowExportDialog(); e.Handled = true; }
                 else if (e.Key == Key.G) { GroupSelectedLayers(); e.Handled = true; }
+                else if (e.Key == Key.C) { CopySelectedLayers(); e.Handled = true; }
+                else if (e.Key == Key.X) { CutSelectedLayers(); e.Handled = true; }
+                else if (e.Key == Key.V) { PasteLayers(); e.Handled = true; }
+                else if (e.Key == Key.A) { SelectAllLayers(); e.Handled = true; }
+                else if (e.Key == Key.R)
+                {
+                    if (_selectedLayers.Count == 1) { StartRename(_selectedLayers[0].Id); e.Handled = true; }
+                }
                 else if (e.Key == Key.OemCloseBrackets) { MoveSelectedLayerZ(true, false); e.Handled = true; }
                 else if (e.Key == Key.OemOpenBrackets) { MoveSelectedLayerZ(false, false); e.Handled = true; }
-                else if (e.Key == Key.A)
-                {
-                    var page = Document.GetActivePage();
-                    if (page != null)
-                    {
-                        _selectedLayers.Clear();
-                        _selectedLayers.AddRange(page.GetAllLayersFlat());
-                        OnSelectionChanged();
-                        RefreshCanvas();
-                        e.Handled = true;
-                    }
-                }
+                else if (e.Key == Key.OemPlus || e.Key == Key.Add) { ZoomIn(); e.Handled = true; }
+                else if (e.Key == Key.OemMinus || e.Key == Key.Subtract) { ZoomOut(); e.Handled = true; }
             }
-            else if (isCtrl && isShift)
+            else if (isCtrl && isShift && !isAlt)
             {
                 if (e.Key == Key.Z) { Redo(); e.Handled = true; }
+                else if (e.Key == Key.E) { ShowExportDialog(); e.Handled = true; }
                 else if (e.Key == Key.G) { UngroupSelectedLayers(); e.Handled = true; }
+                else if (e.Key == Key.V) { PasteLayersHere(_lastRightClickCanvasPoint); e.Handled = true; }
                 else if (e.Key == Key.OemCloseBrackets) { MoveSelectedLayerZ(true, true); e.Handled = true; }
                 else if (e.Key == Key.OemOpenBrackets) { MoveSelectedLayerZ(false, true); e.Handled = true; }
+                else if (e.Key == Key.H) { ToggleVisibilitySelectedLayers(); e.Handled = true; }
+                else if (e.Key == Key.L) { ToggleLockSelectedLayers(); e.Handled = true; }
             }
-            else if (!isCtrl && isAlt)
+            else if (isCtrl && isAlt && !isShift)
             {
-                // Adobe Illustrator Alt+Arrow / Alt+Shift+Arrow instant duplicate & nudge
-                double nudgeDist = isShift ? 10.0 : 1.0;
+                if (e.Key == Key.G) { FrameSelectedLayers(); e.Handled = true; } // Figma Frame Selection
+                else if (e.Key == Key.K) { CreateComponentFromSelection(); e.Handled = true; } // Figma Create Component
+                else if (e.Key == Key.B) { DetachComponentInstance(_selectedLayers.FirstOrDefault()); e.Handled = true; } // Figma Detach Instance
+            }
+            else if (!isCtrl && isShift && !isAlt)
+            {
+                if (e.Key == Key.A) { AutoAlignSelectedLayers(); e.Handled = true; } // Shift + A Auto align / Auto layout
+                else if (e.Key == Key.D0) { ZoomTo100(); e.Handled = true; } // Shift + 0 = 100%
+                else if (e.Key == Key.D1) { ZoomToFit(); e.Handled = true; } // Shift + 1 = Zoom to Fit
+                else if (e.Key == Key.D2) { ZoomToSelection(); e.Handled = true; } // Shift + 2 = Zoom to Selection
+                else if (e.Key == Key.H) { FlipSelectedLayers(true); e.Handled = true; } // Shift + H = Flip horizontal
+                else if (e.Key == Key.V) { FlipSelectedLayers(false); e.Handled = true; } // Shift + V = Flip vertical
+                else if (e.Key == Key.L) { SetActiveTool(ToolType.Arrow); e.Handled = true; }
+            }
+            else if (!isCtrl && isAlt && !isShift)
+            {
                 Key k = (e.Key == Key.System) ? e.SystemKey : e.Key;
-                if (k == Key.Left)
+                if (k == Key.A) { AlignSelected(0); e.Handled = true; }
+                else if (k == Key.H) { AlignSelected(1); e.Handled = true; }
+                else if (k == Key.D) { AlignSelected(2); e.Handled = true; }
+                else if (k == Key.W) { AlignSelected(3); e.Handled = true; }
+                else if (k == Key.V) { AlignSelected(4); e.Handled = true; }
+                else if (k == Key.S) { AlignSelected(5); e.Handled = true; }
+                else if (k == Key.Left || k == Key.Right || k == Key.Up || k == Key.Down)
                 {
-                    _lastTransformDelta = new Point(-nudgeDist, 0);
-                    DuplicateSelectedLayers();
-                    e.Handled = true;
-                }
-                else if (k == Key.Right)
-                {
-                    _lastTransformDelta = new Point(nudgeDist, 0);
-                    DuplicateSelectedLayers();
-                    e.Handled = true;
-                }
-                else if (k == Key.Up)
-                {
-                    _lastTransformDelta = new Point(0, -nudgeDist);
-                    DuplicateSelectedLayers();
-                    e.Handled = true;
-                }
-                else if (k == Key.Down)
-                {
-                    _lastTransformDelta = new Point(0, nudgeDist);
-                    DuplicateSelectedLayers();
-                    e.Handled = true;
+                    // Adobe Illustrator Alt+Arrow instant duplicate & nudge
+                    double nudgeDist = 1.0;
+                    if (k == Key.Left) { _lastTransformDelta = new Point(-nudgeDist, 0); DuplicateSelectedLayers(); e.Handled = true; }
+                    else if (k == Key.Right) { _lastTransformDelta = new Point(nudgeDist, 0); DuplicateSelectedLayers(); e.Handled = true; }
+                    else if (k == Key.Up) { _lastTransformDelta = new Point(0, -nudgeDist); DuplicateSelectedLayers(); e.Handled = true; }
+                    else if (k == Key.Down) { _lastTransformDelta = new Point(0, nudgeDist); DuplicateSelectedLayers(); e.Handled = true; }
                 }
             }
             else if (!isCtrl && !isAlt)
@@ -5249,6 +7205,13 @@ namespace Kerf.UI
                 }
                 else if (e.Key == Key.Escape)
                 {
+                    if (_editingGradientPaint != null)
+                    {
+                        ClearEditingGradient();
+                        RefreshPropertyInspector();
+                        e.Handled = true;
+                        return;
+                    }
                     if (_isVectorEditing)
                     {
                         ExitVectorEditMode();
@@ -5325,6 +7288,9 @@ namespace Kerf.UI
                     else if (e.Key == Key.B || e.Key == Key.P) { SetActiveTool(ToolType.Pen); }
                     else if (e.Key == Key.T) { SetActiveTool(ToolType.Text); }
                     else if (e.Key == Key.L) { SetActiveTool(ToolType.Line); }
+                    else if (e.Key == Key.Z) { ZoomIn(); e.Handled = true; }
+                    else if (e.Key == Key.OemPlus || e.Key == Key.Add) { ZoomIn(); e.Handled = true; }
+                    else if (e.Key == Key.OemMinus || e.Key == Key.Subtract) { ZoomOut(); e.Handled = true; }
                 }
             }
         }
@@ -5427,6 +7393,8 @@ namespace Kerf.UI
             MouseMove += (s, e) => _studio.HandleCanvasMouseMove(e.GetPosition(this));
             MouseUp += (s, e) => _studio.HandleCanvasMouseUp(e.GetPosition(this), e.ChangedButton);
             MouseWheel += (s, e) => _studio.HandleCanvasMouseWheel(e.GetPosition(this), e.Delta);
+            IsManipulationEnabled = true;
+            ManipulationDelta += (s, e) => _studio.HandleCanvasManipulationDelta(e);
             SizeChanged += (s, e) => _studio.RefreshCanvas();
         }
 

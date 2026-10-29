@@ -160,6 +160,58 @@ namespace Kerf.Engine
             int maxPoints,
             out int outCount);
 
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kerf_render_liquid_glass_v2")]
+        private static extern int NativeRenderLiquidGlassV2(
+            IntPtr bgPtr,
+            int bgW,
+            int bgH,
+            int bgStride,
+            IntPtr outPtr,
+            int outW,
+            int outH,
+            int outStride,
+            float marginX,
+            float marginY,
+            float radius,
+            float bezel,
+            float bezelHeight,
+            float glassThickness,
+            float frostSigma,
+            float dispersion,
+            float lightX,
+            float lightY,
+            float tintR,
+            float tintG,
+            float tintB,
+            float tintAlpha,
+            float specularIntensity,
+            int isBgra);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kerf_render_liquid_glass")]
+        private static extern int NativeRenderLiquidGlass(
+            IntPtr bgPtr,
+            int width,
+            int height,
+            int stride,
+            IntPtr outPtr,
+            float cx,
+            float cy,
+            float hw,
+            float hh,
+            float radius,
+            float bezel,
+            float bezelHeight,
+            float glassThickness,
+            float frostSigma,
+            float lightX,
+            float lightY,
+            float tintR,
+            float tintG,
+            float tintB,
+            float tintAlpha,
+            float specularIntensity,
+            int isBgra);
+
         #endregion
 
         private static bool _isAvailable = false;
@@ -477,6 +529,216 @@ namespace Kerf.Engine
 
             result.AddRange(inList);
             return result;
+        }
+
+        public static bool RenderLiquidGlassV2(
+            byte[] bgPixels,
+            int bgW,
+            int bgH,
+            int bgStride,
+            byte[] outPixels,
+            int outW,
+            int outH,
+            int outStride,
+            float marginX,
+            float marginY,
+            float radius,
+            float bezel,
+            float bezelHeight,
+            float glassThickness,
+            float frostSigma,
+            float dispersion,
+            float lightX,
+            float lightY,
+            float tintR,
+            float tintG,
+            float tintB,
+            float tintAlpha,
+            float specularIntensity,
+            bool isBgra)
+        {
+            if (bgPixels == null || outPixels == null || bgW <= 0 || bgH <= 0 || bgStride <= 0 || outW <= 0 || outH <= 0 || outStride <= 0)
+                return false;
+
+            if (!IsAvailable) return false;
+
+            try
+            {
+                GCHandle hBg = GCHandle.Alloc(bgPixels, GCHandleType.Pinned);
+                GCHandle hOut = GCHandle.Alloc(outPixels, GCHandleType.Pinned);
+                try
+                {
+                    int res = NativeRenderLiquidGlassV2(
+                        hBg.AddrOfPinnedObject(),
+                        bgW,
+                        bgH,
+                        bgStride,
+                        hOut.AddrOfPinnedObject(),
+                        outW,
+                        outH,
+                        outStride,
+                        marginX,
+                        marginY,
+                        radius,
+                        bezel,
+                        bezelHeight,
+                        glassThickness,
+                        frostSigma,
+                        dispersion,
+                        lightX,
+                        lightY,
+                        tintR,
+                        tintG,
+                        tintB,
+                        tintAlpha,
+                        specularIntensity,
+                        isBgra ? 1 : 0);
+                    return res == 1;
+                }
+                finally
+                {
+                    hBg.Free();
+                    hOut.Free();
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool RenderLiquidGlass(
+            byte[] bgPixels,
+            int width,
+            int height,
+            int stride,
+            byte[] outPixels,
+            float cx,
+            float cy,
+            float hw,
+            float hh,
+            float radius,
+            float bezel,
+            float bezelHeight,
+            float glassThickness,
+            float frostSigma,
+            float lightX,
+            float lightY,
+            float tintR,
+            float tintG,
+            float tintB,
+            float tintAlpha,
+            float specularIntensity,
+            bool isBgra)
+        {
+            if (bgPixels == null || outPixels == null || width <= 0 || height <= 0 || stride <= 0)
+                return false;
+
+            if (!IsAvailable) return false;
+
+            try
+            {
+                GCHandle hBg = GCHandle.Alloc(bgPixels, GCHandleType.Pinned);
+                GCHandle hOut = GCHandle.Alloc(outPixels, GCHandleType.Pinned);
+                try
+                {
+                    int res = NativeRenderLiquidGlass(
+                        hBg.AddrOfPinnedObject(),
+                        width,
+                        height,
+                        stride,
+                        hOut.AddrOfPinnedObject(),
+                        cx,
+                        cy,
+                        hw,
+                        hh,
+                        radius,
+                        bezel,
+                        bezelHeight,
+                        glassThickness,
+                        frostSigma,
+                        lightX,
+                        lightY,
+                        tintR,
+                        tintG,
+                        tintB,
+                        tintAlpha,
+                        specularIntensity,
+                        isBgra ? 1 : 0);
+                    return res == 1;
+                }
+                finally
+                {
+                    hBg.Free();
+                    hOut.Free();
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool RenderLiquidGlassRaw(
+            IntPtr bgPtr,
+            int width,
+            int height,
+            int stride,
+            IntPtr outPtr,
+            float cx,
+            float cy,
+            float hw,
+            float hh,
+            float radius,
+            float bezel,
+            float bezelHeight,
+            float glassThickness,
+            float frostSigma,
+            float lightX,
+            float lightY,
+            float tintR,
+            float tintG,
+            float tintB,
+            float tintAlpha,
+            float specularIntensity,
+            bool isBgra)
+        {
+            if (bgPtr == IntPtr.Zero || outPtr == IntPtr.Zero || width <= 0 || height <= 0 || stride <= 0)
+                return false;
+
+            if (!IsAvailable) return false;
+
+            try
+            {
+                int res = NativeRenderLiquidGlass(
+                    bgPtr,
+                    width,
+                    height,
+                    stride,
+                    outPtr,
+                    cx,
+                    cy,
+                    hw,
+                    hh,
+                    radius,
+                    bezel,
+                    bezelHeight,
+                    glassThickness,
+                    frostSigma,
+                    lightX,
+                    lightY,
+                    tintR,
+                    tintG,
+                    tintB,
+                    tintAlpha,
+                    specularIntensity,
+                    isBgra ? 1 : 0);
+                return res == 1;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

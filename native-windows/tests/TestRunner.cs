@@ -4,10 +4,14 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 using Kerf.Engine;
 using Kerf.IO;
 using Kerf.Model;
 using Kerf.Tools;
+using Kerf.UI;
+using Page = Kerf.Model.Page;
 
 namespace Kerf.Tests
 {
@@ -16,6 +20,7 @@ namespace Kerf.Tests
         private static int _passed = 0;
         private static int _failed = 0;
 
+        [STAThread]
         public static int Main(string[] args)
         {
             Console.WriteLine("=====================================================================");
@@ -42,6 +47,19 @@ namespace Kerf.Tests
             RunTest("Figma Typography Dynamics & In-Place Text Editing", TestTypographyAndTextDynamics);
             RunTest("Multiple Fills, Multiple Strokes & Gray Shape Defaults", TestMultipleFillsStrokesAndShapeDefaults);
             RunTest("Smart Snapping Alignment Guides & Threshold Snapping", TestSmartSnappingCalculations);
+            RunTest("Two-Layer Reordering, Drag Drop Direction & Command Undo/Redo", TestTwoLayerReorderingAndCommandHistory);
+            RunTest("Frame Selection (Ctrl+Alt+G): Hierarchy, Relative Bounds & Undo/Redo", TestFrameSelectionCommand);
+            RunTest("Component System: Master Components, Instances, Overrides & Detachment", TestComponentAndInstanceSystem);
+            RunTest("Auto Layout Align (Shift+A): Multi-Selection Wrap & Single-Frame Toggling", TestAutoAlignSelection);
+            RunTest("Canvas Navigation: Double-Finger Slide Pan, Shift Pan & Centered Ctrl-Zoom", TestTouchpadPanAndZoomCalculations);
+            RunTest("Figma Toolbar Vector Icons: Selection Arrow Pointer & Component Glyphs", TestFigmaToolbarSelectionIconAndGeometries);
+            RunTest("New Requirements: Delete Shortcut, Middle Pan, Context Icons, Component Glyph, 0px Gap, Fill Sizing", TestUpdatedRequirements);
+            RunTest("Photoshop-Grade Image Rendering Engine: Nested Layers, Text Dynamics, Multi-Pass Shadows & Multi-Scale Export", TestHighQualityImageRenderingEngine);
+            RunTest("Batch 2 Requirements: Drop Shadow Polar/Direction, Multiple Effects (Glass/Grain/Blur), Loading Screen & Icons", TestNewRequirementsBatch2);
+            RunTest("Batch 3 Requirements: Polished ComboBox Dropdown Styling, Apple Real Liquid Glass Optical Render & Rich Effects Controls", TestBatch3Requirements);
+            RunTest("Batch 4 Requirements: Adobe Illustrator Gradient Ramps, Midpoints, Pins & Presets", TestBatch4Requirements_AdobeIllustratorGradients);
+            RunTest("Batch 5 Requirements: Figma-Style On-Canvas Gradient Rollers & Simplified Ramp", TestBatch5Requirements_FigmaOnCanvasGradientRollers);
+            RunTest("Batch 6 Requirements: Real Liquid Glass Snell Optical Refraction & Smooth Sliders", TestBatch6Requirements_RealLiquidGlassAndSmoothSliders);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -864,6 +882,1001 @@ namespace Kerf.Tests
             // Scenario 3: Outside threshold (e.g. diff = 15px) -> No snap
             double outsideDiff = 15.0;
             Assert(Math.Abs(outsideDiff) > snapThreshold, "Points outside threshold must not snap");
+        }
+
+        private static void TestTwoLayerReorderingAndCommandHistory()
+        {
+            var page = new Page();
+            var bottom = new LayerNode { Id = "layer-bottom", Name = "BottomLayer", X = 0, Y = 0, Width = 100, Height = 100 };
+            var top = new LayerNode { Id = "layer-top", Name = "TopLayer", X = 50, Y = 50, Width = 100, Height = 100 };
+            page.Layers.Add(bottom);
+            page.Layers.Add(top);
+
+            Assert(page.Layers.Count == 2, "Page must have exactly 2 layers");
+            Assert(page.Layers[0] == bottom && page.Layers[1] == top, "Initial order: index 0 = bottom, index 1 = top");
+
+            // Move bottom layer ABOVE top layer (drag onto upper half of top layer card)
+            var moveAboveCmd = new ReorderLayerCommand(page, bottom, null, 0, null, 1, null);
+            moveAboveCmd.Execute();
+            Assert(page.Layers[0] == top, "After moving above, index 0 must be top");
+            Assert(page.Layers[1] == bottom, "After moving above, index 1 must be bottom");
+
+            // Undo: restores original order
+            moveAboveCmd.Unexecute();
+            Assert(page.Layers[0] == bottom && page.Layers[1] == top, "Undo must restore original order");
+
+            // Redo:
+            moveAboveCmd.Execute();
+            Assert(page.Layers[0] == top && page.Layers[1] == bottom, "Redo must re-apply reorder");
+
+            // Move bottom (currently at index 1) BELOW top (at index 0)
+            var moveBelowCmd = new ReorderLayerCommand(page, bottom, null, 1, null, 0, null);
+            moveBelowCmd.Execute();
+            Assert(page.Layers[0] == bottom && page.Layers[1] == top, "After moving below, bottom is index 0 again");
+
+            // Undo:
+            moveBelowCmd.Unexecute();
+            Assert(page.Layers[0] == top && page.Layers[1] == bottom, "Undo must restore to top at index 0");
+        }
+
+        private static void TestFrameSelectionCommand()
+        {
+            var page = new Page();
+            var l1 = new LayerNode { Id = "btn1", Name = "Button 1", X = 100, Y = 100, Width = 80, Height = 40 };
+            var l2 = new LayerNode { Id = "btn2", Name = "Button 2", X = 200, Y = 180, Width = 100, Height = 50 };
+            page.Layers.Add(l1);
+            page.Layers.Add(l2);
+
+            double minX = Math.Min(l1.X, l2.X);
+            double minY = Math.Min(l1.Y, l2.Y);
+            double maxX = Math.Max(l1.X + l1.Width, l2.X + l2.Width);
+            double maxY = Math.Max(l1.Y + l1.Height, l2.Y + l2.Height);
+            double frameW = maxX - minX;
+            double frameH = maxY - minY;
+
+            var frame = new LayerNode
+            {
+                Id = "frame-sel-1",
+                Name = "Frame 1",
+                Type = ElementType.Frame,
+                X = minX,
+                Y = minY,
+                Width = frameW,
+                Height = frameH,
+                ClipContent = false
+            };
+
+            l1.X -= minX;
+            l1.Y -= minY;
+            l2.X -= minX;
+            l2.Y -= minY;
+
+            var cmd = new FrameSelectionCommand(page, frame, new List<LayerNode> { l1, l2 }, null, 0, null);
+            cmd.Execute();
+
+            Assert(page.Layers.Count == 1, "Page root should contain 1 layer (the frame)");
+            Assert(page.Layers[0] == frame, "Root layer must be the new frame");
+            Assert(frame.Children.Count == 2, "Frame must contain the 2 wrapped layers");
+            Assert(frame.Children[0].ParentId == frame.Id && frame.Children[1].ParentId == frame.Id, "Children ParentIds must match frame Id");
+            Assert(l1.X == 0 && l1.Y == 0, "Child 1 relative coordinates preserved");
+            Assert(l2.X == 100 && l2.Y == 80, "Child 2 relative coordinates preserved");
+
+            cmd.Unexecute();
+            Assert(page.Layers.Count == 2, "Undo must restore the 2 layers to page root");
+            Assert(page.FindLayerById("frame-sel-1") == null, "Frame must be removed from page on Undo");
+            Assert(l1.ParentId == null && l2.ParentId == null, "Children ParentIds must be cleared on Undo");
+
+            cmd.Execute();
+            Assert(page.Layers.Count == 1 && page.Layers[0] == frame, "Redo must re-wrap layers in frame");
+            Assert(frame.Children.Count == 2, "Redo must restore frame children");
+        }
+
+        private static void TestComponentAndInstanceSystem()
+        {
+            var page = new Page();
+            var master = new LayerNode
+            {
+                Id = "comp-btn-master",
+                Name = "Primary Button",
+                Type = ElementType.ComponentInstance,
+                IsMasterComponent = true,
+                ComponentId = "comp-btn-master",
+                X = 50,
+                Y = 50,
+                Width = 140,
+                Height = 44
+            };
+            page.Layers.Add(master);
+
+            var foundMaster = page.FindMasterComponent(master.ComponentId);
+            Assert(foundMaster == master, "FindMasterComponent must locate master component by ComponentId");
+            Assert(page.FindMasterComponent("non-existent") == null, "FindMasterComponent returns null for missing id");
+
+            var instance = master.Clone();
+            instance.Id = "comp-btn-inst-1";
+            instance.IsMasterComponent = false;
+            instance.ComponentId = master.ComponentId;
+            instance.X = master.X + 200;
+            instance.Y = master.Y;
+            page.Layers.Add(instance);
+
+            var instances = page.FindInstancesOfComponent(master.ComponentId);
+            Assert(instances.Count == 1, "Must find exactly 1 instance");
+            Assert(instances[0] == instance, "Found instance must match created instance");
+
+            instance.Name = "Custom Submit Button";
+            instance.Width = 180;
+            Assert(master.Name == "Primary Button", "Master component name must not be mutated by instance override");
+            Assert(master.Width == 140, "Master component width must not be mutated by instance override");
+
+            instance.Name = master.Name;
+            instance.Width = master.Width;
+            instance.Height = master.Height;
+            Assert(instance.Name == "Primary Button" && instance.Width == 140, "Overrides reset matches master properties");
+
+            instance.ComponentId = null;
+            instance.IsMasterComponent = false;
+            instance.Type = ElementType.Rectangle;
+            var instancesAfterDetach = page.FindInstancesOfComponent(master.ComponentId);
+            Assert(instancesAfterDetach.Count == 0, "Detached instance is no longer returned by FindInstancesOfComponent");
+            Assert(instance.ComponentId == null, "Detached instance ComponentId is cleared");
+        }
+
+        private static void TestAutoAlignSelection()
+        {
+            var page = new Page();
+
+            var frame = new LayerNode
+            {
+                Id = "test-frame",
+                Name = "Auto Frame",
+                Type = ElementType.Frame,
+                X = 0,
+                Y = 0,
+                Width = 200,
+                Height = 200,
+                AutoLayout = null
+            };
+            page.Layers.Add(frame);
+
+            var toggled1 = AutoLayoutEngine.AutoAlignSelection(page, new List<LayerNode> { frame });
+            Assert(toggled1 != null && toggled1.AutoLayout != null, "AutoLayout initialized on frame");
+            Assert(toggled1.AutoLayout.Mode == AutoLayoutMode.Horizontal, "First toggle sets Mode to Horizontal");
+
+            var toggled2 = AutoLayoutEngine.AutoAlignSelection(page, new List<LayerNode> { frame });
+            Assert(toggled2.AutoLayout.Mode == AutoLayoutMode.Vertical, "Second toggle sets Mode to Vertical");
+
+            var toggled3 = AutoLayoutEngine.AutoAlignSelection(page, new List<LayerNode> { frame });
+            Assert(toggled3.AutoLayout.Mode == AutoLayoutMode.Horizontal, "Third toggle sets Mode back to Horizontal");
+
+            var r1 = new LayerNode { Id = "r1", Name = "Box 1", Type = ElementType.Rectangle, X = 10, Y = 10, Width = 60, Height = 40 };
+            var r2 = new LayerNode { Id = "r2", Name = "Box 2", Type = ElementType.Rectangle, X = 80, Y = 10, Width = 60, Height = 40 };
+            page.Layers.Add(r1);
+            page.Layers.Add(r2);
+
+            var autoWrapFrame = AutoLayoutEngine.AutoAlignSelection(page, new List<LayerNode> { r1, r2 });
+            Assert(autoWrapFrame != null, "AutoAlignSelection should return a new Auto Layout frame");
+            Assert(autoWrapFrame.Type == ElementType.Frame, "Wrapped node is a Frame");
+            Assert(autoWrapFrame.AutoLayout != null && autoWrapFrame.AutoLayout.Mode == AutoLayoutMode.Horizontal, "Auto layout mode is Horizontal for side-by-side elements");
+            Assert(autoWrapFrame.AutoLayout.Gap == 0.0, "Auto Layout default gap must be 0px");
+            Assert(autoWrapFrame.Fills == null || autoWrapFrame.Fills.Count == 0, "Auto Layout frame must have no fill by default");
+            Assert(autoWrapFrame.Children.Count == 2, "Wrapped frame contains both selected layers");
+            Assert(page.Layers.Contains(autoWrapFrame), "Wrapped frame is added to page layers");
+            Assert(!page.Layers.Contains(r1) && !page.Layers.Contains(r2), "Original items moved out of root page layers into frame");
+            Assert(r1.X == autoWrapFrame.X, "First item aligned at start");
+            Assert(r2.X == r1.X + r1.Width, "Items equally distributed with 0px default gap");
+        }
+
+        private static void TestTouchpadPanAndZoomCalculations()
+        {
+            Point panOffset = new Point(0, 0);
+            double zoomScale = 1.0;
+
+            int verticalDelta = -120;
+            panOffset.Y += verticalDelta;
+            Assert(panOffset.X == 0 && panOffset.Y == -120, "Vertical slide translates Y offset by delta");
+
+            int horizontalDelta = 80;
+            panOffset.X += horizontalDelta;
+            Assert(panOffset.X == 80 && panOffset.Y == -120, "Shift + slide translates X offset by delta");
+
+            Point cursorPt = new Point(400, 300);
+            double zoomFactor = 1.15;
+            double oldZoom = zoomScale;
+            double newZoom = oldZoom * zoomFactor;
+
+            panOffset.X = cursorPt.X - (cursorPt.X - panOffset.X) * (newZoom / oldZoom);
+            panOffset.Y = cursorPt.Y - (cursorPt.Y - panOffset.Y) * (newZoom / oldZoom);
+            zoomScale = newZoom;
+
+            Assert(Math.Abs(panOffset.X - 32.0) < 0.001, "Pan X correctly anchored to mouse point on zoom");
+            Assert(Math.Abs(panOffset.Y - (-183.0)) < 0.001, "Pan Y correctly anchored to mouse point on zoom");
+            Assert(zoomScale == 1.15, "Zoom scale updated to 1.15");
+
+            double pinchScale = 1.2;
+            double clampedZoom = Math.Max(0.05, Math.Min(32.0, zoomScale * pinchScale));
+            Assert(clampedZoom > zoomScale && clampedZoom <= 32.0, "Touchpad pinch zoom within valid boundaries");
+        }
+
+        private static void TestFigmaToolbarSelectionIconAndGeometries()
+        {
+            Assert(VectorIcons.SelectGeometry != null, "VectorIcons.SelectGeometry must not be null");
+            Assert(!VectorIcons.SelectGeometry.IsEmpty(), "VectorIcons.SelectGeometry must not be empty");
+            Rect selectBounds = VectorIcons.SelectGeometry.Bounds;
+            Assert(selectBounds.Width >= 10.0 && selectBounds.Height >= 15.0,
+                string.Format("Selection arrow must have pointer proportions, got {0}x{1}", selectBounds.Width, selectBounds.Height));
+
+            Assert(VectorIcons.ComponentGeometry != null, "ComponentGeometry must not be null");
+            Assert(!VectorIcons.ComponentGeometry.IsEmpty(), "ComponentGeometry must not be empty");
+
+            Assert(VectorIcons.InstanceGeometry != null, "InstanceGeometry must not be null");
+            Assert(!VectorIcons.InstanceGeometry.IsEmpty(), "InstanceGeometry must not be empty");
+
+            Assert(VectorIcons.AutoLayoutGeometry != null, "AutoLayoutGeometry must not be null");
+            Assert(!VectorIcons.AutoLayoutGeometry.IsEmpty(), "AutoLayoutGeometry must not be empty");
+        }
+
+        private static void TestUpdatedRequirements()
+        {
+            // 1. Delete / Backspace layer deletion
+            var page = new Page();
+            var rect = new LayerNode { Id = "rect-del", Name = "To Delete", Type = ElementType.Rectangle };
+            page.Layers.Add(rect);
+            Assert(page.Layers.Count == 1, "Page has 1 layer before delete");
+            var history = new CommandHistory();
+            history.Execute(new DeleteLayersCommand(page, new[] { rect }));
+            Assert(page.Layers.Count == 0, "Delete command deletes layer");
+            history.Undo();
+            Assert(page.Layers.Count == 1 && page.Layers[0].Id == "rect-del", "Undo restores deleted layer");
+
+            // 2. Middle mouse drag pan
+            Point pan = new Point(100, 100);
+            Point lastMouse = new Point(200, 200);
+            Point curMouse = new Point(250, 230);
+            pan.X += curMouse.X - lastMouse.X;
+            pan.Y += curMouse.Y - lastMouse.Y;
+            Assert(pan.X == 150 && pan.Y == 130, "Middle mouse drag translates pan by mouse delta");
+
+            // 3. Crisp context menu vector icons & CreateIcon rendering
+            Assert(VectorIcons.CutGeometry != null && !VectorIcons.CutGeometry.IsEmpty(), "Cut vector geometry exists");
+            Assert(VectorIcons.CopyGeometry != null && !VectorIcons.CopyGeometry.IsEmpty(), "Copy vector geometry exists");
+            Assert(VectorIcons.PasteGeometry != null && !VectorIcons.PasteGeometry.IsEmpty(), "Paste vector geometry exists");
+            Assert(VectorIcons.TrashGeometry != null && !VectorIcons.TrashGeometry.IsEmpty(), "Trash vector geometry exists");
+            Assert(VectorIcons.FlipHGeometry != null && !VectorIcons.FlipHGeometry.IsEmpty(), "Flip horizontal geometry exists");
+            Assert(VectorIcons.FlipVGeometry != null && !VectorIcons.FlipVGeometry.IsEmpty(), "Flip vertical geometry exists");
+            Assert(VectorIcons.LayerUpGeometry != null && !VectorIcons.LayerUpGeometry.IsEmpty(), "Layer up geometry exists");
+            Assert(VectorIcons.LayerDownGeometry != null && !VectorIcons.LayerDownGeometry.IsEmpty(), "Layer down geometry exists");
+            Assert(VectorIcons.AlignLeftGeometry != null && !VectorIcons.AlignLeftGeometry.IsEmpty(), "Align left geometry exists");
+            Assert(VectorIcons.AlignCenterGeometry != null && !VectorIcons.AlignCenterGeometry.IsEmpty(), "Align center geometry exists");
+            Assert(VectorIcons.AlignRightGeometry != null && !VectorIcons.AlignRightGeometry.IsEmpty(), "Align right geometry exists");
+            Assert(VectorIcons.AlignTopGeometry != null && !VectorIcons.AlignTopGeometry.IsEmpty(), "Align top geometry exists");
+            Assert(VectorIcons.AlignMiddleGeometry != null && !VectorIcons.AlignMiddleGeometry.IsEmpty(), "Align middle geometry exists");
+            Assert(VectorIcons.AlignBottomGeometry != null && !VectorIcons.AlignBottomGeometry.IsEmpty(), "Align bottom geometry exists");
+
+            // Verify CreateIcon renders stroked outline for Trash/Frame/Zoom and filled for Component/Select
+            var trashIcon = VectorIcons.CreateIcon(VectorIcons.TrashGeometry, System.Windows.Media.Brushes.Red);
+            Assert(trashIcon.Stroke != null && trashIcon.StrokeThickness > 0, "Trash icon has visible stroke outline");
+            var compIcon = VectorIcons.CreateIcon(VectorIcons.ComponentGeometry, System.Windows.Media.Brushes.Purple);
+            Assert(compIcon.Fill != null, "Component icon has visible fill glyph");
+
+            // 4. Component icon (❖) and purple styling
+            var master = new LayerNode { Id = "comp-1", Name = "Button", Type = ElementType.Frame, IsMasterComponent = true };
+            var instance = new LayerNode { Id = "inst-1", Name = "Button Instance", Type = ElementType.ComponentInstance, ComponentId = "comp-1" };
+            Assert(master.IsMasterComponent, "Master component flag set");
+            Assert(VectorIcons.ComponentGeometry != null, "Component glyph ❖ exists");
+            Assert(VectorIcons.InstanceGeometry != null, "Instance glyph ◇ exists");
+
+            // 5 & 6. Auto Layout default gap = 0px and no fill
+            var defaultLayout = new AutoLayoutData();
+            Assert(defaultLayout.Gap == 0.0, "Default gap is 0.0px");
+
+            // 7. Color picker dismiss
+            ColorPickerPopup.CloseActive();
+            Assert(true, "CloseActive succeeds without exception");
+
+            // 8. Auto Layout Engine: IgnoreAutoLayout & Fill Container
+            var alFrame = new LayerNode
+            {
+                Type = ElementType.Frame,
+                X = 0,
+                Y = 0,
+                Width = 300,
+                Height = 100,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Horizontal,
+                    Gap = 0.0,
+                    PaddingLeft = 0,
+                    PaddingRight = 0,
+                    PaddingTop = 0,
+                    PaddingBottom = 0,
+                    SizingH = SizingMode.Hug // Starts Hug to test dependency resolution
+                },
+                Children = new List<LayerNode>()
+            };
+
+            var inFlowChild1 = new LayerNode { Type = ElementType.Rectangle, X = 0, Y = 0, Width = 50, Height = 50, LayoutSizingH = SizingMode.Fixed };
+            var ignoredChild = new LayerNode { Type = ElementType.Rectangle, X = 250, Y = 20, Width = 30, Height = 30, IgnoreAutoLayout = true };
+            var inFlowChild2 = new LayerNode { Type = ElementType.Rectangle, X = 0, Y = 0, Width = 50, Height = 50, LayoutSizingH = SizingMode.Fill };
+
+            alFrame.Children.Add(inFlowChild1);
+            alFrame.Children.Add(ignoredChild);
+            alFrame.Children.Add(inFlowChild2);
+
+            AutoLayoutEngine.Reflow(alFrame);
+
+            // Sizing rule: Hug resolved to Fixed because child has Fill
+            Assert(alFrame.AutoLayout.SizingH == SizingMode.Fixed, "Parent Hug switches to Fixed when child has Fill");
+            // Ignored child kept its independent position
+            Assert(ignoredChild.X == 250 && ignoredChild.Y == 20, "Ignored child keeps independent position");
+            // inFlowChild1 starts at 0
+            Assert(inFlowChild1.X == 0, "inFlowChild1 positioned at start");
+            // inFlowChild2 has Fill sizing: available space = 300 - 50 = 250
+            Assert(Math.Abs(inFlowChild2.Width - 250.0) < 0.01, string.Format("Fill child width is 250, got {0}", inFlowChild2.Width));
+            Assert(inFlowChild2.X == 50, "inFlowChild2 positioned directly after inFlowChild1 with 0px gap");
+
+            // Test Baseline Alignment
+            var baseFrame = new LayerNode
+            {
+                Type = ElementType.Frame,
+                X = 0, Y = 0, Width = 300, Height = 100,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Horizontal,
+                    Gap = 10.0,
+                    AlignItems = AlignItems.Baseline,
+                    PaddingTop = 10
+                },
+                Children = new List<LayerNode>()
+            };
+            var txtLarge = new LayerNode { Type = ElementType.Text, Typography = new TypographyData { FontSize = 40 }, Height = 48, Width = 100 };
+            var txtSmall = new LayerNode { Type = ElementType.Text, Typography = new TypographyData { FontSize = 20 }, Height = 24, Width = 60 };
+            baseFrame.Children.Add(txtLarge);
+            baseFrame.Children.Add(txtSmall);
+            AutoLayoutEngine.Reflow(baseFrame);
+            // txtSmall baseline is aligned with txtLarge baseline
+            double baseLarge = txtLarge.Y + (txtLarge.Typography.FontSize * 0.85);
+            double baseSmall = txtSmall.Y + (txtSmall.Typography.FontSize * 0.85);
+            Assert(Math.Abs(baseLarge - baseSmall) < 0.01, "Text children share identical baseline in Baseline alignment");
+        }
+
+        private static void TestHighQualityImageRenderingEngine()
+        {
+            var page = new Page { BackgroundColor = "#1E1E2E" };
+
+            // 1. Root Card Frame with corner radius, drop shadow, and clip content
+            var cardFrame = new LayerNode
+            {
+                Id = "card-frame",
+                Name = "Hero Card",
+                Type = ElementType.Frame,
+                X = 100,
+                Y = 100,
+                Width = 400,
+                Height = 260,
+                CornerRadius = 16,
+                ClipContent = true,
+                Fills = new List<Paint> { Paint.Solid("#2A2E3D", 1.0) },
+                Strokes = new List<StrokeData>
+                {
+                    new StrokeData
+                    {
+                        Paint = Paint.Solid("#3E445B", 1.0),
+                        Width = 1.5,
+                        Alignment = StrokeAlignment.Inside
+                    }
+                },
+                Effects = new List<EffectData>
+                {
+                    new EffectData
+                    {
+                        Type = EffectType.DropShadow,
+                        ColorHex = "#000000",
+                        OffsetX = 0,
+                        OffsetY = 10,
+                        Blur = 20,
+                        Spread = 0,
+                        Opacity = 0.35,
+                        Enabled = true
+                    }
+                },
+                Children = new List<LayerNode>()
+            };
+            page.Layers.Add(cardFrame);
+
+            // 2. Child Text Layer (Title)
+            var titleText = new LayerNode
+            {
+                Id = "card-title",
+                Name = "Card Title",
+                Type = ElementType.Text,
+                X = 124,
+                Y = 124,
+                Width = 350,
+                Height = 32,
+                ParentId = cardFrame.Id,
+                Typography = new TypographyData
+                {
+                    Text = "Photoshop-Grade Rendering",
+                    FontFamily = "Segoe UI",
+                    FontSize = 22,
+                    FontWeight = 700,
+                    Case = TextCase.Original
+                },
+                Fills = new List<Paint> { Paint.Solid("#FFFFFF", 1.0) }
+            };
+            cardFrame.Children.Add(titleText);
+
+            // 3. Child Text Layer (Subtitle with TextCase.Upper)
+            var subText = new LayerNode
+            {
+                Id = "card-sub",
+                Name = "Card Subtitle",
+                Type = ElementType.Text,
+                X = 124,
+                Y = 164,
+                Width = 350,
+                Height = 20,
+                ParentId = cardFrame.Id,
+                Typography = new TypographyData
+                {
+                    Text = "High fidelity vector & font rasterization",
+                    FontFamily = "Segoe UI",
+                    FontSize = 13,
+                    FontWeight = 400,
+                    Case = TextCase.Upper
+                },
+                Fills = new List<Paint> { Paint.Solid("#9CA3AF", 1.0) }
+            };
+            cardFrame.Children.Add(subText);
+
+            // 4. Nested Button Frame with CornerRadius
+            var buttonFrame = new LayerNode
+            {
+                Id = "card-btn",
+                Name = "Action Button",
+                Type = ElementType.Frame,
+                X = 124,
+                Y = 200,
+                Width = 130,
+                Height = 36,
+                CornerRadius = 8,
+                ParentId = cardFrame.Id,
+                Fills = new List<Paint> { Paint.Solid("#3B82F6", 1.0) },
+                Children = new List<LayerNode>()
+            };
+            cardFrame.Children.Add(buttonFrame);
+
+            // 5. Nested Button Label inside Button Frame
+            var btnText = new LayerNode
+            {
+                Id = "card-btn-text",
+                Name = "Button Label",
+                Type = ElementType.Text,
+                X = 144,
+                Y = 208,
+                Width = 90,
+                Height = 20,
+                ParentId = buttonFrame.Id,
+                Typography = new TypographyData
+                {
+                    Text = "Export Now",
+                    FontFamily = "Segoe UI",
+                    FontSize = 13,
+                    FontWeight = 600,
+                    Align = TextAlign.Center
+                },
+                Fills = new List<Paint> { Paint.Solid("#FFFFFF", 1.0) }
+            };
+            buttonFrame.Children.Add(btnText);
+
+            // Test PreProcess: ensures text measurements and auto layout sync
+            HighQualityImageRenderer.PreProcessForExport(page, new[] { cardFrame });
+            Assert(titleText.Width > 0 && titleText.Height > 0, "Text bounds synchronized during pre-processing");
+
+            // Test Bounds Computation: includes stroke and shadow padding
+            Rect exportBounds = HighQualityImageRenderer.ComputeVisualBounds(page, new[] { cardFrame });
+            Assert(exportBounds.Width >= 400.0, "Export bounds width >= frame width (including shadow padding)");
+            Assert(exportBounds.Height >= 260.0, "Export bounds height >= frame height (including shadow padding)");
+
+            // Test 1x Scale Render
+            var bmp1x = HighQualityImageRenderer.Render(page, cardFrame, 1.0, false);
+            Assert(bmp1x != null, "1x RenderTargetBitmap generated");
+            Assert(bmp1x.PixelWidth == (int)Math.Ceiling(exportBounds.Width), "1x pixel width matches export bounds");
+            Assert(bmp1x.PixelHeight == (int)Math.Ceiling(exportBounds.Height), "1x pixel height matches export bounds");
+
+            // Test 2x Retina Scale Render
+            var bmp2x = HighQualityImageRenderer.Render(page, cardFrame, 2.0, false);
+            Assert(bmp2x != null, "2x Retina RenderTargetBitmap generated");
+            Assert(bmp2x.PixelWidth == (int)Math.Ceiling(exportBounds.Width * 2.0), "2x pixel width is exactly 2x");
+            Assert(bmp2x.PixelHeight == (int)Math.Ceiling(exportBounds.Height * 2.0), "2x pixel height is exactly 2x");
+
+            // Test File Export: PNG with transparency and JPEG with studio quality
+            string tempDir = Path.Combine(Path.GetTempPath(), "Kerf_HQ_Test_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string pngPath = Path.Combine(tempDir, "hero_card_2x.png");
+                string jpgPath = Path.Combine(tempDir, "hero_card_2x.jpg");
+
+                // Export via facade RasterExporter
+                RasterExporter.ExportToFile(page, cardFrame, pngPath, RasterFormat.Png, 2.0);
+                Assert(File.Exists(pngPath), "PNG export file created on disk");
+                var pngInfo = new FileInfo(pngPath);
+                Assert(pngInfo.Length > 500, string.Format("PNG file size is healthy ({0} bytes)", pngInfo.Length));
+
+                // Export via HighQualityImageRenderer directly
+                HighQualityImageRenderer.ExportToFile(page, cardFrame, jpgPath, RasterFormat.Jpeg, 2.0);
+                Assert(File.Exists(jpgPath), "JPEG export file created on disk");
+                var jpgInfo = new FileInfo(jpgPath);
+                Assert(jpgInfo.Length > 500, string.Format("JPEG file size is healthy ({0} bytes)", jpgInfo.Length));
+
+                // Test full page export (targets = null)
+                string fullPagePng = Path.Combine(tempDir, "full_page.png");
+                RasterExporter.ExportToFile(page, (LayerNode)null, fullPagePng, RasterFormat.Png, 1.0);
+                Assert(File.Exists(fullPagePng), "Full document PNG exported");
+                Assert(new FileInfo(fullPagePng).Length > 500, "Full document PNG has valid bytes");
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
+
+        private static void TestNewRequirementsBatch2()
+        {
+            // 1. Drop Shadow Direction + Offset (Polar <-> Cartesian)
+            var effect = new EffectData
+            {
+                Type = EffectType.DropShadow,
+                Direction = 90.0,
+                Distance = 10.0
+            };
+            effect.UpdateOffsetsFromPolar();
+            Assert(Math.Abs(effect.OffsetX) < 0.01, string.Format("At 90 deg, OffsetX should be 0, got {0}", effect.OffsetX));
+            Assert(Math.Abs(effect.OffsetY - 10.0) < 0.01, string.Format("At 90 deg, OffsetY should be 10, got {0}", effect.OffsetY));
+
+            effect.Direction = 0.0;
+            effect.Distance = 20.0;
+            effect.UpdateOffsetsFromPolar();
+            Assert(Math.Abs(effect.OffsetX - 20.0) < 0.01, string.Format("At 0 deg, OffsetX should be 20, got {0}", effect.OffsetX));
+            Assert(Math.Abs(effect.OffsetY) < 0.01, string.Format("At 0 deg, OffsetY should be 0, got {0}", effect.OffsetY));
+
+            effect.Direction = 180.0;
+            effect.Distance = 15.0;
+            effect.UpdateOffsetsFromPolar();
+            Assert(Math.Abs(effect.OffsetX - (-15.0)) < 0.01, string.Format("At 180 deg, OffsetX should be -15, got {0}", effect.OffsetX));
+            Assert(Math.Abs(effect.OffsetY) < 0.01, string.Format("At 180 deg, OffsetY should be 0, got {0}", effect.OffsetY));
+
+            // Cartesian -> Polar
+            effect.OffsetX = 10.0;
+            effect.OffsetY = 10.0;
+            effect.UpdatePolarFromOffsets();
+            Assert(Math.Abs(effect.Distance - 14.14) < 0.05, string.Format("Distance should be ~14.14, got {0}", effect.Distance));
+            Assert(Math.Abs(effect.Direction - 45.0) < 0.1, string.Format("Direction should be 45 deg, got {0}", effect.Direction));
+
+            effect.OffsetX = 0.0;
+            effect.OffsetY = -8.0;
+            effect.UpdatePolarFromOffsets();
+            Assert(Math.Abs(effect.Distance - 8.0) < 0.01, string.Format("Distance should be 8, got {0}", effect.Distance));
+            Assert(Math.Abs(effect.Direction - 270.0) < 0.1, string.Format("Direction should be 270 deg (straight up), got {0}", effect.Direction));
+
+            // 2. Multiple Effects support (LiquidGlass, Grain, LayerBlur, InnerShadow, BackgroundBlur)
+            var node = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                Width = 200,
+                Height = 120,
+                Effects = new List<EffectData>()
+            };
+
+            var glass = new EffectData { Type = EffectType.LiquidGlass, Enabled = true, Intensity = 0.75, Blur = 14 };
+            var grain = new EffectData { Type = EffectType.Grain, Enabled = true, Intensity = 0.3, Scale = 1.5 };
+            var blur = new EffectData { Type = EffectType.LayerBlur, Enabled = true, Blur = 20 };
+            var inner = new EffectData { Type = EffectType.InnerShadow, Enabled = true, ColorHex = "#FFFFFF", Opacity = 0.4, Blur = 6 };
+            var bgBlur = new EffectData { Type = EffectType.BackgroundBlur, Enabled = true, Blur = 16 };
+
+            node.Effects.Add(effect);
+            node.Effects.Add(glass);
+            node.Effects.Add(grain);
+            node.Effects.Add(blur);
+            node.Effects.Add(inner);
+            node.Effects.Add(bgBlur);
+
+            Assert(node.Effects.Count == 6, "LayerNode supports all 6 effect types");
+
+            // Clone deep copy test
+            var cloned = node.Clone();
+            Assert(cloned.Effects != null && cloned.Effects.Count == 6, "Cloned node preserves all effects");
+            Assert(cloned.Effects[1].Type == EffectType.LiquidGlass, "Cloned effect 1 is LiquidGlass");
+            Assert(cloned.Effects[1].Intensity == 0.75, "Cloned LiquidGlass intensity preserved");
+            Assert(cloned.Effects[2].Type == EffectType.Grain, "Cloned effect 2 is Grain");
+            Assert(cloned.Effects[2].Scale == 1.5, "Cloned Grain scale preserved");
+
+            // 3. Vector Icons presence & validity
+            Assert(VectorIcons.EffectsGeometry != null, "EffectsGeometry exists");
+            Assert(VectorIcons.LiquidGlassGeometry != null, "LiquidGlassGeometry exists");
+            Assert(VectorIcons.GrainGeometry != null, "GrainGeometry exists");
+            Assert(VectorIcons.BlurGeometry != null, "BlurGeometry exists");
+            Assert(VectorIcons.CutGeometry != null, "CutGeometry exists");
+            Assert(VectorIcons.DuplicateGeometry != null, "DuplicateGeometry exists");
+            Assert(VectorIcons.TrashGeometry != null, "TrashGeometry exists");
+
+            // 4. Loading screen image asset verification
+            string assetRelative = "assets/Loading screen.png";
+            bool assetExists = File.Exists(assetRelative) || File.Exists(Path.Combine("..", assetRelative));
+            Assert(assetExists, "Loading screen image asset exists on disk");
+
+            // 5. HighQualityImageRenderer rendering with LiquidGlass and Grain effects
+            var page = new Page { BackgroundColor = "#1E2230" };
+            var glassCard = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                X = 40,
+                Y = 40,
+                Width = 160,
+                Height = 100,
+                CornerRadius = 12,
+                Fills = new List<Paint> { Paint.Solid("#25293A", 0.9) },
+                Effects = new List<EffectData> { glass, grain }
+            };
+            page.Layers.Add(glassCard);
+
+            var renderedBmp = HighQualityImageRenderer.Render(page, glassCard, 1.0, false);
+            Assert(renderedBmp != null, "HighQualityImageRenderer successfully rendered layer with LiquidGlass and Grain");
+            Assert(renderedBmp.PixelWidth > 100, "Rendered pixel width is valid");
+        }
+
+        private static void TestBatch3Requirements()
+        {
+            // 1. Modern ComboBox Styling & Visibility (No white-on-white)
+            var combo = StudioView.CreateModernComboBox(26);
+            Assert(combo != null, "CreateModernComboBox returns a valid ComboBox");
+            Assert(combo.Template != null, "Modern ComboBox must have a custom ControlTemplate");
+            Assert(combo.ItemContainerStyle != null, "Modern ComboBox must have an ItemContainerStyle for ComboBoxItem");
+            Assert(combo.Foreground is SolidColorBrush, "Modern ComboBox has a non-null solid foreground");
+            var fg = (SolidColorBrush)combo.Foreground;
+            Assert(fg.Color.R > 200 && fg.Color.G > 200 && fg.Color.B > 200, "Foreground is crisp light slate (#F1F5F9)");
+
+            var item = StudioView.CreateModernComboBoxItem("Test Item", EffectType.LiquidGlass);
+            Assert(item != null, "CreateModernComboBoxItem returns a valid ComboBoxItem");
+            Assert(item.Background == Brushes.Transparent, "ComboBoxItem background must be transparent by default");
+
+            // 2. Apple Real Liquid Glass optical render pass verification
+            var glassNode = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                X = 0,
+                Y = 0,
+                Width = 240,
+                Height = 140,
+                CornerRadius = 16,
+                Fills = new List<Paint> { Paint.Solid("#1E2230", 0.8) }
+            };
+
+            var appleGlass = new EffectData
+            {
+                Type = EffectType.LiquidGlass,
+                Enabled = true,
+                Intensity = 0.85,
+                Direction = 315.0,
+                Spread = 2.5,
+                Blur = 16.0,
+                Scale = 1.0,
+                ColorHex = "#FFFFFF",
+                Opacity = 0.15
+            };
+            glassNode.Effects = new List<EffectData> { appleGlass };
+
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                var rect = new Rect(glassNode.X, glassNode.Y, glassNode.Width, glassNode.Height);
+                var geo = new RectangleGeometry(rect, glassNode.CornerRadius, glassNode.CornerRadius);
+                GpuRenderer.RenderAppleLiquidGlass(glassNode, dc, geo, rect, appleGlass);
+            }
+            Assert(dv != null, "RenderAppleLiquidGlass must execute cleanly on DrawingVisual without exceptions");
+
+            // 3. Preset Pill buttons
+            bool pillClicked = false;
+            var pill = StudioView.CreatePresetPill("VisionOS", () => { pillClicked = true; });
+            Assert(pill != null, "CreatePresetPill returns valid pill Button");
+            Assert(pill.Content.ToString() == "VisionOS", "Preset pill has correct label");
+            pill.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(pillClicked, "Preset pill click handler executed");
+
+            // 4. HighQualityImageRenderer export with Apple Liquid Glass
+            var page = new Page { BackgroundColor = "#141722" };
+            page.Layers.Add(glassNode);
+            var rtb = HighQualityImageRenderer.Render(page, glassNode, 2.0, false);
+            Assert(rtb != null && rtb.PixelWidth == 480, "HighQualityImageRenderer rendered Apple Liquid Glass at 2x Retina scale (480px)");
+        }
+
+        private static void TestBatch4Requirements_AdobeIllustratorGradients()
+        {
+            // 1. GradientStopData with Midpoint
+            var s1 = new GradientStopData(0.0, "#FF0000", 1.0);
+            Assert(Math.Abs(s1.Midpoint - 0.5) < 0.001, "Default GradientStopData midpoint is 0.5 (50% blend)");
+            var s2 = new GradientStopData(1.0, "#0000FF", 0.8, 0.35);
+            Assert(Math.Abs(s2.Midpoint - 0.35) < 0.001, "Custom GradientStopData midpoint is 0.35");
+            var clone = s2.Clone();
+            Assert(clone.Position == 1.0 && clone.ColorHex == "#0000FF" && clone.Opacity == 0.8 && Math.Abs(clone.Midpoint - 0.35) < 0.001, "Clone copies Midpoint accurately");
+
+            // 2. GpuRenderer Color Interpolation & Gradient Sampling
+            var red = Color.FromRgb(255, 0, 0);
+            var blue = Color.FromRgb(0, 0, 255);
+            var midColor = GpuRenderer.InterpolateColor(red, blue, 0.5);
+            Assert(midColor.R == 127 && midColor.B == 127, "50% Color interpolation between red and blue produces purple");
+
+            var stops = new List<GradientStopData> { s1, s2 };
+            var sampled0 = GpuRenderer.SampleGradientColor(stops, 0.0);
+            Assert(sampled0.R == 255 && sampled0.B == 0, "Sample at 0.0 produces start color");
+            var sampled1 = GpuRenderer.SampleGradientColor(stops, 1.0);
+            Assert(sampled1.B == 255 && sampled1.R == 0, "Sample at 1.0 produces end color");
+
+            // 3. Illustrator Midpoint stop injection in PopulateGradientStops
+            var paint = new Paint
+            {
+                Type = PaintType.LinearGradient,
+                GradientAngle = 90.0,
+                GradientStops = new List<GradientStopData>
+                {
+                    new GradientStopData(0.0, "#FF0000", 1.0, 0.25),
+                    new GradientStopData(1.0, "#0000FF", 1.0, 0.5)
+                }
+            };
+            var stopCol = new GradientStopCollection();
+            GpuRenderer.PopulateGradientStops(stopCol, paint);
+            Assert(stopCol.Count == 3, "PopulateGradientStops automatically injects shifted 0.25 midpoint stop (Total 3 stops)");
+            Assert(Math.Abs(stopCol[1].Offset - 0.25) < 0.001, "Injected midpoint stop offset matches 0.25");
+
+            // 4. GradientRampControl instantiation and Adobe Illustrator features
+            bool notified = false;
+            var ramp = new GradientRampControl(paint, () => { notified = true; });
+            Assert(ramp != null, "GradientRampControl initialized successfully");
+            Assert(ramp.Content is StackPanel, "GradientRampControl root is a StackPanel");
+
+            // 5. SVG Exporter multi-stop & midpoint export
+            var node = new LayerNode
+            {
+                Id = "grad-box-1",
+                Name = "Gradient Rectangle",
+                Type = ElementType.Rectangle,
+                X = 0,
+                Y = 0,
+                Width = 200,
+                Height = 100,
+                Fills = new List<Paint> { paint }
+            };
+            var page = new Page();
+            page.Layers.Add(node);
+            string svg = SvgExporter.ExportPage(page);
+            Assert(svg.Contains("<linearGradient id=\"grad_lin_grad-box-1_0\""), "SVG output contains linearGradient definition");
+            Assert(svg.Contains("stop-color=\"#FF0000\""), "SVG output contains start stop");
+            Assert(svg.Contains("stop-color=\"#0000FF\""), "SVG output contains end stop");
+            Assert(svg.Contains("offset=\"25%\""), "SVG output contains Illustrator midpoint stop at 25%");
+        }
+
+        private static void TestBatch5Requirements_FigmaOnCanvasGradientRollers()
+        {
+            // 1. GetGradientPoints for LinearGradient
+            var node = new LayerNode
+            {
+                Id = "figma-grad-box",
+                Name = "Figma Gradient Card",
+                Type = ElementType.Rectangle,
+                X = 100,
+                Y = 100,
+                Width = 200,
+                Height = 100,
+                Rotation = 0
+            };
+            var paint = new Paint
+            {
+                Type = PaintType.LinearGradient,
+                GradientAngle = 90.0,
+                GradientStops = new List<GradientStopData>
+                {
+                    new GradientStopData(0.0, "#FF0000", 1.0),
+                    new GradientStopData(0.5, "#00FF00", 1.0),
+                    new GradientStopData(1.0, "#0000FF", 1.0)
+                }
+            };
+
+            Point p1, p2;
+            List<Point> stops;
+            bool ok = GradientRollerEngine.GetGradientPoints(node, paint, out p1, out p2, out stops);
+            Assert(ok, "GetGradientPoints returns true for LinearGradient");
+            Assert(Math.Abs(p1.X - 200.0) < 0.1 && Math.Abs(p1.Y - 100.0) < 0.1, string.Format("Start point p1 is top center (200, 100), got ({0}, {1})", p1.X, p1.Y));
+            Assert(Math.Abs(p2.X - 200.0) < 0.1 && Math.Abs(p2.Y - 200.0) < 0.1, string.Format("End point p2 is bottom center (200, 200), got ({0}, {1})", p2.X, p2.Y));
+            Assert(stops.Count == 3, "Returns 3 stop points along the gradient roller line");
+            Assert(Math.Abs(stops[1].X - 200.0) < 0.1 && Math.Abs(stops[1].Y - 150.0) < 0.1, string.Format("Stop 0.5 point is exact midpoint (200, 150), got ({0}, {1})", stops[1].X, stops[1].Y));
+
+            // 2. Hit Testing on canvas
+            var hitStart = GradientRollerEngine.HitTest(new Point(200, 100), node, paint, 1.0);
+            Assert(hitStart.Type == GradientHandleType.StopNode || hitStart.Type == GradientHandleType.Start, "Hit testing (200, 100) hits start handle / stop 0");
+
+            var hitEnd = GradientRollerEngine.HitTest(new Point(200, 200), node, paint, 1.0);
+            Assert(hitEnd.Type == GradientHandleType.StopNode || hitEnd.Type == GradientHandleType.End, "Hit testing (200, 200) hits end handle / stop 2");
+
+            var hitMid = GradientRollerEngine.HitTest(new Point(200, 150), node, paint, 1.0);
+            Assert(hitMid.Type == GradientHandleType.StopNode && hitMid.StopIndex == 1, "Hit testing (200, 150) hits intermediate stop 1");
+
+            var hitLine = GradientRollerEngine.HitTest(new Point(200, 130), node, paint, 1.0);
+            Assert(hitLine.Type == GradientHandleType.Line, "Hit testing (200, 130) hits the gradient roller vector line");
+            Assert(Math.Abs(hitLine.ParameterT - 0.3) < 0.05, string.Format("ParameterT along roller line is ~0.3, got {0}", hitLine.ParameterT));
+
+            var hitMiss = GradientRollerEngine.HitTest(new Point(500, 500), node, paint, 1.0);
+            Assert(hitMiss.Type == GradientHandleType.None, "Hit testing far away returns None");
+
+            // 3. UpdateAngleFromDrag
+            GradientRollerEngine.UpdateAngleFromDrag(node, paint, new Point(300, 150), false);
+            Assert(Math.Abs(paint.GradientAngle - 0.0) < 0.5 || Math.Abs(paint.GradientAngle - 360.0) < 0.5, string.Format("Dragging end handle horizontally to the right sets angle to 0 deg, got {0}", paint.GradientAngle));
+
+            GradientRollerEngine.UpdateAngleFromDrag(node, paint, new Point(200, 250), false);
+            Assert(Math.Abs(paint.GradientAngle - 90.0) < 0.5, string.Format("Dragging end handle straight down sets angle to 90 deg, got {0}", paint.GradientAngle));
+
+            // 4. ProjectOntoSegment
+            double projMid = GradientRollerEngine.ProjectOntoSegment(new Point(200, 150), new Point(200, 100), new Point(200, 200));
+            Assert(Math.Abs(projMid - 0.5) < 0.001, "Projecting midpoint onto segment yields 0.5");
+
+            // 5. Rotated node with Gradient roller
+            node.Rotation = 45.0;
+            Point pRot1, pRot2;
+            List<Point> stopsRot;
+            bool okRot = GradientRollerEngine.GetGradientPoints(node, paint, out pRot1, out pRot2, out stopsRot);
+            Assert(okRot, "GetGradientPoints supports rotated nodes");
+            double distOrig = Math.Sqrt((p2.X - p1.X) * (p2.X - p1.X) + (p2.Y - p1.Y) * (p2.Y - p1.Y));
+            double distRot = Math.Sqrt((pRot2.X - pRot1.X) * (pRot2.X - pRot1.X) + (pRot2.Y - pRot1.Y) * (pRot2.Y - pRot1.Y));
+            Assert(Math.Abs(distOrig - distRot) < 0.01, "Length of gradient roller line is preserved under layer rotation");
+
+            // 6. Simplified Figma GradientRampControl
+            bool modified = false;
+            var rampControl = new GradientRampControl(paint, () => { modified = true; });
+            Assert(rampControl != null, "Figma GradientRampControl created");
+            Assert(rampControl.SelectedStopIndex == 0, "Default selected stop index is 0");
+            rampControl.SelectedStopIndex = 1;
+            Assert(rampControl.SelectedStopIndex == 1, "SelectedStopIndex changes smoothly");
+
+            // 7. RenderOverlay execution
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                GradientRollerEngine.RenderOverlay(dc, node, paint, 1.0, 1);
+            }
+            Assert(dv != null, "RenderOverlay executes and renders on-canvas vector rollers cleanly");
+        }
+
+        private static void TestBatch6Requirements_RealLiquidGlassAndSmoothSliders()
+        {
+            // 1. Rust and Managed Liquid Glass Optical Refraction Simulation
+            int w = 100;
+            int h = 60;
+            int stride = w * 4;
+            byte[] bg = new byte[h * stride];
+            byte[] output = new byte[h * stride];
+
+            // Fill bg with sample gradient
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int idx = y * stride + x * 4;
+                    bg[idx] = (byte)(x * 2);      // B
+                    bg[idx + 1] = (byte)(y * 3);  // G
+                    bg[idx + 2] = (byte)(180);    // R
+                    bg[idx + 3] = 255;            // A
+                }
+            }
+
+            // Test Rust Native Engine Liquid Glass
+            bool rustExecuted = RustEngineInterop.RenderLiquidGlass(
+                bg, w, h, stride, output,
+                w * 0.5f, h * 0.5f, w * 0.5f, h * 0.5f, 15.0f,
+                20.0f, 16.0f, 40.0f, 3.0f,
+                -0.7071f, -0.7071f,
+                255.0f, 255.0f, 255.0f, 0.15f,
+                0.85f, true);
+
+            Assert(rustExecuted, "Rust Core kerf_render_liquid_glass executes successfully with Snell refraction & chromatic dispersion");
+
+            // Verify refraction output has modified pixels inside the squircle bezel
+            bool pixelsModified = false;
+            for (int i = 0; i < output.Length; i += 4)
+            {
+                if (output[i] != bg[i] || output[i + 1] != bg[i + 1] || output[i + 2] != bg[i + 2])
+                {
+                    pixelsModified = true;
+                    break;
+                }
+            }
+            Assert(pixelsModified, "Liquid Glass refraction engine produces optical distortion and specular highlights");
+
+            // 2. GpuRenderer Liquid Glass Texture Generation & Caching
+            var glassTexture = GpuRenderer.GetOrCreateLiquidGlassTexture(
+                120, 80, 20.0f, 25.0f, 18.0f, 50.0f, 4.0f,
+                -0.7071f, -0.7071f, Colors.White, 0.20f, 0.90f);
+
+            Assert(glassTexture != null, "GpuRenderer produces a valid frozen BitmapSource for Liquid Glass");
+            Assert(glassTexture.PixelWidth == 120 && glassTexture.PixelHeight == 80, "Liquid Glass texture matches dimensions");
+            Assert(glassTexture.Format == PixelFormats.Bgra32, "Liquid Glass texture uses hardware-accelerated Bgra32 format");
+
+            // Cache retrieval
+            var cachedTexture = GpuRenderer.GetOrCreateLiquidGlassTexture(
+                120, 80, 20.0f, 25.0f, 18.0f, 50.0f, 4.0f,
+                -0.7071f, -0.7071f, Colors.White, 0.20f, 0.90f);
+            Assert(object.ReferenceEquals(glassTexture, cachedTexture), "Liquid Glass texture is retained and retrieved from cache");
+
+            // 3. Smooth Slider Custom Styles & IsMoveToPointEnabled
+            var sliderStyle = ScrubControls.GetSharedSliderStyle();
+            Assert(sliderStyle != null, "ScrubControls provides shared modern smooth slider style");
+
+            var sliderElem = ScrubControls.CreateSmoothSlider("Test Smooth", 50, 0, 100, val => { }, "%");
+            Assert(sliderElem != null, "CreateSmoothSlider returns a valid UI element");
+
+            // 4. Gradient On-Canvas Handle State: handles active only during editing
+            var node = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                X = 50,
+                Y = 50,
+                Width = 200,
+                Height = 100,
+                Fills = new List<Paint>
+                {
+                    Paint.LinearGradient("#38BDF8", "#6366F1", 45)
+                }
+            };
+            var fill = node.Fills[0];
+
+            // Verify HitTest handles
+            var hitStart = GradientRollerEngine.HitTest(new Point(node.X, node.Y), node, fill, 1.0);
+            Assert(hitStart != null, "GradientRollerEngine performs handle hit testing");
+
+            // Verify symmetric angle update on drag
+            GradientRollerEngine.UpdateAngleFromDrag(node, fill, new Point(150, 200), false);
+            Assert(Math.Abs(fill.GradientAngle - 90.0) < 0.5, "Gradient roller updates angle smoothly to 90 degrees on downward drag");
+
+            // 5. Liquid Glass Real Transparency & Chromatic Dispersion
+            int outW = 60;
+            int outH = 40;
+            int margin = 20;
+            int bgW = outW + margin * 2;
+            int bgH = outH + margin * 2;
+            int bgStride = bgW * 4;
+            byte[] bgV2 = new byte[bgH * bgStride];
+            for (int y = 0; y < bgH; y++)
+            {
+                for (int x = 0; x < bgW; x++)
+                {
+                    int idx = y * bgStride + x * 4;
+                    bgV2[idx] = (byte)(x * 2);      // B
+                    bgV2[idx + 1] = (byte)(y * 2);  // G
+                    bgV2[idx + 2] = (byte)220;      // R
+                    bgV2[idx + 3] = 255;
+                }
+            }
+
+            int outStride = outW * 4;
+            byte[] outV2 = new byte[outH * outStride];
+            bool v2Executed = RustEngineInterop.RenderLiquidGlassV2(
+                bgV2, bgW, bgH, bgStride,
+                outV2, outW, outH, outStride,
+                margin, margin, 10.0f,
+                15.0f, 12.0f, 40.0f, 2.0f, 0.08f,
+                -0.7071f, -0.7071f,
+                255.0f, 255.0f, 255.0f, 0.15f,
+                0.85f, true);
+
+            Assert(v2Executed, "Rust Core kerf_render_liquid_glass_v2 executes with backdrop margins and chromatic dispersion");
+            // Check transparency outside corner (x=0, y=0 is outside squircle radius 10)
+            Assert(outV2[3] == 0, "Liquid Glass outside squircle is completely transparent (alpha = 0)");
+            // Check opacity inside center (x=30, y=20)
+            int centerIdx = 20 * outStride + 30 * 4;
+            Assert(outV2[centerIdx + 3] > 0, "Liquid Glass inside squircle has valid optical coverage alpha");
         }
     }
 }

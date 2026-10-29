@@ -45,7 +45,9 @@ namespace Kerf.Model
         Start,
         Center,
         End,
-        SpaceBetween
+        SpaceBetween,
+        SpaceAround,
+        SpaceEvenly
     }
 
     public enum SizingMode
@@ -102,6 +104,8 @@ namespace Kerf.Model
         InnerShadow,
         LayerBlur,
         BackgroundBlur,
+        LiquidGlass,
+        Grain,
         Feather
     }
 
@@ -271,22 +275,25 @@ namespace Kerf.Model
         public double Position { get; set; }
         public string ColorHex { get; set; }
         public double Opacity { get; set; }
+        public double Midpoint { get; set; }
 
         public GradientStopData()
         {
             Opacity = 1.0;
+            Midpoint = 0.5;
         }
 
-        public GradientStopData(double pos, string hex, double op = 1.0)
+        public GradientStopData(double pos, string hex, double op = 1.0, double mid = 0.5)
         {
             Position = pos;
             ColorHex = hex;
             Opacity = op;
+            Midpoint = mid;
         }
 
         public GradientStopData Clone()
         {
-            return new GradientStopData(Position, ColorHex, Opacity);
+            return new GradientStopData(Position, ColorHex, Opacity, Midpoint);
         }
     }
 
@@ -299,6 +306,8 @@ namespace Kerf.Model
 
         // Gradients
         public double GradientAngle { get; set; }
+        public Point? GradientStart { get; set; }
+        public Point? GradientEnd { get; set; }
         public Point GradientCenter { get; set; }
         public double GradientRadius { get; set; }
         public List<GradientStopData> GradientStops { get; set; }
@@ -314,6 +323,8 @@ namespace Kerf.Model
             Opacity = 1.0;
             Enabled = true;
             GradientAngle = 90.0;
+            GradientStart = null;
+            GradientEnd = null;
             GradientCenter = new Point(0.5, 0.5);
             GradientRadius = 0.5;
             GradientStops = new List<GradientStopData>();
@@ -353,6 +364,8 @@ namespace Kerf.Model
                 Opacity = this.Opacity,
                 Enabled = this.Enabled,
                 GradientAngle = this.GradientAngle,
+                GradientStart = this.GradientStart,
+                GradientEnd = this.GradientEnd,
                 GradientCenter = new Point(this.GradientCenter.X, this.GradientCenter.Y),
                 GradientRadius = this.GradientRadius,
                 ImageRef = this.ImageRef,
@@ -416,8 +429,12 @@ namespace Kerf.Model
         public EffectType Type { get; set; }
         public double OffsetX { get; set; }
         public double OffsetY { get; set; }
+        public double Direction { get; set; } // Angle in degrees (0 to 360)
+        public double Distance { get; set; }  // Radial offset magnitude
         public double Blur { get; set; }
         public double Spread { get; set; }
+        public double Intensity { get; set; } // Grain intensity or Glass frosted strength
+        public double Scale { get; set; }     // Grain scale
         public string ColorHex { get; set; }
         public double Opacity { get; set; }
         public bool Enabled { get; set; }
@@ -427,11 +444,30 @@ namespace Kerf.Model
             Type = EffectType.DropShadow;
             OffsetX = 0;
             OffsetY = 4;
+            Direction = 90.0;
+            Distance = 4.0;
             Blur = 8;
             Spread = 0;
+            Intensity = 0.25;
+            Scale = 1.0;
             ColorHex = "#000000";
             Opacity = 0.25;
             Enabled = true;
+        }
+
+        public void UpdateOffsetsFromPolar()
+        {
+            double rad = Direction * (Math.PI / 180.0);
+            OffsetX = Math.Round(Distance * Math.Cos(rad), 2);
+            OffsetY = Math.Round(Distance * Math.Sin(rad), 2);
+        }
+
+        public void UpdatePolarFromOffsets()
+        {
+            Distance = Math.Round(Math.Sqrt(OffsetX * OffsetX + OffsetY * OffsetY), 2);
+            double deg = Math.Atan2(OffsetY, OffsetX) * (180.0 / Math.PI);
+            if (deg < 0) deg += 360.0;
+            Direction = Math.Round(deg, 1);
         }
 
         public EffectData Clone()
@@ -441,8 +477,12 @@ namespace Kerf.Model
                 Type = this.Type,
                 OffsetX = this.OffsetX,
                 OffsetY = this.OffsetY,
+                Direction = this.Direction,
+                Distance = this.Distance,
                 Blur = this.Blur,
                 Spread = this.Spread,
+                Intensity = this.Intensity,
+                Scale = this.Scale,
                 ColorHex = this.ColorHex,
                 Opacity = this.Opacity,
                 Enabled = this.Enabled
@@ -518,7 +558,7 @@ namespace Kerf.Model
         public AutoLayoutData()
         {
             Mode = AutoLayoutMode.None;
-            Gap = 12.0;
+            Gap = 0.0;
             PaddingTop = 16.0;
             PaddingRight = 16.0;
             PaddingBottom = 16.0;
@@ -618,6 +658,13 @@ namespace Kerf.Model
 
         // Layout & Constraints
         public AutoLayoutData AutoLayout { get; set; }
+        public bool IgnoreAutoLayout { get; set; }
+        public SizingMode LayoutSizingH { get; set; }
+        public SizingMode LayoutSizingV { get; set; }
+        public double MinWidth { get; set; }
+        public double MaxWidth { get; set; }
+        public double MinHeight { get; set; }
+        public double MaxHeight { get; set; }
         public ConstraintType ConstraintH { get; set; }
         public ConstraintType ConstraintV { get; set; }
 
@@ -665,6 +712,13 @@ namespace Kerf.Model
             Geometry = new VectorGeometry();
             Typography = new TypographyData();
             AutoLayout = new AutoLayoutData();
+            IgnoreAutoLayout = false;
+            LayoutSizingH = SizingMode.Fixed;
+            LayoutSizingV = SizingMode.Fixed;
+            MinWidth = 0.0;
+            MaxWidth = 100000.0;
+            MinHeight = 0.0;
+            MaxHeight = 100000.0;
             ConstraintH = ConstraintType.Left;
             ConstraintV = ConstraintType.Top;
 
@@ -730,6 +784,13 @@ namespace Kerf.Model
                 BooleanOperation = this.BooleanOperation,
                 ComponentId = this.ComponentId,
                 IsMasterComponent = this.IsMasterComponent,
+                IgnoreAutoLayout = this.IgnoreAutoLayout,
+                LayoutSizingH = this.LayoutSizingH,
+                LayoutSizingV = this.LayoutSizingV,
+                MinWidth = this.MinWidth,
+                MaxWidth = this.MaxWidth,
+                MinHeight = this.MinHeight,
+                MaxHeight = this.MaxHeight,
                 IsVisible = this.IsVisible,
                 IsLocked = this.IsLocked,
                 IsCollapsed = this.IsCollapsed,
@@ -985,6 +1046,18 @@ namespace Kerf.Model
                 if (child == potentialChild || IsDescendant(child, potentialChild)) return true;
             }
             return false;
+        }
+
+        public LayerNode FindMasterComponent(string componentId)
+        {
+            if (string.IsNullOrEmpty(componentId)) return null;
+            return GetAllLayersFlat().FirstOrDefault(l => l.IsMasterComponent && l.ComponentId == componentId);
+        }
+
+        public List<LayerNode> FindInstancesOfComponent(string componentId)
+        {
+            if (string.IsNullOrEmpty(componentId)) return new List<LayerNode>();
+            return GetAllLayersFlat().Where(l => !l.IsMasterComponent && l.ComponentId == componentId).ToList();
         }
     }
 

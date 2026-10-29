@@ -732,13 +732,21 @@ namespace Kerf.UI
                     }
 
                     var childFe = popup.Child as FrameworkElement;
-                    if (childFe != null)
+                    if (childFe != null && childFe.IsLoaded)
                     {
-                        Point ptPopup = e.GetPosition(childFe);
-                        if (ptPopup.X >= 0 && ptPopup.X <= childFe.ActualWidth &&
-                            ptPopup.Y >= 0 && ptPopup.Y <= childFe.ActualHeight)
+                        try
                         {
-                            return; // Clicked inside popup
+                            Point screenPos = win.PointToScreen(e.GetPosition(win));
+                            Point ptPopup = childFe.PointFromScreen(screenPos);
+                            if (ptPopup.X >= 0 && ptPopup.X <= childFe.ActualWidth &&
+                                ptPopup.Y >= 0 && ptPopup.Y <= childFe.ActualHeight)
+                            {
+                                return; // Clicked inside popup
+                            }
+                        }
+                        catch
+                        {
+                            // Fallback
                         }
                     }
 
