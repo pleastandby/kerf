@@ -228,8 +228,8 @@ namespace Kerf.Tools
                     paint.GradientAngle = Math.Round(deg, 1);
                 }
 
-                paint.GradientStart = null;
-                paint.GradientEnd = null;
+                paint.GradientStart = new Point(Math.Round(u, 4), Math.Round(v, 4));
+                paint.GradientEnd = new Point(Math.Round(0.5 + du, 4), Math.Round(0.5 + dv, 4));
             }
             else // RadialGradient
             {
@@ -270,8 +270,8 @@ namespace Kerf.Tools
                     paint.GradientAngle = Math.Round(deg, 1);
                 }
 
-                paint.GradientEnd = null;
-                paint.GradientStart = null;
+                paint.GradientEnd = new Point(Math.Round(u, 4), Math.Round(v, 4));
+                paint.GradientStart = new Point(Math.Round(0.5 - du, 4), Math.Round(0.5 - dv, 4));
             }
             else // RadialGradient
             {

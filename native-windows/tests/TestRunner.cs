@@ -1724,6 +1724,7 @@ namespace Kerf.Tests
             Assert(Math.Abs(projMid - 0.5) < 0.001, "Projecting midpoint onto segment yields 0.5");
 
             // 5. Rotated node with Gradient roller
+            GradientRollerEngine.GetGradientPoints(node, paint, out p1, out p2, out stops);
             node.Rotation = 45.0;
             Point pRot1, pRot2;
             List<Point> stopsRot;
