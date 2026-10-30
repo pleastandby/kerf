@@ -693,3 +693,50 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
 - **Total Tests:** 34
 - **Passing:** 34 (100%)
 - Added `TestBatch7Requirements_PolishedUI_FigmaGradient_PenToolVectorEdit` covering segment hit-testing, direct bending, tangent-aligned node insertion, path splitting, rounded templates, and gradient control initialization.
+
+---
+
+## 19. Effects Panel Collapse/Expand, Compact Icon Labels, Indestructible Templates & Transparent Frame Selection
+
+### 1. Collapse & Expand Effects Controls
+- **Problem Statement:** Adding multiple effects (e.g., Liquid Glass with 7 sliders + presets, Drop Shadow, Film Grain) filled the property inspector with towering vertical stacks, cluttering the workspace.
+- **Solution:**
+  - Added `public bool IsExpanded { get; set; }` to `EffectData` in `CanonicalDocument.cs` (defaults to `true`).
+  - Added dedicated rounded collapse/expand chevron buttons (`▾` / `▸`) to every effect card header in `StudioView.cs`.
+  - When collapsed, the effect card contracts into an ultra-clean 32px bar retaining its eye toggle, type dropdown, and delete button.
+  - When expanded, all detailed parameter controls (colors, polar direction, distance, offsets, blur, spread, sliders) are smoothly revealed.
+
+### 2. Parameter Labels Replaced with Icons & Tooltips
+- **Problem Statement:** Text labels like `"Direction"`, `"Caustic Rim"`, `"Chromatic Aberration"`, `"Lens Bulge"`, `"Grain Scale"`, and `"Offset X"` overflowed the 28px scrub field label container and the 54px slider label margin.
+- **Solution:**
+  - Replaced text labels with intuitive, standard typography icons across all effects in `StudioView.cs`:
+    - **Drop Shadow & Inner Shadow:** `"∠"` (Angle Direction), `"⇥"` (Distance), `"X"` (Offset X), `"Y"` (Offset Y), `"◌"` (Blur Radius), `"⤢"` (Spread), `"◐"` (Opacity), `"🎨"` (Color).
+    - **Liquid Glass:** `"🎨"` (Tint), `"◐"` (Glass Opacity), `"☼"` (Light Angle), `"◎"` (Caustic Rim), `"✦"` (Specular Highlight), `"⌒"` (Lens Bulge Curvature), `"❄"` (Frost Diffusion Blur), `"🌈"` (Chromatic Aberration Dispersion).
+    - **Film Grain:** `"🎨"` (Tint), `"▦"` (Grain Intensity), `"⛶"` (Texture Scale), `"☁"` (Softness Blur).
+    - **Layer Blur & Background Blur:** `"🎨"` (Backdrop Tint), `"◐"` (Tint Opacity), `"◌"` (Blur Radius).
+  - Updated `ScrubControls.CreateScrubField` and `CreateSmoothSlider` to accept descriptive `tooltip` parameters, displaying the full human-readable parameter title on hover.
+  - Adjusted `CreateSmoothSlider` and `CreateColorRow` to allocate a compact 24px width for icon glyphs, completely eliminating text overflow and keeping the inspector pixel-perfect.
+
+### 3. Indestructible Starter Templates & Robust Project Saving
+- **Problem Statement:** Prebuilt templates were opened as existing physical files in `ProjectsFolder`. If deleted or edited, templates were reported missing or were permanently overwritten by user edits. Furthermore, saving untitled projects did not update the document title, and canceling save prompts during navigation still closed documents.
+- **Solution:**
+  - Decoupled starter templates from disk files. Implemented first-class, pure in-memory generator functions in `StorageManager.cs`:
+    - `CreateStarterMobileTemplate()`: Complete iPhone 16 Pro banking interface with status bar, balance card, action buttons, and transactions.
+    - `CreateStarterDashboardTemplate()`: 1280x800 desktop canvas with dark glass sidebar, navigation items, metric cards, and charts.
+    - `CreateStarterLandingPageTemplate()`: SaaS Landing Page with navigation bar, hero headline, CTA buttons, and liquid glass app preview.
+    - `CreateStarterDesignSystemTemplate()`: Design System & UI Kit with color token palette, button states, chips, and card components.
+  - Clicking a template card in `HomePageView.cs` now instantiates a fresh document in memory (`filePath = null`), ensuring templates are 100% available, indestructible, and cannot be overwritten.
+  - In `StudioView.SaveCurrentDocument()`: Returns `bool` success status, updates `Document.Name = Path.GetFileNameWithoutExtension(...)`, and triggers atomic save.
+  - In `MainWindow.cs`: If the user cancels the Save dialog when navigating home or closing the window, navigation/closing is cancelled to prevent data loss.
+  - In `StorageManager.GetRecentProjects()`: Case-insensitive search for `"Name":` / `"name":` in project headers ensures all user designs are listed.
+
+### 4. Frame Selection (`Ctrl+Alt+G`) Transparent Fills
+- **Problem Statement:** In Figma, creating a frame from scratch on the canvas defaults to a white background, but framing an existing selection (`Ctrl+Alt+G`) should have NO fill so it does not obscure underlying artwork or add an unwanted solid white box.
+- **Solution:**
+  - In `StudioView.FrameSelection()`: Changed `Fills = new List<Paint> { Paint.Solid("#FFFFFF") }` to `Fills = new List<Paint>()`.
+  - Wrapping objects in a frame now produces a transparent structural container without adding any unwanted fills.
+
+### 5. Automated Verification Suite
+- **Total Tests:** 35
+- **Passing:** 35 (100%)
+- Added `TestBatch8Requirements_EffectsCollapseIcons_Templates_FrameSelection` covering effect expansion state cloning, icon scrub controls, slider compact dimensions, all 4 template generators, and transparent frame selection.

@@ -438,6 +438,7 @@ namespace Kerf.Model
         public string ColorHex { get; set; }
         public double Opacity { get; set; }
         public bool Enabled { get; set; }
+        public bool IsExpanded { get; set; }
 
         public EffectData()
         {
@@ -453,6 +454,7 @@ namespace Kerf.Model
             ColorHex = "#000000";
             Opacity = 0.25;
             Enabled = true;
+            IsExpanded = true;
         }
 
         public void UpdateOffsetsFromPolar()
@@ -485,7 +487,8 @@ namespace Kerf.Model
                 Scale = this.Scale,
                 ColorHex = this.ColorHex,
                 Opacity = this.Opacity,
-                Enabled = this.Enabled
+                Enabled = this.Enabled,
+                IsExpanded = this.IsExpanded
             };
         }
     }

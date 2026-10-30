@@ -230,35 +230,29 @@ namespace Kerf.UI
 
             panel.Children.Add(CreateTemplateCard("Mobile UI Design", "iPhone 16 Pro frames, Auto Layout stacks & modern components", "#6366F1", "#A855F7", () =>
             {
-                string path = IOPath.Combine(StorageManager.ProjectsFolder, "Mobile UI Design.kerf");
-                StorageManager.EnsureDefaultTemplates();
-                if (File.Exists(path))
-                {
-                    OpenProjectFile(path);
-                }
-                else
-                {
-                    var doc = new KerfDocument { Name = "Mobile UI Design" };
-                    if (DocumentOpened != null) DocumentOpened(doc, null);
-                }
+                var doc = StorageManager.CreateStarterMobileTemplate();
+                if (DocumentOpened != null) DocumentOpened(doc, null);
             }));
 
             panel.Children.Add(CreateTemplateCard("Analytics Dashboard", "Desktop 1280px canvas, responsive metric cards & sidebar layout", "#0EA5E9", "#3B82F6", () =>
             {
-                string path = IOPath.Combine(StorageManager.ProjectsFolder, "Analytics Dashboard.kerf");
-                StorageManager.EnsureDefaultTemplates();
-                if (File.Exists(path))
-                {
-                    OpenProjectFile(path);
-                }
-                else
-                {
-                    var doc = new KerfDocument { Name = "Analytics Dashboard" };
-                    if (DocumentOpened != null) DocumentOpened(doc, null);
-                }
+                var doc = StorageManager.CreateStarterDashboardTemplate();
+                if (DocumentOpened != null) DocumentOpened(doc, null);
             }));
 
-            panel.Children.Add(CreateTemplateCard("Blank Canvas", "Start fresh with an infinite Direct3D Retained Scene Graph", "#10B981", "#059669", () =>
+            panel.Children.Add(CreateTemplateCard("SaaS Landing Page", "Modern hero headline, CTA buttons, navigation bar & app preview", "#EC4899", "#8B5CF6", () =>
+            {
+                var doc = StorageManager.CreateStarterLandingPageTemplate();
+                if (DocumentOpened != null) DocumentOpened(doc, null);
+            }));
+
+            panel.Children.Add(CreateTemplateCard("Design System & UI Kit", "Color token swatches, button states, badge chips & cards", "#10B981", "#059669", () =>
+            {
+                var doc = StorageManager.CreateStarterDesignSystemTemplate();
+                if (DocumentOpened != null) DocumentOpened(doc, null);
+            }));
+
+            panel.Children.Add(CreateTemplateCard("Blank Canvas", "Start fresh with an infinite Direct3D Retained Scene Graph", "#38BDF8", "#6366F1", () =>
             {
                 if (NewDocumentRequested != null) NewDocumentRequested();
             }));

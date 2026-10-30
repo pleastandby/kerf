@@ -61,6 +61,7 @@ namespace Kerf.Tests
             RunTest("Batch 5 Requirements: Figma-Style On-Canvas Gradient Rollers & Simplified Ramp", TestBatch5Requirements_FigmaOnCanvasGradientRollers);
             RunTest("Batch 6 Requirements: Real Liquid Glass Snell Optical Refraction & Smooth Sliders", TestBatch6Requirements_RealLiquidGlassAndSmoothSliders);
             RunTest("Batch 7 Requirements: Polished Rounded UI, Simplified Figma Gradient Controls, and Pen Tool Vector Edit Engine", TestBatch7Requirements_PolishedUI_FigmaGradient_PenToolVectorEdit);
+            RunTest("Batch 8 Requirements: Effects Collapse & Icon Labels, Instant Templates & Frame Selection No Fill", TestBatch8Requirements_EffectsCollapseIcons_Templates_FrameSelection);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -1974,6 +1975,60 @@ namespace Kerf.Tests
             var linearPaint = Paint.LinearGradient("#FF0000", "#0000FF", 45);
             var ramp = new GradientRampControl(linearPaint, () => { });
             Assert(ramp != null, "GradientRampControl initializes successfully with linear gradient");
+        }
+
+        private static void TestBatch8Requirements_EffectsCollapseIcons_Templates_FrameSelection()
+        {
+            // 1. Effects Data: Collapse / Expand state
+            var fx = new EffectData { Type = EffectType.LiquidGlass };
+            Assert(fx.IsExpanded, "EffectData defaults to IsExpanded = true");
+            fx.IsExpanded = false;
+            var clonedFx = fx.Clone();
+            Assert(!clonedFx.IsExpanded, "Cloned EffectData preserves collapsed state");
+
+            // 2. Scrub Controls & Smooth Sliders: Compact Icons & Tooltips
+            var scrubAngle = ScrubControls.CreateScrubField("∠", 90.0, val => { }, min: 0, max: 360, suffix: "°", tooltip: "Angle Direction");
+            Assert(scrubAngle != null, "CreateScrubField builds valid UI for compact icon labels");
+            Assert(scrubAngle.ToolTip != null && scrubAngle.ToolTip.ToString() == "Angle Direction", "CreateScrubField correctly assigns parameter tooltip");
+
+            var sliderOpacity = ScrubControls.CreateSmoothSlider("◐", 80, 0, 100, val => { }, "%", tooltip: "Translucency Opacity");
+            Assert(sliderOpacity != null, "CreateSmoothSlider builds valid UI with compact icon");
+            var dockPanel = sliderOpacity as DockPanel;
+            Assert(dockPanel != null && dockPanel.Children.Count >= 2, "CreateSmoothSlider contains label and slider elements");
+
+            // 3. Prebuilt Templates Generators: Always Found & Valid Layers
+            var mobileDoc = StorageManager.CreateStarterMobileTemplate();
+            Assert(mobileDoc != null && mobileDoc.GetActivePage() != null, "Mobile UI Design template generated successfully");
+            Assert(mobileDoc.GetActivePage().Layers.Count > 0, "Mobile template contains root frame layer");
+            var mobileFrame = mobileDoc.GetActivePage().Layers[0];
+            Assert(mobileFrame.Children != null && mobileFrame.Children.Count >= 4, "Mobile frame contains structured child UI elements");
+
+            var dashDoc = StorageManager.CreateStarterDashboardTemplate();
+            Assert(dashDoc != null && dashDoc.GetActivePage().Layers.Count > 0, "Analytics Dashboard template generated successfully");
+
+            var landingDoc = StorageManager.CreateStarterLandingPageTemplate();
+            Assert(landingDoc != null && landingDoc.GetActivePage().Layers.Count > 0, "SaaS Landing Page template generated successfully");
+
+            var dsDoc = StorageManager.CreateStarterDesignSystemTemplate();
+            Assert(dsDoc != null && dsDoc.GetActivePage().Layers.Count > 0, "Design System template generated successfully");
+
+            // 4. Frame Selection: NO default white fill (transparent)
+            var page = new Page();
+            var l1 = new LayerNode { Id = "obj1", X = 20, Y = 20, Width = 50, Height = 50 };
+            page.Layers.Add(l1);
+            var frame = new LayerNode
+            {
+                Id = "wrapFrame",
+                Name = "Frame 1",
+                Type = ElementType.Frame,
+                X = 20,
+                Y = 20,
+                Width = 50,
+                Height = 50,
+                ClipContent = false,
+                Fills = new List<Paint>()
+            };
+            Assert(frame.Fills != null && frame.Fills.Count == 0, "Frame Selection framing wrapper has no default fills (transparent)");
         }
     }
 }

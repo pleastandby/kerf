@@ -26,9 +26,10 @@ namespace Kerf.UI
             double min = double.MinValue,
             double max = double.MaxValue,
             double step = 1.0,
-            string suffix = "")
+            string suffix = "",
+            string tooltip = null)
         {
-            var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+            var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 6), ToolTip = tooltip ?? label };
 
             var container = new Border
             {
@@ -36,7 +37,8 @@ namespace Kerf.UI
                 BorderBrush = new SolidColorBrush(Color.FromRgb(40, 48, 70)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5),
-                Height = 28
+                Height = 28,
+                ToolTip = tooltip ?? label
             };
 
             var grid = new Grid();
@@ -52,7 +54,8 @@ namespace Kerf.UI
                 Foreground = new SolidColorBrush(Color.FromRgb(125, 140, 175)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Cursor = Cursors.SizeWE
+                Cursor = Cursors.SizeWE,
+                ToolTip = tooltip ?? label
             };
             Grid.SetColumn(lbl, 0);
             grid.Children.Add(lbl);
@@ -223,18 +226,22 @@ namespace Kerf.UI
             double min,
             double max,
             Action<double> onChanged,
-            string suffix = "")
+            string suffix = "",
+            string tooltip = null)
         {
             var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 8), LastChildFill = true };
 
             // Label
+            bool isShort = (label != null && label.Length <= 2);
             var lbl = new TextBlock
             {
                 Text = label,
-                FontSize = 11,
+                FontSize = isShort ? 12 : 11,
                 Foreground = new SolidColorBrush(Color.FromRgb(130, 140, 165)),
-                Width = 54,
-                VerticalAlignment = VerticalAlignment.Center
+                Width = isShort ? 24 : 54,
+                TextAlignment = isShort ? TextAlignment.Center : TextAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = tooltip ?? label
             };
             DockPanel.SetDock(lbl, Dock.Left);
             dock.Children.Add(lbl);

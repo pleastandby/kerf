@@ -306,8 +306,11 @@ namespace Kerf.UI
 
                 if (res == MessageBoxResult.Yes)
                 {
-                    _studioView.SaveCurrentDocument();
-                    NavigateToHome();
+                    bool saved = _studioView.SaveCurrentDocument();
+                    if (saved)
+                    {
+                        NavigateToHome();
+                    }
                 }
                 else if (res == MessageBoxResult.No)
                 {
@@ -334,7 +337,11 @@ namespace Kerf.UI
 
                 if (res == MessageBoxResult.Yes)
                 {
-                    _studioView.SaveCurrentDocument();
+                    bool saved = _studioView.SaveCurrentDocument();
+                    if (!saved)
+                    {
+                        e.Cancel = true;
+                    }
                 }
                 else if (res == MessageBoxResult.Cancel)
                 {

@@ -221,13 +221,26 @@ namespace Kerf.IO
                         var headerBuf = new char[1024];
                         int read = reader.Read(headerBuf, 0, 1024);
                         var headerStr = new string(headerBuf, 0, read);
-                        if (headerStr.Contains("\"name\":"))
+                        int nIdx = headerStr.IndexOf("\"Name\":", StringComparison.OrdinalIgnoreCase);
+                        if (nIdx < 0) nIdx = headerStr.IndexOf("\"name\":", StringComparison.OrdinalIgnoreCase);
+                        if (nIdx >= 0)
                         {
-                            int idx = headerStr.IndexOf("\"name\":") + 7;
-                            int end = headerStr.IndexOf("\"", idx + 1);
-                            if (idx > 6 && end > idx)
+                            int colonIdx = headerStr.IndexOf(":", nIdx);
+                            if (colonIdx >= 0)
                             {
-                                meta.Name = headerStr.Substring(idx + 1, end - idx - 1);
+                                int startQuote = headerStr.IndexOf("\"", colonIdx);
+                                if (startQuote >= 0)
+                                {
+                                    int endQuote = headerStr.IndexOf("\"", startQuote + 1);
+                                    if (endQuote > startQuote)
+                                    {
+                                        string foundName = headerStr.Substring(startQuote + 1, endQuote - startQuote - 1).Trim();
+                                        if (!string.IsNullOrEmpty(foundName))
+                                        {
+                                            meta.Name = foundName;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -247,11 +260,11 @@ namespace Kerf.IO
         {
             try
             {
-                string blankPath = IOPath.Combine(ProjectsFolder, "Mobile UI Design.kerf");
-                if (!File.Exists(blankPath))
+                string mobilePath = IOPath.Combine(ProjectsFolder, "Mobile UI Design.kerf");
+                if (!File.Exists(mobilePath))
                 {
                     var doc = CreateStarterMobileTemplate();
-                    SaveAtomic(doc, blankPath);
+                    SaveAtomic(doc, mobilePath);
                 }
 
                 string dashPath = IOPath.Combine(ProjectsFolder, "Analytics Dashboard.kerf");
@@ -260,6 +273,20 @@ namespace Kerf.IO
                     var doc = CreateStarterDashboardTemplate();
                     SaveAtomic(doc, dashPath);
                 }
+
+                string landingPath = IOPath.Combine(ProjectsFolder, "SaaS Landing Page.kerf");
+                if (!File.Exists(landingPath))
+                {
+                    var doc = CreateStarterLandingPageTemplate();
+                    SaveAtomic(doc, landingPath);
+                }
+
+                string designPath = IOPath.Combine(ProjectsFolder, "Design System & UI Kit.kerf");
+                if (!File.Exists(designPath))
+                {
+                    var doc = CreateStarterDesignSystemTemplate();
+                    SaveAtomic(doc, designPath);
+                }
             }
             catch
             {
@@ -267,7 +294,7 @@ namespace Kerf.IO
             }
         }
 
-        private static KerfDocument CreateStarterMobileTemplate()
+        public static KerfDocument CreateStarterMobileTemplate()
         {
             var doc = new KerfDocument { Name = "Mobile UI Design" };
             var page = doc.GetActivePage();
@@ -275,6 +302,7 @@ namespace Kerf.IO
 
             var frame = new LayerNode
             {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
                 Name = "iPhone 16 Pro - Home",
                 Type = ElementType.Frame,
                 X = 120,
@@ -283,60 +311,168 @@ namespace Kerf.IO
                 Height = 852,
                 CornerRadius = 48,
                 ClipContent = true,
-                Fills = new List<Paint> { Paint.Solid("#1A1D26") }
+                Fills = new List<Paint> { Paint.Solid("#131722") },
+                Children = new List<LayerNode>()
             };
 
-            var header = new LayerNode
+            var statusBar = new LayerNode
             {
-                Name = "Hero Card",
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Status Time",
+                Type = ElementType.Text,
+                X = 36,
+                Y = 20,
+                Width = 60,
+                Height = 24,
+                Typography = new TypographyData
+                {
+                    Text = "9:41",
+                    FontSize = 15,
+                    FontWeight = 600,
+                    FontFamily = "Segoe UI"
+                },
+                Fills = new List<Paint> { Paint.Solid("#FFFFFF") }
+            };
+            frame.Children.Add(statusBar);
+
+            var heroCard = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Balance Card",
                 Type = ElementType.Rectangle,
-                X = 144,
-                Y = 160,
+                X = 24,
+                Y = 80,
                 Width = 345,
-                Height = 220,
+                Height = 200,
                 CornerRadius = 24,
                 Fills = new List<Paint> { Paint.LinearGradient("#6366F1", "#A855F7", 135) }
             };
+            frame.Children.Add(heroCard);
 
-            var title = new LayerNode
+            var balanceLabel = new LayerNode
             {
-                Name = "Title Text",
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Balance Label",
                 Type = ElementType.Text,
-                X = 168,
-                Y = 200,
-                Width = 290,
-                Height = 40,
+                X = 48,
+                Y = 108,
+                Width = 150,
+                Height = 20,
                 Typography = new TypographyData
                 {
-                    Text = "Kerf Studio v3.0",
-                    FontSize = 28,
+                    Text = "TOTAL BALANCE",
+                    FontSize = 11,
+                    FontWeight = 700,
+                    FontFamily = "Segoe UI"
+                },
+                Fills = new List<Paint> { Paint.Solid("#E0E7FF") }
+            };
+            frame.Children.Add(balanceLabel);
+
+            var balanceVal = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Balance Value",
+                Type = ElementType.Text,
+                X = 48,
+                Y = 136,
+                Width = 240,
+                Height = 44,
+                Typography = new TypographyData
+                {
+                    Text = "$24,580.40",
+                    FontSize = 32,
                     FontWeight = 700,
                     FontFamily = "Segoe UI"
                 },
                 Fills = new List<Paint> { Paint.Solid("#FFFFFF") }
             };
+            frame.Children.Add(balanceVal);
 
-            var btn = new LayerNode
+            var actionBtn1 = new LayerNode
             {
-                Name = "Action Button",
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Send Button",
                 Type = ElementType.Rectangle,
-                X = 168,
-                Y = 300,
-                Width = 140,
-                Height = 48,
-                CornerRadius = 14,
-                Fills = new List<Paint> { Paint.Solid("#FFFFFF") }
+                X = 24,
+                Y = 304,
+                Width = 72,
+                Height = 72,
+                CornerRadius = 20,
+                Fills = new List<Paint> { Paint.Solid("#1F2538") }
             };
+            frame.Children.Add(actionBtn1);
+
+            var actionBtn2 = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Receive Button",
+                Type = ElementType.Rectangle,
+                X = 115,
+                Y = 304,
+                Width = 72,
+                Height = 72,
+                CornerRadius = 20,
+                Fills = new List<Paint> { Paint.Solid("#1F2538") }
+            };
+            frame.Children.Add(actionBtn2);
+
+            var actionBtn3 = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Swap Button",
+                Type = ElementType.Rectangle,
+                X = 206,
+                Y = 304,
+                Width = 72,
+                Height = 72,
+                CornerRadius = 20,
+                Fills = new List<Paint> { Paint.Solid("#1F2538") }
+            };
+            frame.Children.Add(actionBtn3);
+
+            var actionBtn4 = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "More Button",
+                Type = ElementType.Rectangle,
+                X = 297,
+                Y = 304,
+                Width = 72,
+                Height = 72,
+                CornerRadius = 20,
+                Fills = new List<Paint> { Paint.Solid("#1F2538") }
+            };
+            frame.Children.Add(actionBtn4);
+
+            var txCard = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Transactions Container",
+                Type = ElementType.Rectangle,
+                X = 24,
+                Y = 400,
+                Width = 345,
+                Height = 360,
+                CornerRadius = 24,
+                Fills = new List<Paint> { Paint.Solid("#1A1F30") }
+            };
+            frame.Children.Add(txCard);
 
             page.Layers.Add(frame);
-            page.Layers.Add(header);
-            page.Layers.Add(title);
-            page.Layers.Add(btn);
-
             return doc;
         }
 
-        private static KerfDocument CreateStarterDashboardTemplate()
+        public static KerfDocument CreateStarterDashboardTemplate()
         {
             var doc = new KerfDocument { Name = "Analytics Dashboard" };
             var page = doc.GetActivePage();
@@ -344,6 +480,7 @@ namespace Kerf.IO
 
             var frame = new LayerNode
             {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
                 Name = "Desktop Canvas",
                 Type = ElementType.Frame,
                 X = 80,
@@ -352,36 +489,361 @@ namespace Kerf.IO
                 Height = 800,
                 CornerRadius = 16,
                 ClipContent = true,
-                Fills = new List<Paint> { Paint.Solid("#121622") }
+                Fills = new List<Paint> { Paint.Solid("#0F131E") },
+                Children = new List<LayerNode>()
             };
 
             var sidebar = new LayerNode
             {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
                 Name = "Sidebar",
                 Type = ElementType.Rectangle,
-                X = 80,
-                Y = 80,
+                X = 0,
+                Y = 0,
                 Width = 240,
                 Height = 800,
-                Fills = new List<Paint> { Paint.Solid("#171D2D") }
+                Fills = new List<Paint> { Paint.Solid("#151926") }
             };
+            frame.Children.Add(sidebar);
 
-            var metricCard = new LayerNode
+            var logo = new LayerNode
             {
-                Name = "Revenue Card",
-                Type = ElementType.Rectangle,
-                X = 360,
-                Y = 140,
-                Width = 320,
-                Height = 180,
-                CornerRadius = 16,
-                Fills = new List<Paint> { Paint.Solid("#1E2438") }
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Brand Logo",
+                Type = ElementType.Text,
+                X = 24,
+                Y = 28,
+                Width = 180,
+                Height = 28,
+                Typography = new TypographyData
+                {
+                    Text = "APEX STUDIO",
+                    FontSize = 16,
+                    FontWeight = 700,
+                    FontFamily = "Segoe UI"
+                },
+                Fills = new List<Paint> { Paint.Solid("#38BDF8") }
             };
+            frame.Children.Add(logo);
+
+            var stat1 = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Revenue Metric Card",
+                Type = ElementType.Rectangle,
+                X = 270,
+                Y = 40,
+                Width = 310,
+                Height = 140,
+                CornerRadius = 16,
+                Fills = new List<Paint> { Paint.Solid("#1A2030") }
+            };
+            frame.Children.Add(stat1);
+
+            var stat2 = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Users Metric Card",
+                Type = ElementType.Rectangle,
+                X = 605,
+                Y = 40,
+                Width = 310,
+                Height = 140,
+                CornerRadius = 16,
+                Fills = new List<Paint> { Paint.Solid("#1A2030") }
+            };
+            frame.Children.Add(stat2);
+
+            var stat3 = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Conversion Metric Card",
+                Type = ElementType.Rectangle,
+                X = 940,
+                Y = 40,
+                Width = 300,
+                Height = 140,
+                CornerRadius = 16,
+                Fills = new List<Paint> { Paint.Solid("#1A2030") }
+            };
+            frame.Children.Add(stat3);
+
+            var mainChart = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Analytics Main Chart",
+                Type = ElementType.Rectangle,
+                X = 270,
+                Y = 210,
+                Width = 645,
+                Height = 550,
+                CornerRadius = 20,
+                Fills = new List<Paint> { Paint.Solid("#161C2C") }
+            };
+            frame.Children.Add(mainChart);
+
+            var activityPanel = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Realtime Activity Feed",
+                Type = ElementType.Rectangle,
+                X = 940,
+                Y = 210,
+                Width = 300,
+                Height = 550,
+                CornerRadius = 20,
+                Fills = new List<Paint> { Paint.Solid("#161C2C") }
+            };
+            frame.Children.Add(activityPanel);
 
             page.Layers.Add(frame);
-            page.Layers.Add(sidebar);
-            page.Layers.Add(metricCard);
+            return doc;
+        }
 
+        public static KerfDocument CreateStarterLandingPageTemplate()
+        {
+            var doc = new KerfDocument { Name = "SaaS Landing Page" };
+            var page = doc.GetActivePage();
+            page.BackgroundColor = "#090D16";
+
+            var frame = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                Name = "Landing Page Screen",
+                Type = ElementType.Frame,
+                X = 100,
+                Y = 80,
+                Width = 1440,
+                Height = 900,
+                CornerRadius = 16,
+                ClipContent = true,
+                Fills = new List<Paint> { Paint.Solid("#0B101D") },
+                Children = new List<LayerNode>()
+            };
+
+            var navBar = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Navigation Bar",
+                Type = ElementType.Rectangle,
+                X = 40,
+                Y = 24,
+                Width = 1360,
+                Height = 64,
+                CornerRadius = 16,
+                Fills = new List<Paint> { Paint.Solid("#131929") }
+            };
+            frame.Children.Add(navBar);
+
+            var heroBadge = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Hero Badge Pill",
+                Type = ElementType.Rectangle,
+                X = 570,
+                Y = 140,
+                Width = 300,
+                Height = 36,
+                CornerRadius = 18,
+                Fills = new List<Paint> { Paint.Solid("#1E263C") }
+            };
+            frame.Children.Add(heroBadge);
+
+            var heroTitle = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Headline Text",
+                Type = ElementType.Text,
+                X = 220,
+                Y = 200,
+                Width = 1000,
+                Height = 70,
+                Typography = new TypographyData
+                {
+                    Text = "Design at the Speed of Light",
+                    FontSize = 52,
+                    FontWeight = 800,
+                    FontFamily = "Segoe UI"
+                },
+                Fills = new List<Paint> { Paint.Solid("#FFFFFF") }
+            };
+            frame.Children.Add(heroTitle);
+
+            var heroSub = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Subtitle Text",
+                Type = ElementType.Text,
+                X = 320,
+                Y = 285,
+                Width = 800,
+                Height = 50,
+                Typography = new TypographyData
+                {
+                    Text = "Next-generation DirectX vector engine delivering sub-millisecond manipulation, native SVG typography, and liquid glass optics.",
+                    FontSize = 16,
+                    FontWeight = 400,
+                    FontFamily = "Segoe UI"
+                },
+                Fills = new List<Paint> { Paint.Solid("#94A3B8") }
+            };
+            frame.Children.Add(heroSub);
+
+            var ctaBtn = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Primary CTA Button",
+                Type = ElementType.Rectangle,
+                X = 540,
+                Y = 360,
+                Width = 170,
+                Height = 50,
+                CornerRadius = 12,
+                Fills = new List<Paint> { Paint.Solid("#6366F1") }
+            };
+            frame.Children.Add(ctaBtn);
+
+            var ctaSec = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Secondary CTA Button",
+                Type = ElementType.Rectangle,
+                X = 730,
+                Y = 360,
+                Width = 170,
+                Height = 50,
+                CornerRadius = 12,
+                Fills = new List<Paint> { Paint.Solid("#1F273B") }
+            };
+            frame.Children.Add(ctaSec);
+
+            var previewCanvas = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "App Preview Glass Card",
+                Type = ElementType.Rectangle,
+                X = 220,
+                Y = 450,
+                Width = 1000,
+                Height = 400,
+                CornerRadius = 24,
+                Fills = new List<Paint> { Paint.Solid("#151B2E") }
+            };
+            frame.Children.Add(previewCanvas);
+
+            page.Layers.Add(frame);
+            return doc;
+        }
+
+        public static KerfDocument CreateStarterDesignSystemTemplate()
+        {
+            var doc = new KerfDocument { Name = "Design System & UI Kit" };
+            var page = doc.GetActivePage();
+            page.BackgroundColor = "#0C0F18";
+
+            var frame = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                Name = "Design System Canvas",
+                Type = ElementType.Frame,
+                X = 80,
+                Y = 80,
+                Width = 1440,
+                Height = 900,
+                CornerRadius = 16,
+                ClipContent = true,
+                Fills = new List<Paint> { Paint.Solid("#0F1422") },
+                Children = new List<LayerNode>()
+            };
+
+            var dsTitle = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Design System Title",
+                Type = ElementType.Text,
+                X = 48,
+                Y = 40,
+                Width = 600,
+                Height = 40,
+                Typography = new TypographyData
+                {
+                    Text = "Design System & UI Tokens",
+                    FontSize = 28,
+                    FontWeight = 700,
+                    FontFamily = "Segoe UI"
+                },
+                Fills = new List<Paint> { Paint.Solid("#FFFFFF") }
+            };
+            frame.Children.Add(dsTitle);
+
+            // Palette Swatches
+            string[] colors = new string[] { "#6366F1", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6" };
+            for (int i = 0; i < colors.Length; i++)
+            {
+                var swatch = new LayerNode
+                {
+                    Id = Guid.NewGuid().ToString().Substring(0, 8),
+                    ParentId = frame.Id,
+                    Name = "Token " + colors[i],
+                    Type = ElementType.Rectangle,
+                    X = 48 + i * 110,
+                    Y = 110,
+                    Width = 96,
+                    Height = 96,
+                    CornerRadius = 16,
+                    Fills = new List<Paint> { Paint.Solid(colors[i]) }
+                };
+                frame.Children.Add(swatch);
+            }
+
+            // Button Components Card
+            var btnSection = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Buttons Showcase",
+                Type = ElementType.Rectangle,
+                X = 48,
+                Y = 240,
+                Width = 620,
+                Height = 280,
+                CornerRadius = 20,
+                Fills = new List<Paint> { Paint.Solid("#181E30") }
+            };
+            frame.Children.Add(btnSection);
+
+            // Cards Showcase
+            var cardSection = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                ParentId = frame.Id,
+                Name = "Cards Showcase",
+                Type = ElementType.Rectangle,
+                X = 700,
+                Y = 240,
+                Width = 690,
+                Height = 280,
+                CornerRadius = 20,
+                Fills = new List<Paint> { Paint.Solid("#181E30") }
+            };
+            frame.Children.Add(cardSection);
+
+            page.Layers.Add(frame);
             return doc;
         }
     }
