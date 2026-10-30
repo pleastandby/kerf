@@ -373,7 +373,7 @@ namespace Kerf.UI
             {
                 Width = 24,
                 Height = 24,
-                CornerRadius = new CornerRadius(4),
+                CornerRadius = new CornerRadius(5),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(60, 72, 100)),
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand,
@@ -404,7 +404,7 @@ namespace Kerf.UI
                 Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 76)),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
+                CornerRadius = new CornerRadius(5),
                 Margin = new Thickness(0, 0, 6, 0)
             };
             _stopHexBox = new TextBox
@@ -437,7 +437,7 @@ namespace Kerf.UI
                 Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 76)),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4)
+                CornerRadius = new CornerRadius(5)
             };
             _stopPosBox = new TextBox
             {
@@ -632,16 +632,34 @@ namespace Kerf.UI
             NotifyChange();
         }
 
+        public static ControlTemplate CreateRoundedButtonTemplate(double cornerRadius)
+        {
+            var t = new ControlTemplate(typeof(Button));
+            var b = new FrameworkElementFactory(typeof(Border), "btnBorder");
+            b.SetValue(Border.CornerRadiusProperty, new CornerRadius(cornerRadius));
+            b.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Button.BackgroundProperty));
+            b.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Button.BorderBrushProperty));
+            b.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Button.BorderThicknessProperty));
+            b.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Button.PaddingProperty));
+            b.SetValue(Border.SnapsToDevicePixelsProperty, true);
+            var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+            cp.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            cp.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            b.AppendChild(cp);
+            t.VisualTree = b;
+            return t;
+        }
+
         private FrameworkElement BuildAngleRow()
         {
-            var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+            var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
 
             var angleLbl = new TextBlock
             {
                 Text = "Angle",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175)),
-                Width = 42,
+                Width = 46,
                 VerticalAlignment = VerticalAlignment.Center
             };
             DockPanel.SetDock(angleLbl, Dock.Left);
@@ -649,12 +667,12 @@ namespace Kerf.UI
 
             var angleBoxBorder = new Border
             {
-                Width = 52,
-                Height = 22,
+                Width = 64,
+                Height = 24,
                 Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 76)),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
+                CornerRadius = new CornerRadius(5),
                 Margin = new Thickness(0, 0, 6, 0)
             };
             _angleBox = new TextBox
@@ -665,13 +683,14 @@ namespace Kerf.UI
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 VerticalContentAlignment = VerticalAlignment.Center,
-                Padding = new Thickness(4, 0, 2, 0)
+                Padding = new Thickness(6, 0, 2, 0)
             };
             _angleBox.KeyDown += (s, e) =>
             {
                 if (e.Key == Key.Enter)
                 {
                     ApplyAngleInput();
+                    _angleBox.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
                 }
             };
             _angleBox.LostFocus += (s, e) => ApplyAngleInput();
@@ -679,13 +698,17 @@ namespace Kerf.UI
             DockPanel.SetDock(angleBoxBorder, Dock.Left);
             dock.Children.Add(angleBoxBorder);
 
-            // Quick Angle Presets: 0°, 45°, 90°, 180°
-            var presetsStack = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            presetsStack.Children.Add(CreateAnglePill("0°", 0));
-            presetsStack.Children.Add(CreateAnglePill("45°", 45));
-            presetsStack.Children.Add(CreateAnglePill("90°", 90));
-            presetsStack.Children.Add(CreateAnglePill("180°", 180));
-            dock.Children.Add(presetsStack);
+            // Clean 180° Flip button
+            var flipBtn = CreateIconButton("⇅", "Flip gradient 180°", () =>
+            {
+                _paint.GradientAngle = (_paint.GradientAngle + 180.0) % 360.0;
+                _paint.GradientStart = null;
+                _paint.GradientEnd = null;
+                if (_angleBox != null) _angleBox.Text = Math.Round(_paint.GradientAngle) + "°";
+                NotifyChange();
+            });
+            DockPanel.SetDock(flipBtn, Dock.Right);
+            dock.Children.Add(flipBtn);
 
             return dock;
         }
@@ -714,14 +737,15 @@ namespace Kerf.UI
             {
                 Content = label,
                 FontSize = 9.5,
-                Padding = new Thickness(4, 1, 4, 1),
+                Padding = new Thickness(6, 1, 6, 1),
                 Height = 22,
                 Margin = new Thickness(2, 0, 0, 0),
                 Background = Math.Abs(_paint.GradientAngle - angle) < 1.0 ? new SolidColorBrush(Color.FromRgb(45, 54, 80)) : new SolidColorBrush(Color.FromRgb(24, 28, 40)),
                 Foreground = Math.Abs(_paint.GradientAngle - angle) < 1.0 ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(140, 150, 175)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66)),
                 BorderThickness = new Thickness(1),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Template = CreateRoundedButtonTemplate(5)
             };
             btn.Click += (s, e) =>
             {
@@ -740,16 +764,17 @@ namespace Kerf.UI
             var btn = new Button
             {
                 Content = label,
-                FontSize = 10,
+                FontSize = 10.5,
                 FontWeight = isActive ? FontWeights.Bold : FontWeights.Normal,
-                Height = 22,
-                Padding = new Thickness(8, 2, 8, 2),
+                Height = 24,
+                Padding = new Thickness(10, 2, 10, 2),
                 Margin = new Thickness(0, 0, 4, 0),
                 Background = isActive ? new SolidColorBrush(Color.FromRgb(67, 56, 202)) : new SolidColorBrush(Color.FromRgb(26, 30, 44)),
                 Foreground = isActive ? Brushes.White : new SolidColorBrush(Color.FromRgb(140, 150, 175)),
                 BorderBrush = isActive ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : new SolidColorBrush(Color.FromRgb(40, 48, 70)),
                 BorderThickness = new Thickness(1),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Template = CreateRoundedButtonTemplate(6)
             };
             btn.Click += (s, e) => onClick();
             return btn;
@@ -762,14 +787,15 @@ namespace Kerf.UI
                 Content = icon,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
-                Width = 22,
-                Height = 22,
+                Width = 24,
+                Height = 24,
                 Background = new SolidColorBrush(Color.FromRgb(26, 32, 48)),
                 Foreground = new SolidColorBrush(Color.FromRgb(180, 195, 220)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78)),
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand,
-                ToolTip = tooltip
+                ToolTip = tooltip,
+                Template = CreateRoundedButtonTemplate(5)
             };
             btn.Click += (s, e) => onClick();
             return btn;

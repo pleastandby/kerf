@@ -61,6 +61,135 @@ namespace Kerf.Tools
             return res;
         }
 
+        /// <summary>
+        /// Hit-tests segments of the vector geometry (Figma-style).
+        /// If a segment between nodes is within tolerance, returns true with the segment index and closest point on curve.
+        /// </summary>
+        public static bool HitTestSegment(VectorGeometry geometry, Point point, double tolerance, out int segmentIndex, out Point closestPoint)
+        {
+            segmentIndex = -1;
+            closestPoint = point;
+            if (geometry == null || geometry.Nodes == null || geometry.Nodes.Count < 2) return false;
+
+            double bestDistSq = tolerance * tolerance;
+            int count = geometry.Nodes.Count;
+            int segmentLimit = geometry.IsClosed ? count : count - 1;
+
+            for (int i = 0; i < segmentLimit; i++)
+            {
+                var p0 = geometry.Nodes[i];
+                var p1 = geometry.Nodes[(i + 1) % count];
+
+                bool isCurve = (p0.OutHandle.X != p0.Anchor.X || p0.OutHandle.Y != p0.Anchor.Y ||
+                                p1.InHandle.X != p1.Anchor.X || p1.InHandle.Y != p1.Anchor.Y);
+
+                if (!isCurve)
+                {
+                    Point proj;
+                    double dSq = DistanceSqToSegment(point, p0.Anchor, p1.Anchor, out proj);
+                    if (dSq < bestDistSq)
+                    {
+                        bestDistSq = dSq;
+                        segmentIndex = i;
+                        closestPoint = proj;
+                    }
+                }
+                else
+                {
+                    Point prevPt = p0.Anchor;
+                    const int steps = 16;
+                    for (int s = 1; s <= steps; s++)
+                    {
+                        double t = (double)s / steps;
+                        Point curPt = SampleCubicBezier(p0.Anchor, p0.OutHandle, p1.InHandle, p1.Anchor, t);
+                        Point proj;
+                        double dSq = DistanceSqToSegment(point, prevPt, curPt, out proj);
+                        if (dSq < bestDistSq)
+                        {
+                            bestDistSq = dSq;
+                            segmentIndex = i;
+                            closestPoint = proj;
+                        }
+                        prevPt = curPt;
+                    }
+                }
+            }
+
+            return segmentIndex >= 0;
+        }
+
+        private static double DistanceSqToSegment(Point pt, Point a, Point b, out Point proj)
+        {
+            double dx = b.X - a.X;
+            double dy = b.Y - a.Y;
+            double lenSq = dx * dx + dy * dy;
+            if (lenSq < 1e-6)
+            {
+                proj = a;
+                double px = pt.X - a.X;
+                double py = pt.Y - a.Y;
+                return px * px + py * py;
+            }
+
+            double t = Math.Max(0.0, Math.Min(1.0, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lenSq));
+            proj = new Point(a.X + t * dx, a.Y + t * dy);
+            double rx = pt.X - proj.X;
+            double ry = pt.Y - proj.Y;
+            return rx * rx + ry * ry;
+        }
+
+        private static Point SampleCubicBezier(Point p0, Point p1, Point p2, Point p3, double t)
+        {
+            double u = 1.0 - t;
+            double tt = t * t;
+            double uu = u * u;
+            double uuu = uu * u;
+            double ttt = tt * t;
+
+            double x = uuu * p0.X + 3.0 * uu * t * p1.X + 3.0 * u * tt * p2.X + ttt * p3.X;
+            double y = uuu * p0.Y + 3.0 * uu * t * p1.Y + 3.0 * u * tt * p2.Y + ttt * p3.Y;
+            return new Point(x, y);
+        }
+
+        /// <summary>
+        /// Bends a segment between two nodes towards the mouse position (Figma Bend Tool behavior).
+        /// </summary>
+        public static void BendSegment(VectorGeometry geometry, int segmentIndex, Point mousePos)
+        {
+            if (geometry == null || geometry.Nodes == null || geometry.Nodes.Count < 2) return;
+            int count = geometry.Nodes.Count;
+            if (segmentIndex < 0 || segmentIndex >= count) return;
+
+            var p0 = geometry.Nodes[segmentIndex];
+            var p1 = geometry.Nodes[(segmentIndex + 1) % count];
+
+            Point mid = new Point((p0.Anchor.X + p1.Anchor.X) * 0.5, (p0.Anchor.Y + p1.Anchor.Y) * 0.5);
+            double dx = mousePos.X - mid.X;
+            double dy = mousePos.Y - mid.Y;
+
+            p0.Type = BezierNodeType.Smooth;
+            p1.Type = BezierNodeType.Smooth;
+
+            double segDx = p1.Anchor.X - p0.Anchor.X;
+            double segDy = p1.Anchor.Y - p0.Anchor.Y;
+
+            p0.OutHandle = new Point(p0.Anchor.X + segDx * 0.33 + dx * 0.7, p0.Anchor.Y + segDy * 0.33 + dy * 0.7);
+            p1.InHandle = new Point(p1.Anchor.X - segDx * 0.33 + dx * 0.7, p1.Anchor.Y - segDy * 0.33 + dy * 0.7);
+
+            if (p0.Type == BezierNodeType.Smooth || p0.Type == BezierNodeType.Symmetric)
+            {
+                double hdx = p0.OutHandle.X - p0.Anchor.X;
+                double hdy = p0.OutHandle.Y - p0.Anchor.Y;
+                p0.InHandle = new Point(p0.Anchor.X - hdx, p0.Anchor.Y - hdy);
+            }
+            if (p1.Type == BezierNodeType.Smooth || p1.Type == BezierNodeType.Symmetric)
+            {
+                double hdx = p1.InHandle.X - p1.Anchor.X;
+                double hdy = p1.InHandle.Y - p1.Anchor.Y;
+                p1.OutHandle = new Point(p1.Anchor.X - hdx, p1.Anchor.Y - hdy);
+            }
+        }
+
         public static void MoveAnchor(VectorGeometry geometry, int index, Point newAnchor)
         {
             if (geometry == null || index < 0 || index >= geometry.Nodes.Count) return;
@@ -230,11 +359,29 @@ namespace Kerf.Tools
         public static void InsertNode(VectorGeometry geometry, int index, Point point)
         {
             if (geometry == null) return;
+            double ux = 1.0, uy = 0.0;
+            if (geometry.Nodes != null && geometry.Nodes.Count >= 2)
+            {
+                int count = geometry.Nodes.Count;
+                int prevIdx = (index > 0) ? index - 1 : (geometry.IsClosed ? count - 1 : 0);
+                int nextIdx = (index < count) ? index : (geometry.IsClosed ? 0 : count - 1);
+                var pPrev = geometry.Nodes[prevIdx];
+                var pNext = geometry.Nodes[nextIdx];
+                double dx = pNext.Anchor.X - pPrev.Anchor.X;
+                double dy = pNext.Anchor.Y - pPrev.Anchor.Y;
+                double len = Math.Sqrt(dx * dx + dy * dy);
+                if (len > 0.001)
+                {
+                    ux = dx / len;
+                    uy = dy / len;
+                }
+            }
+
             var node = new BezierNode(point.X, point.Y)
             {
                 Type = BezierNodeType.Smooth,
-                InHandle = new Point(point.X - 15, point.Y),
-                OutHandle = new Point(point.X + 15, point.Y)
+                InHandle = new Point(point.X - ux * 16, point.Y - uy * 16),
+                OutHandle = new Point(point.X + ux * 16, point.Y + uy * 16)
             };
             geometry.Nodes.Insert(Math.Max(0, Math.Min(geometry.Nodes.Count, index)), node);
         }

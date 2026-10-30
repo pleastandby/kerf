@@ -660,3 +660,36 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
 
 
 
+
+---
+
+## 18. Polished Rounded UI, Simplified Figma Gradient Controls & Pen Tool / Vector Edit Mode
+
+### 1. Polished, Rounded UI Everywhere (Zero Rough Rectangular Elements)
+- **Root Cause & Visual Issue:** Standard WPF controls (`Button`, `TextBox`, `Border`) render with sharp 90-degree corners and hard edges by default unless styled with explicit `ControlTemplate` wrappers containing `Border.CornerRadius`.
+- **Comprehensive Solution:**
+  - Added reusable `CreateRoundedButtonTemplate(cornerRadius)` helper in `StudioView.cs`, `GradientRampControl.cs`, and `HomePageView.cs`.
+  - Applied rounded templates (4–8px for buttons/cards, 10–12px for pills/badges, full circle for close buttons) across:
+    - Primary and secondary buttons in `HomePageView.cs`.
+    - Inspector cards, section headers, layer action buttons, filter chips, and typography alignment grids in `StudioView.cs`.
+    - Color picker popup close button and property input wrappers.
+    - Gradient type pills, stop swatches, hex/opacity textboxes, and stop sliders in `GradientRampControl.cs`.
+
+### 2. Simplified Figma Gradient Controls
+- Replaced bulky, cluttered angle preset buttons (`0°`, `45°`, `90°`, `180°`) with a streamlined, compact angle input box and a clean `⇅` 180° flip button matching Figma's design.
+- Polished the gradient track with smooth rounded borders (`CornerRadius = 8`), smooth stop circular pins (`CornerRadius = 7`), and unified stop property inputs.
+- Preserved 2D unconstrained handle stretching on the canvas with fluid 144 FPS non-destructive stop dragging.
+
+### 3. Figma Pen Tool & Vector Edit Mode Enhancements
+- **Shortcut Alignment:** Assigned `P` as the primary shortcut for the Pen Tool (Polygon no longer steals `P`).
+- **Segment Hit Testing (`BezierVectorEngine.HitTestSegment`):** High-precision distance calculation supporting both straight lines and Bézier curves sampled with 16 sub-segments.
+- **Segment Insertion (`BezierVectorEngine.InsertNode`):** Clicking an existing segment in Vector Edit Mode with the Pen Tool inserts a new smooth vertex aligned with the segment's tangent vector without disrupting overall curvature.
+- **Direct Segment Bending (`BezierVectorEngine.BendSegment`):** Dragging an existing segment with the Move Tool (`V`) in Vector Edit Mode directly bends the curve by calculating smooth opposite handles on the connecting nodes.
+- **Cut Tool (`X` Shortcut & `SplitPathAtNode`):** Pressing `X` in Vector Edit Mode cleanly cuts/splits the path at the selected vertex node.
+- **Path Continuation:** Clicking empty canvas space with the Pen Tool while an endpoint is selected extends open paths or prepends them when the first node is selected.
+- **Polished Vector HUD:** Updated overlay HUD badge: `"Vector Edit Mode | V: Move • P: Pen • X: Cut • Enter: Done"`.
+
+### 4. Automated Verification Suite
+- **Total Tests:** 34
+- **Passing:** 34 (100%)
+- Added `TestBatch7Requirements_PolishedUI_FigmaGradient_PenToolVectorEdit` covering segment hit-testing, direct bending, tangent-aligned node insertion, path splitting, rounded templates, and gradient control initialization.

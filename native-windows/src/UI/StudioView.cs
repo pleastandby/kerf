@@ -84,6 +84,8 @@ namespace Kerf.UI
         private bool _isDraggingNodeAnchor = false;
         private bool _isDraggingNodeHandle = false;
         private bool _draggingOutHandle = false;
+        private bool _isDraggingSegment = false;
+        private int _draggingSegmentIndex = -1;
 
         // Corner Radius interaction
         private double _startCornerRadius = 0.0;
@@ -503,7 +505,8 @@ namespace Kerf.UI
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
                 ToolTip = tooltip,
-                Tag = tool
+                Tag = tool,
+                Template = CreateRoundedButtonTemplate(6)
             };
 
             bool isFilled = (tool == ToolType.Select);
@@ -674,7 +677,8 @@ namespace Kerf.UI
                 Padding = new Thickness(6, 2, 6, 2),
                 Margin = new Thickness(0, 0, 4, 0),
                 BorderThickness = new Thickness(1),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Template = CreateRoundedButtonTemplate(6)
             };
 
             Action updateStyle = () =>
@@ -1884,7 +1888,8 @@ namespace Kerf.UI
                     FontWeight = FontWeights.SemiBold,
                     Height = 32,
                     Margin = new Thickness(0, 0, 0, 8),
-                    Cursor = Cursors.Hand
+                    Cursor = Cursors.Hand,
+                    Template = CreateRoundedButtonTemplate(6)
                 };
                 editVectorBtn.Click += (s, e) => EnterVectorEditMode(primary);
                 _propertyInspectorStack.Children.Add(editVectorBtn);
@@ -2040,7 +2045,8 @@ namespace Kerf.UI
                 FontWeight = FontWeights.SemiBold,
                 Height = 30,
                 Margin = new Thickness(0, 0, 0, 10),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Template = CreateRoundedButtonTemplate(6)
             };
             doneBtn.Click += (s, e) => ExitVectorEditMode();
             _propertyInspectorStack.Children.Add(doneBtn);
@@ -2142,7 +2148,8 @@ namespace Kerf.UI
                     BorderThickness = new Thickness(1),
                     Height = 26,
                     Margin = new Thickness(0, 0, 0, 12),
-                    Cursor = Cursors.Hand
+                    Cursor = Cursors.Hand,
+                    Template = CreateRoundedButtonTemplate(5)
                 };
                 delNodeBtn.Click += (s, e) =>
                 {
@@ -2214,7 +2221,8 @@ namespace Kerf.UI
                 Foreground = isActive ? Brushes.Black : Brushes.White,
                 FontWeight = isActive ? FontWeights.Bold : FontWeights.Normal,
                 BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Template = CreateRoundedButtonTemplate(5)
             };
             btn.Click += (s, e) => onClick();
             return btn;
@@ -2685,6 +2693,7 @@ namespace Kerf.UI
             {
                 var addBtn = new Button
                 {
+                    Template = CreateRoundedButtonTemplate(4),
                     Content = "+",
                     FontSize = 14,
                     FontWeight = FontWeights.Bold,
@@ -2750,6 +2759,7 @@ namespace Kerf.UI
 
                 var eyeBtn = new Button
                 {
+                    Template = CreateRoundedButtonTemplate(4),
                     Content = fill.Enabled ? "👁" : "—",
                     FontSize = 10,
                     Width = 22,
@@ -2771,6 +2781,7 @@ namespace Kerf.UI
 
                 var delBtn = new Button
                 {
+                    Template = CreateRoundedButtonTemplate(4),
                     Content = "✕",
                     FontSize = 10,
                     Width = 20,
@@ -2911,6 +2922,7 @@ namespace Kerf.UI
                     var toggleRow = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
                     var rollerBtn = new Button
                     {
+                        Template = CreateRoundedButtonTemplate(6),
                         Content = isEditingThis ? "● Canvas Roller Active [Done]" : "✏ Edit on Canvas",
                         FontSize = 10,
                         FontWeight = FontWeights.SemiBold,
@@ -3010,6 +3022,7 @@ namespace Kerf.UI
 
                 var eyeBtn = new Button
                 {
+                    Template = CreateRoundedButtonTemplate(4),
                     Content = stroke.Enabled ? "👁" : "—",
                     FontSize = 10,
                     Width = 22,
@@ -3031,6 +3044,7 @@ namespace Kerf.UI
 
                 var delBtn = new Button
                 {
+                    Template = CreateRoundedButtonTemplate(4),
                     Content = "✕",
                     FontSize = 10,
                     Width = 20,
@@ -3166,6 +3180,7 @@ namespace Kerf.UI
                     var toggleRow = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
                     var rollerBtn = new Button
                     {
+                        Template = CreateRoundedButtonTemplate(6),
                         Content = isEditingThis ? "● Canvas Roller Active [Done]" : "✏ Edit on Canvas",
                         FontSize = 10,
                         FontWeight = FontWeights.SemiBold,
@@ -3328,6 +3343,7 @@ namespace Kerf.UI
 
                 var eyeBtn = new Button
                 {
+                    Template = CreateRoundedButtonTemplate(4),
                     Content = fx.Enabled ? "👁" : "—",
                     FontSize = 10,
                     Width = 22,
@@ -3350,6 +3366,7 @@ namespace Kerf.UI
 
                 var delBtn = new Button
                 {
+                    Template = CreateRoundedButtonTemplate(4),
                     Content = "✕",
                     FontSize = 10,
                     Width = 22,
@@ -3827,6 +3844,7 @@ namespace Kerf.UI
 
             var italicBtn = new Button
             {
+                Template = CreateRoundedButtonTemplate(5),
                 Content = "I",
                 FontStyle = FontStyles.Italic,
                 FontWeight = FontWeights.Bold,
@@ -3903,7 +3921,8 @@ namespace Kerf.UI
                     Foreground = isSel ? Brushes.Black : Brushes.White,
                     BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78)),
                     BorderThickness = new Thickness(1),
-                    Cursor = Cursors.Hand
+                    Cursor = Cursors.Hand,
+                    Template = CreateRoundedButtonTemplate(5)
                 };
                 btn.Click += (s, e) =>
                 {
@@ -3945,7 +3964,8 @@ namespace Kerf.UI
                     Foreground = isSel ? Brushes.Black : Brushes.White,
                     BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78)),
                     BorderThickness = new Thickness(1),
-                    Cursor = Cursors.Hand
+                    Cursor = Cursors.Hand,
+                    Template = CreateRoundedButtonTemplate(5)
                 };
                 btn.Click += (s, e) =>
                 {
@@ -3989,7 +4009,8 @@ namespace Kerf.UI
                     Foreground = isSel ? Brushes.Black : Brushes.White,
                     BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78)),
                     BorderThickness = new Thickness(1),
-                    Cursor = Cursors.Hand
+                    Cursor = Cursors.Hand,
+                    Template = CreateRoundedButtonTemplate(5)
                 };
                 btn.Click += (s, e) =>
                 {
@@ -4207,15 +4228,23 @@ namespace Kerf.UI
             DockPanel.SetDock(lbl, Dock.Left);
             dock.Children.Add(lbl);
 
+            var border = new Border
+            {
+                Height = 26,
+                Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 76)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5)
+            };
             var tb = new TextBox
             {
                 Text = val.ToString("F0"),
                 FontSize = 12,
-                Height = 26,
-                Background = new SolidColorBrush(Color.FromRgb(28, 33, 48)),
+                Background = Brushes.Transparent,
                 Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(44, 52, 75)),
-                Padding = new Thickness(6, 2, 6, 2)
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(6, 2, 6, 2),
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             tb.LostFocus += (s, e) =>
             {
@@ -4230,8 +4259,8 @@ namespace Kerf.UI
                     if (double.TryParse(tb.Text, out d)) onChanged(d);
                 }
             };
-
-            dock.Children.Add(tb);
+            border.Child = tb;
+            dock.Children.Add(border);
             return dock;
         }
 
@@ -4266,16 +4295,25 @@ namespace Kerf.UI
             DockPanel.SetDock(swatch, Dock.Left);
             dock.Children.Add(swatch);
 
+            var tbBorder = new Border
+            {
+                Height = 26,
+                Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 76)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5)
+            };
             var tb = new TextBox
             {
                 Text = hex,
                 FontSize = 12,
-                Height = 26,
-                Background = new SolidColorBrush(Color.FromRgb(28, 33, 48)),
+                Background = Brushes.Transparent,
                 Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(44, 52, 75)),
-                Padding = new Thickness(6, 2, 6, 2)
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(6, 2, 6, 2),
+                VerticalContentAlignment = VerticalAlignment.Center
             };
+            tbBorder.Child = tb;
 
             swatch.MouseLeftButtonUp += (s, e) =>
             {
@@ -4297,7 +4335,7 @@ namespace Kerf.UI
                 }
             };
 
-            dock.Children.Add(tb);
+            dock.Children.Add(tbBorder);
             return dock;
         }
 
@@ -4501,7 +4539,57 @@ namespace Kerf.UI
                     }
                     else
                     {
-                        _selectedNodeIndex = -1;
+                        // Figma-style Segment Hit Test & Add Point / Bend
+                        int hitSeg;
+                        Point splitPt;
+                        if (BezierVectorEngine.HitTestSegment(_editingVectorNode.Geometry, canvasPt, tolerance, out hitSeg, out splitPt))
+                        {
+                            if (_activeTool == ToolType.Pen)
+                            {
+                                // Pen tool clicking on segment inserts a new vertex on the segment
+                                BezierVectorEngine.InsertNode(_editingVectorNode.Geometry, hitSeg + 1, splitPt);
+                                _selectedNodeIndex = hitSeg + 1;
+                                _isDraggingNodeAnchor = true;
+                                _startVectorGeometry = _editingVectorNode.Geometry.Clone();
+                                InvalidateAndRefresh(_editingVectorNode);
+                                History.MarkDirty();
+                                RefreshPropertyInspector();
+                                return;
+                            }
+                            else
+                            {
+                                // Select / Move tool clicking on segment bends the curve
+                                _isDraggingSegment = true;
+                                _draggingSegmentIndex = hitSeg;
+                                _startVectorGeometry = _editingVectorNode.Geometry.Clone();
+                                _selectedNodeIndex = -1;
+                                return;
+                            }
+                        }
+                        else if (_activeTool == ToolType.Pen && !_editingVectorNode.Geometry.IsClosed)
+                        {
+                            // Pen tool clicking on empty canvas extends open geometry
+                            if (_selectedNodeIndex == 0)
+                            {
+                                BezierVectorEngine.InsertNode(_editingVectorNode.Geometry, 0, canvasPt);
+                                _selectedNodeIndex = 0;
+                            }
+                            else
+                            {
+                                BezierVectorEngine.AddNode(_editingVectorNode.Geometry, canvasPt);
+                                _selectedNodeIndex = _editingVectorNode.Geometry.Nodes.Count - 1;
+                            }
+                            _isDraggingNodeAnchor = true;
+                            _startVectorGeometry = _editingVectorNode.Geometry.Clone();
+                            InvalidateAndRefresh(_editingVectorNode);
+                            History.MarkDirty();
+                            RefreshPropertyInspector();
+                            return;
+                        }
+                        else
+                        {
+                            _selectedNodeIndex = -1;
+                        }
                     }
                     RefreshCanvas();
                     RefreshPropertyInspector();
@@ -4782,6 +4870,15 @@ namespace Kerf.UI
                     }
                     return;
                 }
+            }
+
+            // Vector Edit Mode: Bend tool dragging segment
+            if (_isVectorEditing && _isDraggingSegment && _editingVectorNode != null && _editingVectorNode.Geometry != null && _draggingSegmentIndex >= 0)
+            {
+                BezierVectorEngine.BendSegment(_editingVectorNode.Geometry, _draggingSegmentIndex, canvasPt);
+                _sceneGraph.InvalidateNode(_editingVectorNode.Id);
+                RefreshCanvas();
+                return;
             }
 
             // Vector Edit Mode: Dragging anchor node or tangent handle
@@ -5274,6 +5371,17 @@ namespace Kerf.UI
 
                     RefreshCanvas();
                     RefreshPropertyInspector();
+                }
+            }
+
+            if (_isDraggingSegment)
+            {
+                _isDraggingSegment = false;
+                _draggingSegmentIndex = -1;
+                if (_editingVectorNode != null)
+                {
+                    _sceneGraph.InvalidateNode(_editingVectorNode.Id);
+                    RefreshCanvas();
                 }
             }
 
@@ -5931,7 +6039,7 @@ namespace Kerf.UI
             {
                 var typeFace = new Typeface("Segoe UI");
                 var badgeText = new FormattedText(
-                    "Vector Edit Mode (Esc / Enter to exit)",
+                    "Vector Edit Mode | V: Move • P: Pen • X: Cut • Enter: Done",
                     CultureInfo.CurrentCulture,
                     FlowDirection.LeftToRight,
                     typeFace,
@@ -7286,7 +7394,18 @@ namespace Kerf.UI
                     else if (e.Key == Key.R) { SetActiveTool(ToolType.Rect); }
                     else if (e.Key == Key.O) { SetActiveTool(ToolType.Ellipse); }
                     else if (e.Key == Key.F) { SetActiveTool(ToolType.Frame); }
-                    else if (e.Key == Key.B || e.Key == Key.P) { SetActiveTool(ToolType.Pen); }
+                    else if (e.Key == Key.P || e.Key == Key.B) { SetActiveTool(ToolType.Pen); }
+                    else if (e.Key == Key.X && _isVectorEditing && _editingVectorNode != null && _editingVectorNode.Geometry != null)
+                    {
+                        if (_selectedNodeIndex >= 0 && _selectedNodeIndex < _editingVectorNode.Geometry.Nodes.Count)
+                        {
+                            BezierVectorEngine.SplitPathAtNode(_editingVectorNode.Geometry, _selectedNodeIndex);
+                            InvalidateAndRefresh(_editingVectorNode);
+                            RefreshPropertyInspector();
+                            History.MarkDirty();
+                            e.Handled = true;
+                        }
+                    }
                     else if (e.Key == Key.T) { SetActiveTool(ToolType.Text); }
                     else if (e.Key == Key.L) { SetActiveTool(ToolType.Line); }
                     else if (e.Key == Key.Z) { ZoomIn(); e.Handled = true; }
@@ -7312,6 +7431,24 @@ namespace Kerf.UI
             };
         }
 
+        public static ControlTemplate CreateRoundedButtonTemplate(double cornerRadius)
+        {
+            var t = new ControlTemplate(typeof(Button));
+            var b = new FrameworkElementFactory(typeof(Border), "btnBorder");
+            b.SetValue(Border.CornerRadiusProperty, new CornerRadius(cornerRadius));
+            b.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Button.BackgroundProperty));
+            b.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Button.BorderBrushProperty));
+            b.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Button.BorderThicknessProperty));
+            b.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Button.PaddingProperty));
+            b.SetValue(Border.SnapsToDevicePixelsProperty, true);
+            var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+            cp.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            cp.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            b.AppendChild(cp);
+            t.VisualTree = b;
+            return t;
+        }
+
         private Button CreateIconButton(Geometry iconGeo, string tooltip, Action onClick)
         {
             var btn = new Button
@@ -7322,7 +7459,8 @@ namespace Kerf.UI
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
-                ToolTip = tooltip
+                ToolTip = tooltip,
+                Template = CreateRoundedButtonTemplate(6)
             };
             btn.Content = VectorIcons.CreateIcon(iconGeo, new SolidColorBrush(Color.FromRgb(170, 185, 210)), null, 16);
             btn.Click += (s, e) => onClick();
@@ -7342,7 +7480,8 @@ namespace Kerf.UI
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
-                Margin = new Thickness(2, 0, 2, 0)
+                Margin = new Thickness(2, 0, 2, 0),
+                Template = CreateRoundedButtonTemplate(5)
             };
             btn.Click += (s, e) => onClick();
             return btn;
@@ -7361,7 +7500,8 @@ namespace Kerf.UI
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
                 ToolTip = tooltip,
-                Margin = new Thickness(2, 0, 2, 0)
+                Margin = new Thickness(2, 0, 2, 0),
+                Template = CreateRoundedButtonTemplate(5)
             };
             btn.Click += (s, e) => onClick();
             return btn;

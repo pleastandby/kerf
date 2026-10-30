@@ -528,6 +528,24 @@ namespace Kerf.UI
             }
         }
 
+        public static ControlTemplate CreateRoundedButtonTemplate(double cornerRadius)
+        {
+            var t = new ControlTemplate(typeof(Button));
+            var b = new FrameworkElementFactory(typeof(Border), "btnBorder");
+            b.SetValue(Border.CornerRadiusProperty, new CornerRadius(cornerRadius));
+            b.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Button.BackgroundProperty));
+            b.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Button.BorderBrushProperty));
+            b.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Button.BorderThicknessProperty));
+            b.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Button.PaddingProperty));
+            b.SetValue(Border.SnapsToDevicePixelsProperty, true);
+            var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+            cp.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            cp.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            b.AppendChild(cp);
+            t.VisualTree = b;
+            return t;
+        }
+
         private Button CreateButton(string text, bool isPrimary)
         {
             var btn = new Button
@@ -544,7 +562,8 @@ namespace Kerf.UI
                 BorderBrush = isPrimary
                     ? new SolidColorBrush(Color.FromRgb(129, 140, 248))
                     : new SolidColorBrush(Color.FromRgb(50, 60, 85)),
-                BorderThickness = new Thickness(1)
+                BorderThickness = new Thickness(1),
+                Template = CreateRoundedButtonTemplate(8)
             };
             return btn;
         }

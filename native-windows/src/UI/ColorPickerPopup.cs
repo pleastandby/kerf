@@ -92,7 +92,8 @@ namespace Kerf.UI
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
                 HorizontalAlignment = HorizontalAlignment.Right,
-                ToolTip = "Close (Esc)"
+                ToolTip = "Close (Esc)",
+                Template = StudioView.CreateRoundedButtonTemplate(10)
             };
             closeBtn.Click += (s, e) =>
             {

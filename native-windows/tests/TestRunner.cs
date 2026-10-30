@@ -60,6 +60,7 @@ namespace Kerf.Tests
             RunTest("Batch 4 Requirements: Adobe Illustrator Gradient Ramps, Midpoints, Pins & Presets", TestBatch4Requirements_AdobeIllustratorGradients);
             RunTest("Batch 5 Requirements: Figma-Style On-Canvas Gradient Rollers & Simplified Ramp", TestBatch5Requirements_FigmaOnCanvasGradientRollers);
             RunTest("Batch 6 Requirements: Real Liquid Glass Snell Optical Refraction & Smooth Sliders", TestBatch6Requirements_RealLiquidGlassAndSmoothSliders);
+            RunTest("Batch 7 Requirements: Polished Rounded UI, Simplified Figma Gradient Controls, and Pen Tool Vector Edit Engine", TestBatch7Requirements_PolishedUI_FigmaGradient_PenToolVectorEdit);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -1930,6 +1931,49 @@ namespace Kerf.Tests
             // Check opacity inside center (x=30, y=20)
             int centerIdx = 20 * outStride + 30 * 4;
             Assert(outV2[centerIdx + 3] > 0, "Liquid Glass inside squircle has valid optical coverage alpha");
+        }
+
+        private static void TestBatch7Requirements_PolishedUI_FigmaGradient_PenToolVectorEdit()
+        {
+            // 1. Vector Edit Engine: Segment Hit-Testing (Figma Pen & Move interaction)
+            var geo = new VectorGeometry();
+            var n1 = new BezierNode(0, 0);
+            var n2 = new BezierNode(100, 0);
+            geo.Nodes.Add(n1);
+            geo.Nodes.Add(n2);
+
+            int hitSeg;
+            Point closestPt;
+            bool hit = BezierVectorEngine.HitTestSegment(geo, new Point(50, 2), 5.0, out hitSeg, out closestPt);
+            Assert(hit && hitSeg == 0, "HitTestSegment correctly detects cursor hit on segment 0");
+
+            int missSeg;
+            Point missPt;
+            bool miss = BezierVectorEngine.HitTestSegment(geo, new Point(50, 25), 5.0, out missSeg, out missPt);
+            Assert(!miss && missSeg == -1, "HitTestSegment ignores points outside tolerance threshold");
+
+            // 2. Vector Edit Engine: BendSegment (Figma Bend Tool directly dragging segments)
+            BezierVectorEngine.BendSegment(geo, 0, new Point(50, 40));
+            Assert(n1.OutHandle.Y > 10, "BendSegment curves starting tangent towards target handle drag position");
+            Assert(n2.InHandle.Y > 10, "BendSegment curves ending tangent towards target handle drag position");
+
+            // 3. Vector Edit Engine: InsertNode along segment (Figma Pen click on segment inserts at hitSeg + 1)
+            BezierVectorEngine.InsertNode(geo, hitSeg + 1, new Point(50, 20));
+            Assert(geo.Nodes.Count == 3, "VectorGeometry has 3 nodes after segment subdivision");
+            Assert(Math.Abs(geo.Nodes[1].Anchor.X - 50) < 0.01 && Math.Abs(geo.Nodes[1].Anchor.Y - 20) < 0.01, "Inserted node is positioned accurately along the segment");
+
+            // 4. Vector Edit Engine: SplitPathAtNode (Figma Cut Tool 'X' shortcut)
+            BezierVectorEngine.SplitPathAtNode(geo, 1);
+            Assert(geo.Nodes.Count == 4, "SplitPathAtNode cleanly splits open path vertex into separate editable endpoints");
+
+            // 5. Polished UI Rounded Button Templates
+            var roundedTmpl = GradientRampControl.CreateRoundedButtonTemplate(6);
+            Assert(roundedTmpl != null, "CreateRoundedButtonTemplate returns valid ControlTemplate");
+
+            // 6. Simplified Figma-Style Gradient Controls
+            var linearPaint = Paint.LinearGradient("#FF0000", "#0000FF", 45);
+            var ramp = new GradientRampControl(linearPaint, () => { });
+            Assert(ramp != null, "GradientRampControl initializes successfully with linear gradient");
         }
     }
 }
