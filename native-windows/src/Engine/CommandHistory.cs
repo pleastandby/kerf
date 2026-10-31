@@ -696,11 +696,19 @@ namespace Kerf.Engine
             else
             {
                 var parent = _page.FindLayerById(parentId);
-                if (parent != null)
+                if (parent != null && (parent.Type == ElementType.Frame || parent.Type == ElementType.Group))
                 {
-                    if (parent.Children == null) parent.Children = new List<LayerNode>();
-                    targetList = parent.Children;
-                    _source.ParentId = parent.Id;
+                    if (parent == _source || (!string.IsNullOrEmpty(parent.Id) && parent.Id == _source.Id) || Page.IsDescendant(_source, parent))
+                    {
+                        targetList = _page.Layers;
+                        _source.ParentId = null;
+                    }
+                    else
+                    {
+                        if (parent.Children == null) parent.Children = new List<LayerNode>();
+                        targetList = parent.Children;
+                        _source.ParentId = parent.Id;
+                    }
                 }
                 else
                 {

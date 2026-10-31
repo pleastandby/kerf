@@ -1,7 +1,7 @@
 # Kerf Studio — Progress & Modernization Handover Document
 
 **Last Updated:** October 29, 2026  
-**Status:** Completed / Milestone 11 Achieved  
+**Status:** Completed / Milestone 20 Achieved  
 **Target:** Modern GPU-Accelerated Desktop Vector Design Application with Native Rust Graphics Engine (100% Desktop-Only)
 
 ---
@@ -740,3 +740,35 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
 - **Total Tests:** 35
 - **Passing:** 35 (100%)
 - Added `TestBatch8Requirements_EffectsCollapseIcons_Templates_FrameSelection` covering effect expansion state cloning, icon scrub controls, slider compact dimensions, all 4 template generators, and transparent frame selection.
+
+---
+
+## 20. Layer Hierarchy Reparenting, WPF Visual Tree Synchronization & Undo/Redo Engine Stability
+
+### 1. Root Cause Analysis of `System.ArgumentException: Specified Visual is already a child of another Visual`
+- **WPF VisualTree Invariant:** In WPF, every `Visual` instance (including `DrawingVisual`) can have at most one visual parent at any time. Adding a visual to a `VisualCollection` when `VisualTreeHelper.GetParent(visual) != null` unconditionally throws `ArgumentException`.
+- **Timing & Order Failure:** In `RetainedSceneGraph.Synchronize(Page page)`, top-level visuals were cleared (`_rootVisual.Children.Clear()`), but existing child `vNode.Visual` instances still remained inside their old parent's `Children` collection. When a layer was moved from one frame to another (or to the root) via drag-and-drop or during an Undo/Redo operation, if the new parent was processed before the old parent had its children cleared, WPF attempted to add the still-attached child visual to the new parent's visual collection, causing a critical crash.
+- **Zombie Duplication in Model:** In `CanonicalDocument.RemoveLayerEverywhere()`, the method previously returned immediately on the first match (`return true;`), which could leave stale references if a node existed in both parent containers or if duplicate IDs occurred.
+
+### 2. Architectural Solution & Fixes
+- **Atomic Two-Phase Visual Detachment (`RetainedSceneGraph.cs`):**
+  - **Phase 1 (Global Detach):** Before reconstructing the visual hierarchy in `Synchronize(page)` and `Clear()`, all existing nodes in `_nodeLookup.Values` have their visuals safely detached from any parent (`SafeDetachVisual`), their visual children cleared (`vNode.Visual.Children.Clear()`), their logical children cleared (`vNode.Children.Clear()`), and their `Parent` set to `null`.
+  - **Phase 2 (Safe Re-attach):** Implemented `SafeAttachVisual(ContainerVisual parent, Visual child)` which inspects `VisualTreeHelper.GetParent(child)` and removes the child from any lingering visual container before adding it to `parent.Children`. Includes defensive `try-catch` exception handling for ultimate runtime resilience.
+  - **Cycle & Duplicate ID Guards:** Added `HashSet<string> visited` in `SyncLayerHierarchy` and cycle detection in `CollectNodeIds`, preventing infinite recursion in case of corrupted data hierarchies.
+- **Complete Cleanup Everywhere (`CanonicalDocument.cs`):**
+  - Updated `RemoveLayerEverywhere()` and `RemoveRecursive()` to iterate backwards and clean up all occurrences by reference and by ID (`node.Id == Layers[i].Id`).
+  - Strengthened `IsDescendant()` to match both by reference and by ID.
+- **Model Invariant Enforcement in Commands (`CommandHistory.cs` & `StudioView.cs`):**
+  - In `ReorderLayerCommand.MoveTo()`: Ensured target parent must be a container (`ElementType.Frame` or `ElementType.Group`). Guarded against moving a node into itself or into any of its descendants (`Page.IsDescendant(_source, parent)`), redirecting invalid moves to root.
+  - In `StudioView.MoveLayerHierarchy()` and card drop handlers: Guarded against `dropped == layer || dropped.Id == layer.Id`.
+
+### 3. Automated Verification Suite
+- **Total Tests:** 36
+- **Passing:** 36 (100%)
+- **Failing:** 0
+- Added `TestVisualReparentingAcrossHierarchyAndUndoRedo` verifying:
+  - Nested multi-frame layer reordering across hierarchies.
+  - Safe visual attachment and detachment across containers and root.
+  - Full Undo/Redo cycles restoring visual parents accurately.
+  - Rapid 20x back-and-forth stress reordering without leaks or errors.
+  - Non-container parenting and descendant cyclic nesting prevention.

@@ -954,25 +954,41 @@ namespace Kerf.Model
         public bool RemoveLayerEverywhere(LayerNode node)
         {
             if (node == null || Layers == null) return false;
-            if (Layers.Remove(node)) return true;
+            bool removed = false;
+            for (int i = Layers.Count - 1; i >= 0; i--)
+            {
+                if (Layers[i] == node || (!string.IsNullOrEmpty(node.Id) && Layers[i].Id == node.Id))
+                {
+                    Layers.RemoveAt(i);
+                    removed = true;
+                }
+            }
 
             foreach (var root in Layers)
             {
-                if (RemoveRecursive(root, node)) return true;
+                if (RemoveRecursive(root, node)) removed = true;
             }
-            return false;
+            return removed;
         }
 
         private bool RemoveRecursive(LayerNode current, LayerNode target)
         {
             if (current == null || current.Children == null) return false;
-            if (current.Children.Remove(target)) return true;
+            bool removed = false;
+            for (int i = current.Children.Count - 1; i >= 0; i--)
+            {
+                if (current.Children[i] == target || (!string.IsNullOrEmpty(target.Id) && current.Children[i].Id == target.Id))
+                {
+                    current.Children.RemoveAt(i);
+                    removed = true;
+                }
+            }
 
             foreach (var child in current.Children)
             {
-                if (RemoveRecursive(child, target)) return true;
+                if (RemoveRecursive(child, target)) removed = true;
             }
-            return false;
+            return removed;
         }
 
         public LayerNode FindLayerById(string id)
@@ -1042,11 +1058,11 @@ namespace Kerf.Model
         public static bool IsDescendant(LayerNode potentialParent, LayerNode potentialChild)
         {
             if (potentialParent == null || potentialChild == null) return false;
-            if (potentialParent == potentialChild) return true;
+            if (potentialParent == potentialChild || (!string.IsNullOrEmpty(potentialParent.Id) && potentialParent.Id == potentialChild.Id)) return true;
             if (potentialParent.Children == null) return false;
             foreach (var child in potentialParent.Children)
             {
-                if (child == potentialChild || IsDescendant(child, potentialChild)) return true;
+                if (child == potentialChild || (!string.IsNullOrEmpty(child.Id) && child.Id == potentialChild.Id) || IsDescendant(child, potentialChild)) return true;
             }
             return false;
         }

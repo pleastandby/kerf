@@ -1192,7 +1192,7 @@ namespace Kerf.UI
                 card.BorderThickness = new Thickness(1);
 
                 var dropped = e.Data.GetData(typeof(LayerNode)) as LayerNode;
-                if (dropped == null || dropped == layer) return;
+                if (dropped == null || dropped == layer || (dropped.Id != null && dropped.Id == layer.Id)) return;
 
                 double y = e.GetPosition(card).Y;
                 double h = card.ActualHeight;
@@ -6554,7 +6554,7 @@ namespace Kerf.UI
 
         public void MoveLayerHierarchy(LayerNode source, LayerNode target, DropPosition position)
         {
-            if (source == null || target == null || source == target) return;
+            if (source == null || target == null || source == target || (source.Id != null && source.Id == target.Id)) return;
             var page = Document.GetActivePage();
             if (page == null) return;
 

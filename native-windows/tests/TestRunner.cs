@@ -62,6 +62,7 @@ namespace Kerf.Tests
             RunTest("Batch 6 Requirements: Real Liquid Glass Snell Optical Refraction & Smooth Sliders", TestBatch6Requirements_RealLiquidGlassAndSmoothSliders);
             RunTest("Batch 7 Requirements: Polished Rounded UI, Simplified Figma Gradient Controls, and Pen Tool Vector Edit Engine", TestBatch7Requirements_PolishedUI_FigmaGradient_PenToolVectorEdit);
             RunTest("Batch 8 Requirements: Effects Collapse & Icon Labels, Instant Templates & Frame Selection No Fill", TestBatch8Requirements_EffectsCollapseIcons_Templates_FrameSelection);
+            RunTest("Visual Hierarchy Reparenting & Nested Undo/Redo Engine Synchronization", TestVisualReparentingAcrossHierarchyAndUndoRedo);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -2030,6 +2031,135 @@ namespace Kerf.Tests
             };
             Assert(frame.Fills != null && frame.Fills.Count == 0, "Frame Selection framing wrapper has no default fills (transparent)");
         }
+
+        private static void TestVisualReparentingAcrossHierarchyAndUndoRedo()
+        {
+            var page = new Page();
+            var frameA = new LayerNode
+            {
+                Id = "frame-a",
+                Name = "Frame A",
+                Type = ElementType.Frame,
+                X = 0,
+                Y = 0,
+                Width = 300,
+                Height = 300,
+                Children = new List<LayerNode>()
+            };
+
+            var frameB = new LayerNode
+            {
+                Id = "frame-b",
+                Name = "Frame B",
+                Type = ElementType.Frame,
+                X = 400,
+                Y = 0,
+                Width = 300,
+                Height = 300,
+                Children = new List<LayerNode>()
+            };
+
+            var rect1 = new LayerNode
+            {
+                Id = "rect-1",
+                Name = "Rectangle 1",
+                Type = ElementType.Rectangle,
+                X = 20,
+                Y = 20,
+                Width = 80,
+                Height = 80,
+                ParentId = "frame-a"
+            };
+            frameA.Children.Add(rect1);
+
+            var rect2 = new LayerNode
+            {
+                Id = "rect-2",
+                Name = "Rectangle 2",
+                Type = ElementType.Rectangle,
+                X = 120,
+                Y = 20,
+                Width = 80,
+                Height = 80,
+                ParentId = "frame-a"
+            };
+            frameA.Children.Add(rect2);
+
+            page.Layers.Add(frameA);
+            page.Layers.Add(frameB);
+
+            var renderer = new GpuRenderer();
+            var sceneGraph = new RetainedSceneGraph(renderer);
+
+            // 1. Initial synchronization
+            sceneGraph.Synchronize(page);
+            var vFrameA = sceneGraph.GetVisualNode("frame-a");
+            var vFrameB = sceneGraph.GetVisualNode("frame-b");
+            var vRect1 = sceneGraph.GetVisualNode("rect-1");
+            Assert(vFrameA != null && vFrameB != null && vRect1 != null, "SceneGraph must index all frame and rect nodes");
+            Assert(vFrameA.Visual.Children.Contains(vRect1.Visual), "Rect1 visual must be child of Frame A visual initially");
+
+            // 2. Reorder rect1 from Frame A to Frame B (execute command)
+            var reorderToB = new ReorderLayerCommand(page, rect1, "frame-a", 0, "frame-b", 0, () =>
+            {
+                sceneGraph.Synchronize(page);
+            });
+            reorderToB.Execute();
+
+            Assert(vFrameB.Visual.Children.Contains(vRect1.Visual), "After move to Frame B, Rect1 visual must be child of Frame B visual");
+            Assert(!vFrameA.Visual.Children.Contains(vRect1.Visual), "Rect1 visual must NOT remain in Frame A visual children");
+
+            // 3. Move rect1 from Frame B to Root (before Frame A in page.Layers)
+            var reorderToRoot = new ReorderLayerCommand(page, rect1, "frame-b", 0, null, 0, () =>
+            {
+                sceneGraph.Synchronize(page);
+            });
+            reorderToRoot.Execute();
+
+            Assert(sceneGraph.RootVisual.Children.Contains(vRect1.Visual), "After move to root, Rect1 visual must be child of RootVisual");
+            Assert(!vFrameB.Visual.Children.Contains(vRect1.Visual), "Rect1 visual must NOT remain in Frame B visual children");
+
+            // 4. Undo move to root (rect1 returns to Frame B)
+            reorderToRoot.Unexecute();
+            Assert(vFrameB.Visual.Children.Contains(vRect1.Visual), "After undo, Rect1 visual must be restored to Frame B visual");
+            Assert(!sceneGraph.RootVisual.Children.Contains(vRect1.Visual), "Rect1 visual must NOT remain in RootVisual");
+
+            // 5. Undo move to Frame B (rect1 returns to Frame A)
+            reorderToB.Unexecute();
+            Assert(vFrameA.Visual.Children.Contains(vRect1.Visual), "After second undo, Rect1 visual must be restored to Frame A visual");
+            Assert(!vFrameB.Visual.Children.Contains(vRect1.Visual), "Rect1 visual must NOT remain in Frame B visual");
+
+            // 6. Redo all
+            reorderToB.Execute();
+            Assert(vFrameB.Visual.Children.Contains(vRect1.Visual), "Redo move to Frame B restored visual to Frame B");
+            reorderToRoot.Execute();
+            Assert(sceneGraph.RootVisual.Children.Contains(vRect1.Visual), "Redo move to Root restored visual to Root");
+
+            // 7. Stress test: Reparent back and forth 20 times rapidly
+            for (int i = 0; i < 20; i++)
+            {
+                reorderToRoot.Unexecute();
+                reorderToRoot.Execute();
+            }
+
+            // 8. Prevent non-container parenting & cyclic descendant nesting
+            // A: Non-container (Rectangle) cannot contain Frame A
+            var nonContainerCmd = new ReorderLayerCommand(page, frameA, null, 0, "rect-1", 0, () =>
+            {
+                sceneGraph.Synchronize(page);
+            });
+            nonContainerCmd.Execute();
+            Assert(rect1.Children == null || !rect1.Children.Contains(frameA), "Rectangle 1 must never become a container of Frame A");
+
+            // B: Attempting to move Frame A into its own child frame (nested cycle)
+            var childFrame = new LayerNode { Id = "child-frame", Name = "Child Frame", Type = ElementType.Frame, ParentId = "frame-a" };
+            frameA.Children.Add(childFrame);
+            var cycleCmd = new ReorderLayerCommand(page, frameA, null, 0, "child-frame", 0, () =>
+            {
+                sceneGraph.Synchronize(page);
+            });
+            cycleCmd.Execute();
+            Assert(childFrame.Children == null || !childFrame.Children.Contains(frameA), "Child Frame must never contain its own ancestor Frame A");
+        }
     }
 }
-

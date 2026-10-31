@@ -93,6 +93,13 @@ namespace Kerf.Engine
         public void Clear()
         {
             _rootVisual.Children.Clear();
+            foreach (var vNode in _nodeLookup.Values)
+            {
+                SafeDetachVisual(vNode.Visual);
+                vNode.Visual.Children.Clear();
+                vNode.Children.Clear();
+                vNode.Parent = null;
+            }
             _nodeLookup.Clear();
             _visualLookup.Clear();
         }
@@ -126,26 +133,108 @@ namespace Kerf.Engine
                 if (vNode.Parent != null)
                 {
                     vNode.Parent.Children.Remove(vNode);
-                    vNode.Parent.Visual.Children.Remove(vNode.Visual);
                 }
+                SafeDetachVisual(vNode.Visual);
+                vNode.Visual.Children.Clear();
+                vNode.Children.Clear();
+                vNode.Parent = null;
                 _visualLookup.Remove(vNode.Visual);
                 _nodeLookup.Remove(id);
             }
 
-            // Synchronize tree structure
+            // CRITICAL: Detach ALL existing visuals from their parents and clear their children
+            // before reconstructing the visual hierarchy. In WPF, a Visual can only have one parent.
+            // If layers were reordered, reparented, or undone/redone across frames, existing child
+            // visuals would still be attached to their old parents, causing:
+            // "System.ArgumentException: Specified Visual is already a child of another Visual"
             _rootVisual.Children.Clear();
+            foreach (var vNode in _nodeLookup.Values)
+            {
+                SafeDetachVisual(vNode.Visual);
+                vNode.Visual.Children.Clear();
+                vNode.Children.Clear();
+                vNode.Parent = null;
+            }
+
+            // Synchronize tree structure
+            var visited = new HashSet<string>();
             foreach (var layer in page.Layers)
             {
-                var vNode = SyncLayerHierarchy(layer, null);
-                _rootVisual.Children.Add(vNode.Visual);
+                var vNode = SyncLayerHierarchy(layer, null, visited);
+                if (vNode != null)
+                {
+                    SafeAttachVisual(_rootVisual, vNode.Visual);
+                }
+            }
+        }
+
+        private static void SafeDetachVisual(Visual child)
+        {
+            if (child == null) return;
+            try
+            {
+                var parent = VisualTreeHelper.GetParent(child) as ContainerVisual;
+                if (parent != null)
+                {
+                    parent.Children.Remove(child);
+                }
+            }
+            catch
+            {
+                // Ignore any detach exceptions
+            }
+        }
+
+        private static void SafeAttachVisual(ContainerVisual parent, Visual child)
+        {
+            if (parent == null || child == null) return;
+            try
+            {
+                var currentParent = VisualTreeHelper.GetParent(child) as ContainerVisual;
+                if (currentParent != null)
+                {
+                    if (currentParent == parent && parent.Children.Contains(child))
+                    {
+                        return; // Already attached to this parent
+                    }
+                    currentParent.Children.Remove(child);
+                }
+                parent.Children.Add(child);
+            }
+            catch (ArgumentException)
+            {
+                // In the rare event of lingering composition target or multi-thread delay,
+                // re-attempt detachment before attaching.
+                try
+                {
+                    var fallbackParent = VisualTreeHelper.GetParent(child) as ContainerVisual;
+                    if (fallbackParent != null)
+                    {
+                        fallbackParent.Children.Remove(child);
+                    }
+                    if (!parent.Children.Contains(child))
+                    {
+                        parent.Children.Add(child);
+                    }
+                }
+                catch
+                {
+                    // Fail-safe to guarantee studio never crashes on visual hierarchy sync
+                }
             }
         }
 
         private void CollectNodeIds(IEnumerable<LayerNode> layers, HashSet<string> ids)
         {
+            if (layers == null) return;
             foreach (var layer in layers)
             {
-                ids.Add(layer.Id);
+                if (layer == null || string.IsNullOrEmpty(layer.Id)) continue;
+                if (!ids.Add(layer.Id))
+                {
+                    // Guard against cyclic data model references
+                    continue;
+                }
                 if (layer.Children != null && layer.Children.Count > 0)
                 {
                     CollectNodeIds(layer.Children, ids);
@@ -153,8 +242,14 @@ namespace Kerf.Engine
             }
         }
 
-        private SceneVisualNode SyncLayerHierarchy(LayerNode layer, SceneVisualNode parent)
+        private SceneVisualNode SyncLayerHierarchy(LayerNode layer, SceneVisualNode parent, HashSet<string> visited)
         {
+            if (layer == null || string.IsNullOrEmpty(layer.Id) || visited.Contains(layer.Id))
+            {
+                return null;
+            }
+            visited.Add(layer.Id);
+
             SceneVisualNode vNode;
             if (!_nodeLookup.TryGetValue(layer.Id, out vNode))
             {
@@ -177,9 +272,16 @@ namespace Kerf.Engine
             {
                 foreach (var child in layer.Children)
                 {
-                    var childVNode = SyncLayerHierarchy(child, vNode);
-                    vNode.Children.Add(childVNode);
-                    vNode.Visual.Children.Add(childVNode.Visual);
+                    if (child == null || string.IsNullOrEmpty(child.Id) || visited.Contains(child.Id))
+                    {
+                        continue;
+                    }
+                    var childVNode = SyncLayerHierarchy(child, vNode, visited);
+                    if (childVNode != null)
+                    {
+                        vNode.Children.Add(childVNode);
+                        SafeAttachVisual(vNode.Visual, childVNode.Visual);
+                    }
                 }
             }
 
