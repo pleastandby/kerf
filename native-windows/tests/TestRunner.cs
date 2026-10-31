@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Kerf.Engine;
+using Kerf.Engine.Animation;
 using Kerf.IO;
 using Kerf.Model;
 using Kerf.Tools;
@@ -64,6 +65,7 @@ namespace Kerf.Tests
             RunTest("Batch 8 Requirements: Effects Collapse & Icon Labels, Instant Templates & Frame Selection No Fill", TestBatch8Requirements_EffectsCollapseIcons_Templates_FrameSelection);
             RunTest("Visual Hierarchy Reparenting & Nested Undo/Redo Engine Synchronization", TestVisualReparentingAcrossHierarchyAndUndoRedo);
             RunTest("Corner Radius On-Canvas Handles & Figma Auto Layout Flexbox Model", TestCornerRadiusNodesAndFigmaAutoLayoutFlexbox);
+            RunTest("Rive Animation Engine & State Machine Runtime (newreq.md)", TestRiveAnimationAndStateMachineEngine);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -2206,6 +2208,222 @@ namespace Kerf.Tests
             AutoLayoutEngine.Reflow(wrapped);
             Assert(wrapped.Children[0] == frame2, "Child frames reorder according to drag position along flex axis");
             Assert(wrapped.Children[1] == frame1, "Second child follows first in flexbox flow");
+        }
+
+        private static void TestRiveAnimationAndStateMachineEngine()
+        {
+            // 1. Cubic Bezier Solver (Newton-Raphson + Bisection) & Easing Curves
+            double easeVal = CubicBezierEase.Evaluate(0.5, 0.25, 0.1, 0.25, 1.0);
+            Assert(easeVal > 0.0 && easeVal < 1.0, "Cubic Bezier evaluates accurately");
+            Assert(Math.Abs(CubicBezierEase.Linear(0.5) - 0.5) < 1e-6, "Linear ease at 0.5 is 0.5");
+            Assert(CubicBezierEase.Evaluate(0.0, 0.42, 0.0, 0.58, 1.0) == 0.0, "Ease at 0.0 is 0.0");
+            Assert(CubicBezierEase.Evaluate(1.0, 0.42, 0.0, 0.58, 1.0) == 1.0, "Ease at 1.0 is 1.0");
+
+            // 2. Track & Keyframe Interpolation (Hold, Linear, Cubic)
+            Track track = new Track(101, (ushort)PropKey.X);
+            track.AddKeyframe(Keyframe.Linear(0.0, 50.0));
+            track.AddKeyframe(Keyframe.Cubic(1.0, 150.0, 0.25, 0.1, 0.25, 1.0));
+            track.AddKeyframe(Keyframe.Hold(2.0, 300.0));
+            track.AddKeyframe(Keyframe.Linear(3.0, 500.0));
+
+            Assert(track.Sample(-0.5) == 50.0, "Track samples start value before time 0");
+            Assert(Math.Abs(track.Sample(0.5) - 100.0) < 1e-4, "Track samples linear midpoint at 100.0");
+            Assert(track.Sample(1.0) == 150.0, "Track samples exact keyframe at 1.0s");
+            Assert(track.Sample(2.5) == 300.0, "Track holds value during Hold interval");
+            Assert(track.Sample(4.0) == 500.0, "Track samples end value after time 3.0s");
+
+            // 3. Clip advance and loop modes (OneShot, Loop, PingPong)
+            ClipInstance inst = new ClipInstance(0);
+            double duration = 2.0;
+
+            // OneShot
+            inst.Advance(2.5, duration, LoopMode.OneShot);
+            Assert(inst.Time == 2.0, "OneShot clamps at duration");
+
+            // Loop
+            inst.Time = 0.0;
+            inst.Advance(2.5, duration, LoopMode.Loop);
+            Assert(Math.Abs(inst.Time - 0.5) < 1e-4, "Loop wraps time with modulo");
+
+            // PingPong
+            inst.Time = 0.0;
+            inst.Direction = 1;
+            inst.Advance(2.5, duration, LoopMode.PingPong);
+            Assert(inst.Direction == -1, "PingPong reverses direction on hitting boundary");
+            Assert(Math.Abs(inst.Time - 1.5) < 1e-4, "PingPong bounces back from duration");
+
+            // 4. State Machine Runtime: Inputs, Conditions, Transitions & Trigger Auto-Clear
+            StateMachineDefinition smDef = new StateMachineDefinition("InteractiveCard");
+            int trigClick = smDef.AddInput(MachineInput.Trigger("onClick"));
+            int boolHover = smDef.AddInput(MachineInput.Bool("isHover", false));
+            int numSpeed = smDef.AddInput(MachineInput.Number("speed", 1.0));
+
+            MachineLayer layer = new MachineLayer("BaseLayer");
+            int sIdle = layer.AddState(new MachineState(0, "Idle", StateKind.Animation, 0));
+            int sHover = layer.AddState(new MachineState(1, "Hover", StateKind.Animation, 1));
+            int sPressed = layer.AddState(new MachineState(2, "Pressed", StateKind.Animation, 2));
+
+            // Idle -> Hover on isHover == true
+            layer.AddTransition(new StateTransition(sIdle, sHover, 0.2).WithCondition(new TransitionCondition(boolHover, ConditionOp.Eq, 1.0)));
+            // Hover -> Pressed on onClick Trigger
+            layer.AddTransition(new StateTransition(sHover, sPressed, 0.1).WithCondition(new TransitionCondition(trigClick, ConditionOp.Eq, 1.0)));
+
+            smDef.AddLayer(layer);
+
+            List<Clip> clips = new List<Clip>();
+            Clip cIdle = new Clip(0, "IdleClip", 1.0, 60.0, LoopMode.Loop);
+            Clip cHover = new Clip(1, "HoverClip", 1.0, 60.0, LoopMode.Loop);
+            Clip cPressed = new Clip(2, "PressedClip", 1.0, 60.0, LoopMode.OneShot);
+
+            Track trX = new Track(101, (ushort)PropKey.X);
+            trX.AddKeyframe(Keyframe.Linear(0.0, 100.0));
+            trX.AddKeyframe(Keyframe.Linear(1.0, 200.0));
+            cPressed.AddTrack(trX);
+
+            clips.Add(cIdle);
+            clips.Add(cHover);
+            clips.Add(cPressed);
+
+            StateMachineRuntime smRuntime = new StateMachineRuntime(smDef, clips);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sIdle, "State machine starts in Entry/Idle state");
+
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            smRuntime.Update(0.016, pose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sIdle, "Remains in Idle state with no inputs");
+
+            // Activate hover
+            smRuntime.SetBool(boolHover, true);
+            smRuntime.Update(0.016, pose);
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition != null, "Transition to Hover started");
+
+            // Advance through transition
+            smRuntime.Update(0.25, pose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sHover, "Transition to Hover completed");
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition == null, "Transition cleared upon completion");
+
+            // Fire trigger onClick
+            smRuntime.FireTrigger(trigClick);
+            Assert(smDef.Inputs[trigClick].Fired, "Trigger is active before update");
+            smRuntime.Update(0.016, pose);
+            Assert(!smDef.Inputs[trigClick].Fired, "Trigger MUST be cleared automatically after update (lasts 1 frame)");
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition != null, "Transition to Pressed started via Trigger");
+
+            smRuntime.Update(0.15, pose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sPressed, "Transition to Pressed completed");
+
+            // 5. Zero-Duration Chain Resolution with Cycle Guard
+            StateMachineDefinition chainDef = new StateMachineDefinition("Chain");
+            MachineLayer chainLayer = new MachineLayer("ChainLayer");
+            int c0 = chainLayer.AddState(new MachineState(0, "C0", StateKind.Entry));
+            int c1 = chainLayer.AddState(new MachineState(1, "C1", StateKind.Animation, 0));
+            int c2 = chainLayer.AddState(new MachineState(2, "C2", StateKind.Animation, 0));
+            chainLayer.AddTransition(new StateTransition(c0, c1, 0.0));
+            chainLayer.AddTransition(new StateTransition(c1, c2, 0.0));
+            chainDef.AddLayer(chainLayer);
+
+            StateMachineRuntime chainRuntime = new StateMachineRuntime(chainDef, clips);
+            chainRuntime.Update(0.016, pose);
+            Assert(chainRuntime.LayerRuntimes[0].CurrentState == c2, "Zero-duration transition chain resolved instantly to C2 in 1 update");
+
+            // 6. Interrupted Transition Snapshotting
+            StateMachineDefinition interDef = new StateMachineDefinition("Interruptible");
+            int boolJump = interDef.AddInput(MachineInput.Bool("jump", false));
+            MachineLayer interLayer = new MachineLayer("InterLayer");
+            int iA = interLayer.AddState(new MachineState(0, "A", StateKind.Animation, 0));
+            int iB = interLayer.AddState(new MachineState(1, "B", StateKind.Animation, 1));
+            int iC = interLayer.AddState(new MachineState(2, "C", StateKind.Animation, 2));
+            interLayer.AddTransition(new StateTransition(iA, iB, 1.0).WithInterrupt(true));
+            interLayer.AddTransition(new StateTransition(iA, iC, 0.5).WithCondition(new TransitionCondition(boolJump, ConditionOp.Eq, 1.0)).WithInterrupt(true));
+            interDef.AddLayer(interLayer);
+
+            StateMachineRuntime interRuntime = new StateMachineRuntime(interDef, clips);
+            interRuntime.Update(0.016, pose); // starts A -> B
+            interRuntime.Update(0.4, pose);   // mid-blend
+            Assert(interRuntime.LayerRuntimes[0].ActiveTransition != null && interRuntime.LayerRuntimes[0].ActiveTransition.ToState == iB, "Mid-transition to B");
+
+            // Interrupt mid-blend by setting jump = true
+            interRuntime.SetBool(boolJump, true);
+            interRuntime.Update(0.016, pose);
+            Assert(interRuntime.LayerRuntimes[0].ActiveTransition != null && interRuntime.LayerRuntimes[0].ActiveTransition.ToState == iC, "Interrupted to C");
+            Assert(interRuntime.LayerRuntimes[0].ActiveTransition.SnapshotPose != null, "Snapshot pose captured at interruption point to eliminate visual pops");
+
+            // 7. 1D Blend & Direct Blend States
+            StateMachineDefinition blendDef = new StateMachineDefinition("BlendMachine");
+            int blendInput = blendDef.AddInput(MachineInput.Number("speed", 0.5));
+            MachineLayer blendLayer = new MachineLayer("BlendLayer");
+            MachineState b1d = new MachineState(0, "BlendWalkRun", StateKind.Blend1D);
+            b1d.BlendInputIndex = blendInput;
+            b1d.Blend1DItems.Add(new Blend1DItem(0.0, 0)); // Clip 0
+            b1d.Blend1DItems.Add(new Blend1DItem(1.0, 2)); // Clip 2 (PressedClip with trX 100->200)
+            blendLayer.AddState(b1d);
+            blendDef.AddLayer(blendLayer);
+
+            StateMachineRuntime blendRuntime = new StateMachineRuntime(blendDef, clips);
+            var blendPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            blendRuntime.Update(0.0, blendPose);
+            Assert(blendPose.ContainsKey(101) && blendPose[101].ContainsKey((ushort)PropKey.X), "1D Blend produces animated property output");
+            double blendVal = blendPose[101][(ushort)PropKey.X];
+            Assert(blendVal >= 40.0 && blendVal <= 160.0, string.Format("1D Blend evaluated between clips at 50% threshold, got {0}", blendVal));
+
+            // 8. Pointer Event Listeners
+            NodeListener btnListener = new NodeListener(42, PointerEventKind.Down);
+            btnListener.Actions.Add(new ListenerAction(ActionKind.Fire, trigClick));
+            smDef.AddListener(btnListener);
+
+            smRuntime.OnPointerEvent(42, PointerEventKind.Down);
+            Assert(smDef.Inputs[trigClick].Fired, "Pointer down event on target node fired the configured trigger input");
+
+            // 9. Smart Animate Prototype Compiler & Property Binder
+            var frameA = new Dictionary<uint, Dictionary<ushort, double>>();
+            var frameB = new Dictionary<uint, Dictionary<ushort, double>>();
+            frameA[7] = new Dictionary<ushort, double>();
+            frameA[7][(ushort)PropKey.X] = 100.0;
+            frameA[7][(ushort)PropKey.Opacity] = 1.0;
+
+            frameB[7] = new Dictionary<ushort, double>();
+            frameB[7][(ushort)PropKey.X] = 300.0;
+            frameB[7][(ushort)PropKey.Opacity] = 0.5;
+
+            Clip smartClip = SmartAnimateCompiler.CompileTransitionClip(99, "SmartTrans", 0.5, frameA, frameB);
+            Assert(smartClip.Tracks.Count == 2, "Smart Animate compiler generated 2 tracks for differing properties");
+
+            var smartPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            smartClip.SampleToPose(0.5, smartPose);
+            Assert(smartPose.ContainsKey(7) && Math.Abs(smartPose[7][(ushort)PropKey.X] - 300.0) < 50.0, "Smart animate sampled interpolated position");
+
+            LayerNode testLayer = new LayerNode { Id = "test-node", X = 0, Y = 0, Width = 100, Height = 100, Opacity = 1.0 };
+            PropertyBinder.ApplyPoseToLayer(testLayer, 7, smartPose);
+            Assert(testLayer.X == smartPose[7][(ushort)PropKey.X], "PropertyBinder updated LayerNode X from animation pose");
+            Assert(testLayer.Opacity == smartPose[7][(ushort)PropKey.Opacity], "PropertyBinder updated LayerNode Opacity from animation pose");
+
+            // 10. Native Rust Interop Verification
+            if (AnimationNativeBridge.IsNativeAvailable)
+            {
+                ulong nativeCtx = AnimationNativeBridge.kerf_anim_context_create();
+                Assert(nativeCtx != 0, "Native Rust animation context created successfully via C-ABI");
+
+                uint nativeClip = AnimationNativeBridge.kerf_anim_clip_create(nativeCtx, 1, "NativeWalk", 1.0f, 60.0f, 1);
+                uint nativeTrack = AnimationNativeBridge.kerf_anim_clip_add_track(nativeCtx, nativeClip, 55, (ushort)PropKey.Width);
+                AnimationNativeBridge.kerf_anim_track_add_keyframe(nativeCtx, nativeClip, nativeTrack, 0.0f, 100.0f, 1, 0, 0, 1, 1);
+                AnimationNativeBridge.kerf_anim_track_add_keyframe(nativeCtx, nativeClip, nativeTrack, 1.0f, 200.0f, 1, 0, 0, 1, 1);
+
+                float sampledWidth = AnimationNativeBridge.kerf_anim_track_sample(nativeCtx, nativeClip, nativeTrack, 0.5f);
+                Assert(Math.Abs(sampledWidth - 150.0f) < 0.1f, string.Format("Native Rust track sampled at midpoint: expected 150, got {0}", sampledWidth));
+
+                uint nativeSm = AnimationNativeBridge.kerf_sm_create(nativeCtx, "NativeSM");
+                uint nativeInput = AnimationNativeBridge.kerf_sm_add_input(nativeCtx, nativeSm, "isActive", 0, 0.0f);
+                uint nativeLayer = AnimationNativeBridge.kerf_sm_add_layer(nativeCtx, nativeSm, "MainLayer");
+                uint nativeS0 = AnimationNativeBridge.kerf_sm_add_state(nativeCtx, nativeSm, nativeLayer, "Off", 0, 0);
+                uint nativeS1 = AnimationNativeBridge.kerf_sm_add_state(nativeCtx, nativeSm, nativeLayer, "On", 3, nativeClip);
+                uint nativeTrans = AnimationNativeBridge.kerf_sm_add_transition(nativeCtx, nativeSm, nativeLayer, nativeS0, nativeS1, 0.1f, 0.0f, 0, 1);
+                AnimationNativeBridge.kerf_sm_transition_add_condition(nativeCtx, nativeSm, nativeLayer, nativeTrans, nativeInput, 0, 1.0f);
+
+                AnimationNativeBridge.kerf_sm_set_bool(nativeCtx, nativeSm, nativeInput, 1);
+                uint redrawNeeded = AnimationNativeBridge.kerf_sm_advance(nativeCtx, nativeSm, 0.016f);
+                Assert(redrawNeeded == 1, "Native Rust state machine requires redraw upon starting transition");
+
+                AnimationNativeBridge.kerf_anim_context_destroy(nativeCtx);
+            }
         }
     }
 }

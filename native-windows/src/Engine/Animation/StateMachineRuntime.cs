@@ -1,0 +1,557 @@
+using System;
+using System.Collections.Generic;
+
+namespace Kerf.Engine.Animation
+{
+    public class ActiveTransitionState
+    {
+        public StateTransition Definition { get; set; }
+        public int ToState { get; set; }
+        public ClipInstance ToTime { get; set; }
+        public double Elapsed { get; set; }
+        public double Duration { get; set; }
+        public Dictionary<uint, Dictionary<ushort, double>> SnapshotPose { get; set; }
+
+        public ActiveTransitionState(StateTransition def, int toState, double duration)
+        {
+            Definition = def;
+            ToState = toState;
+            ToTime = new ClipInstance(toState);
+            Elapsed = 0.0;
+            Duration = Math.Max(0.0, duration);
+            SnapshotPose = null;
+        }
+    }
+
+    public class LayerRuntimeState
+    {
+        public int CurrentState { get; set; }
+        public ClipInstance CurTime { get; set; }
+        public ActiveTransitionState ActiveTransition { get; set; }
+        public bool IsFinished { get; set; }
+
+        public LayerRuntimeState(int entryState)
+        {
+            CurrentState = entryState;
+            CurTime = new ClipInstance(entryState);
+            ActiveTransition = null;
+            IsFinished = false;
+        }
+    }
+
+    public class StateMachineRuntime
+    {
+        public StateMachineDefinition Definition { get; private set; }
+        public List<Clip> Clips { get; private set; }
+        public List<LayerRuntimeState> LayerRuntimes { get; private set; }
+        public List<string> ReportedEvents { get; private set; }
+
+        public StateMachineRuntime(StateMachineDefinition def, List<Clip> clips)
+        {
+            Definition = def ?? new StateMachineDefinition("Empty");
+            Clips = clips ?? new List<Clip>();
+            LayerRuntimes = new List<LayerRuntimeState>();
+            ReportedEvents = new List<string>();
+
+            for (int i = 0; i < Definition.Layers.Count; i++)
+            {
+                MachineLayer layer = Definition.Layers[i];
+                int entryIdx = 0;
+                for (int s = 0; s < layer.States.Count; s++)
+                {
+                    if (layer.States[s].Kind == StateKind.Entry)
+                    {
+                        entryIdx = s;
+                        break;
+                    }
+                }
+                LayerRuntimes.Add(new LayerRuntimeState(entryIdx));
+            }
+        }
+
+        public void SetBool(int inputIdx, bool val)
+        {
+            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+            {
+                Definition.Inputs[inputIdx].Value = val ? 1.0 : 0.0;
+            }
+        }
+
+        public void SetNumber(int inputIdx, double val)
+        {
+            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+            {
+                Definition.Inputs[inputIdx].Value = val;
+            }
+        }
+
+        public void FireTrigger(int inputIdx)
+        {
+            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+            {
+                Definition.Inputs[inputIdx].Fired = true;
+            }
+        }
+
+        public double GetInputValue(int inputIdx)
+        {
+            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+            {
+                return Definition.Inputs[inputIdx].Value;
+            }
+            return 0.0;
+        }
+
+        public void OnPointerEvent(uint targetNodeId, PointerEventKind kind)
+        {
+            List<ListenerAction> actionsToRun = new List<ListenerAction>();
+            for (int i = 0; i < Definition.Listeners.Count; i++)
+            {
+                NodeListener listener = Definition.Listeners[i];
+                if (listener.TargetNodeId == targetNodeId && listener.Kind == kind)
+                {
+                    actionsToRun.AddRange(listener.Actions);
+                }
+            }
+
+            for (int a = 0; a < actionsToRun.Count; a++)
+            {
+                ListenerAction action = actionsToRun[a];
+                switch (action.Kind)
+                {
+                    case ActionKind.SetBool:
+                        SetBool(action.InputIndex, action.Parameter > 0.5);
+                        break;
+                    case ActionKind.SetNumber:
+                        SetNumber(action.InputIndex, action.Parameter);
+                        break;
+                    case ActionKind.Fire:
+                        FireTrigger(action.InputIndex);
+                        break;
+                }
+            }
+        }
+
+        private double GetNormalizedProgress(MachineLayer layer, int currentStateIdx, double curTime)
+        {
+            if (currentStateIdx < 0 || currentStateIdx >= layer.States.Count) return 1.0;
+            MachineState state = layer.States[currentStateIdx];
+            if (state.Kind == StateKind.Animation && state.ClipIndex >= 0 && state.ClipIndex < Clips.Count)
+            {
+                double d = Clips[state.ClipIndex].Duration;
+                return (d > 0.0) ? Math.Max(0.0, curTime / d) : 1.0;
+            }
+            return 1.0;
+        }
+
+        private StateTransition FindValidTransition(MachineLayer layer, int currentState, double curTime, int activeTransitionToState)
+        {
+            int anyStateIdx = -1;
+            for (int s = 0; s < layer.States.Count; s++)
+            {
+                if (layer.States[s].Kind == StateKind.Any)
+                {
+                    anyStateIdx = s;
+                    break;
+                }
+            }
+
+            // Ordered candidate search: transitions from current state first, then Any state
+            List<StateTransition> candidates = new List<StateTransition>();
+            for (int t = 0; t < layer.Transitions.Count; t++)
+            {
+                if (layer.Transitions[t].FromState == currentState)
+                {
+                    candidates.Add(layer.Transitions[t]);
+                }
+            }
+            if (anyStateIdx >= 0)
+            {
+                for (int t = 0; t < layer.Transitions.Count; t++)
+                {
+                    if (layer.Transitions[t].FromState == anyStateIdx)
+                    {
+                        candidates.Add(layer.Transitions[t]);
+                    }
+                }
+            }
+
+            double progress = GetNormalizedProgress(layer, currentState, curTime);
+
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                StateTransition trans = candidates[i];
+
+                // Avoid self-restart loop if from Any to current
+                if (anyStateIdx >= 0 && trans.FromState == anyStateIdx && trans.ToState == currentState)
+                {
+                    continue;
+                }
+
+                // If currently transitioning, do not interrupt with the same target state
+                if (activeTransitionToState >= 0 && trans.ToState == activeTransitionToState)
+                {
+                    continue;
+                }
+
+                // Check exit time
+                if (trans.ExitTime.HasValue && progress < trans.ExitTime.Value)
+                {
+                    continue;
+                }
+
+                // Check all conditions
+                bool allConditionsPassed = true;
+                for (int c = 0; c < trans.Conditions.Count; c++)
+                {
+                    if (!trans.Conditions[c].IsTrue(Definition.Inputs))
+                    {
+                        allConditionsPassed = false;
+                        break;
+                    }
+                }
+
+                if (allConditionsPassed)
+                {
+                    return trans;
+                }
+            }
+
+            return null;
+        }
+
+        public bool Update(double dt, Dictionary<uint, Dictionary<ushort, double>> outPose)
+        {
+            bool needsRedraw = false;
+
+            for (int i = 0; i < Definition.Layers.Count; i++)
+            {
+                MachineLayer layerDef = Definition.Layers[i];
+                LayerRuntimeState layerRt = LayerRuntimes[i];
+
+                if (layerRt.IsFinished) continue;
+
+                // 1. Advance current state clip
+                if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
+                {
+                    MachineState curState = layerDef.States[layerRt.CurrentState];
+                    if (curState.Kind == StateKind.Animation && curState.ClipIndex >= 0 && curState.ClipIndex < Clips.Count)
+                    {
+                        Clip clip = Clips[curState.ClipIndex];
+                        layerRt.CurTime.Advance(dt, clip.Duration, clip.LoopMode);
+                        needsRedraw = true;
+                    }
+                }
+
+                // 2. Advance transition clip if active
+                if (layerRt.ActiveTransition != null)
+                {
+                    layerRt.ActiveTransition.Elapsed += dt;
+                    needsRedraw = true;
+
+                    if (layerRt.ActiveTransition.ToState >= 0 && layerRt.ActiveTransition.ToState < layerDef.States.Count)
+                    {
+                        MachineState toState = layerDef.States[layerRt.ActiveTransition.ToState];
+                        if (toState.Kind == StateKind.Animation && toState.ClipIndex >= 0 && toState.ClipIndex < Clips.Count)
+                        {
+                            Clip clip = Clips[toState.ClipIndex];
+                            layerRt.ActiveTransition.ToTime.Advance(dt, clip.Duration, clip.LoopMode);
+                        }
+                    }
+                }
+
+                // 3. Complete finished transition
+                if (layerRt.ActiveTransition != null && layerRt.ActiveTransition.Elapsed >= layerRt.ActiveTransition.Duration)
+                {
+                    int toState = layerRt.ActiveTransition.ToState;
+                    ClipInstance toTime = layerRt.ActiveTransition.ToTime;
+                    layerRt.CurrentState = toState;
+                    layerRt.CurTime = toTime;
+                    layerRt.ActiveTransition = null;
+
+                    if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
+                    {
+                        if (layerDef.States[layerRt.CurrentState].Kind == StateKind.Exit)
+                        {
+                            layerRt.IsFinished = true;
+                        }
+                    }
+                }
+
+                // 4. Resolve transitions with zero-duration chain resolution & cycle guard (max 100 steps)
+                const int MAX_STEPS = 100;
+                for (int step = 0; step < MAX_STEPS; step++)
+                {
+                    if (layerRt.ActiveTransition != null && !layerRt.ActiveTransition.Definition.Interrupt)
+                    {
+                        // Current transition cannot be interrupted mid-blend
+                        break;
+                    }
+
+                    int activeToState = (layerRt.ActiveTransition != null) ? layerRt.ActiveTransition.ToState : -1;
+                    StateTransition nextTrans = FindValidTransition(layerDef, layerRt.CurrentState, layerRt.CurTime.Time, activeToState);
+                    if (nextTrans != null)
+                    {
+                        // Do not interrupt if already blending to the exact same target state
+                        if (layerRt.ActiveTransition != null && layerRt.ActiveTransition.ToState == nextTrans.ToState)
+                        {
+                            break;
+                        }
+
+                        // Snapshot current pose if interrupting an active transition to prevent visual pops
+                        Dictionary<uint, Dictionary<ushort, double>> snapshot = null;
+                        if (layerRt.ActiveTransition != null)
+                        {
+                            var fromPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                            var toPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                            SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose);
+                            SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose);
+                            double mix = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
+                            snapshot = new Dictionary<uint, Dictionary<ushort, double>>();
+                            BlendPoses(fromPose, toPose, mix, snapshot);
+                        }
+
+                        int toState = nextTrans.ToState;
+                        double duration = nextTrans.Duration;
+                        layerRt.ActiveTransition = new ActiveTransitionState(nextTrans, toState, duration);
+                        layerRt.ActiveTransition.SnapshotPose = snapshot;
+                        needsRedraw = true;
+
+                        if (duration <= 0.0)
+                        {
+                            // Instant zero-duration transition: complete immediately and allow chain resolution
+                            layerRt.CurrentState = toState;
+                            layerRt.CurTime = new ClipInstance(toState);
+                            layerRt.ActiveTransition = null;
+
+                            if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
+                            {
+                                if (layerDef.States[layerRt.CurrentState].Kind == StateKind.Exit)
+                                {
+                                    layerRt.IsFinished = true;
+                                    break;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                // 5. Sample poses and blend
+                var layerPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                if (layerRt.ActiveTransition != null)
+                {
+                    var fromPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                    if (layerRt.ActiveTransition.SnapshotPose != null)
+                    {
+                        fromPose = layerRt.ActiveTransition.SnapshotPose;
+                    }
+                    else if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
+                    {
+                        SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose);
+                    }
+
+                    var toPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                    if (layerRt.ActiveTransition.ToState >= 0 && layerRt.ActiveTransition.ToState < layerDef.States.Count)
+                    {
+                        SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose);
+                    }
+
+                    double u = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
+                    double mix = CubicBezierEase.Ease(u);
+                    BlendPoses(fromPose, toPose, mix, layerPose);
+                }
+                else if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
+                {
+                    SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, layerPose);
+                }
+
+                // Merge into final output pose (later layers override earlier layers)
+                if (outPose != null)
+                {
+                    foreach (var nodeKvp in layerPose)
+                    {
+                        Dictionary<ushort, double> targetProps;
+                        if (!outPose.TryGetValue(nodeKvp.Key, out targetProps))
+                        {
+                            targetProps = new Dictionary<ushort, double>();
+                            outPose[nodeKvp.Key] = targetProps;
+                        }
+                        foreach (var propKvp in nodeKvp.Value)
+                        {
+                            targetProps[propKvp.Key] = propKvp.Value;
+                        }
+                    }
+                }
+            }
+
+            // 6. Clear triggers: triggers last exactly one update frame!
+            for (int i = 0; i < Definition.Inputs.Count; i++)
+            {
+                if (Definition.Inputs[i].Kind == InputKind.Trigger)
+                {
+                    Definition.Inputs[i].Fired = false;
+                }
+            }
+
+            return needsRedraw;
+        }
+
+        private void SampleState(MachineState state, double time, Dictionary<uint, Dictionary<ushort, double>> outPose)
+        {
+            if (state == null || outPose == null) return;
+
+            switch (state.Kind)
+            {
+                case StateKind.Animation:
+                    if (state.ClipIndex >= 0 && state.ClipIndex < Clips.Count)
+                    {
+                        Clips[state.ClipIndex].SampleToPose(time, outPose);
+                    }
+                    break;
+
+                case StateKind.Blend1D:
+                    if (state.Blend1DItems.Count == 0) return;
+                    double val = (state.BlendInputIndex >= 0 && state.BlendInputIndex < Definition.Inputs.Count)
+                        ? Definition.Inputs[state.BlendInputIndex].Value
+                        : 0.0;
+
+                    if (val <= state.Blend1DItems[0].Threshold)
+                    {
+                        int cIdx = state.Blend1DItems[0].ClipIndex;
+                        if (cIdx >= 0 && cIdx < Clips.Count) Clips[cIdx].SampleToPose(time, outPose);
+                        return;
+                    }
+                    if (val >= state.Blend1DItems[state.Blend1DItems.Count - 1].Threshold)
+                    {
+                        int cIdx = state.Blend1DItems[state.Blend1DItems.Count - 1].ClipIndex;
+                        if (cIdx >= 0 && cIdx < Clips.Count) Clips[cIdx].SampleToPose(time, outPose);
+                        return;
+                    }
+
+                    for (int i = 0; i < state.Blend1DItems.Count - 1; i++)
+                    {
+                        Blend1DItem a = state.Blend1DItems[i];
+                        Blend1DItem b = state.Blend1DItems[i + 1];
+                        if (val >= a.Threshold && val <= b.Threshold)
+                        {
+                            double span = b.Threshold - a.Threshold;
+                            double w = (span > 1e-5) ? (val - a.Threshold) / span : 0.0;
+                            var poseA = new Dictionary<uint, Dictionary<ushort, double>>();
+                            var poseB = new Dictionary<uint, Dictionary<ushort, double>>();
+                            if (a.ClipIndex >= 0 && a.ClipIndex < Clips.Count) Clips[a.ClipIndex].SampleToPose(time, poseA);
+                            if (b.ClipIndex >= 0 && b.ClipIndex < Clips.Count) Clips[b.ClipIndex].SampleToPose(time, poseB);
+                            BlendPoses(poseA, poseB, w, outPose);
+                            return;
+                        }
+                    }
+                    break;
+
+                case StateKind.BlendDirect:
+                    for (int i = 0; i < state.BlendDirectItems.Count; i++)
+                    {
+                        BlendDirectItem item = state.BlendDirectItems[i];
+                        double w = (item.WeightInputIndex >= 0 && item.WeightInputIndex < Definition.Inputs.Count)
+                            ? Math.Max(0.0, Math.Min(1.0, Definition.Inputs[item.WeightInputIndex].Value))
+                            : 0.0;
+
+                        if (w > 0.001 && item.ClipIndex >= 0 && item.ClipIndex < Clips.Count)
+                        {
+                            var temp = new Dictionary<uint, Dictionary<ushort, double>>();
+                            Clips[item.ClipIndex].SampleToPose(time, temp);
+                            foreach (var nKvp in temp)
+                            {
+                                Dictionary<ushort, double> nodeProps;
+                                if (!outPose.TryGetValue(nKvp.Key, out nodeProps))
+                                {
+                                    nodeProps = new Dictionary<ushort, double>();
+                                    outPose[nKvp.Key] = nodeProps;
+                                }
+                                foreach (var pKvp in nKvp.Value)
+                                {
+                                    double cur = nodeProps.ContainsKey(pKvp.Key) ? nodeProps[pKvp.Key] : 0.0;
+                                    nodeProps[pKvp.Key] = cur + pKvp.Value * w;
+                                }
+                            }
+                        }
+                    }
+                    break;
+            }
+        }
+
+        public static void BlendPoses(
+            Dictionary<uint, Dictionary<ushort, double>> basePose,
+            Dictionary<uint, Dictionary<ushort, double>> targetPose,
+            double mix,
+            Dictionary<uint, Dictionary<ushort, double>> outPose)
+        {
+            if (outPose == null) return;
+            mix = Math.Max(0.0, Math.Min(1.0, mix));
+
+            if (targetPose != null)
+            {
+                foreach (var nKvp in targetPose)
+                {
+                    uint nodeId = nKvp.Key;
+                    Dictionary<ushort, double> baseNodeProps = null;
+                    if (basePose != null) basePose.TryGetValue(nodeId, out baseNodeProps);
+
+                    Dictionary<ushort, double> outNodeProps;
+                    if (!outPose.TryGetValue(nodeId, out outNodeProps))
+                    {
+                        outNodeProps = new Dictionary<ushort, double>();
+                        outPose[nodeId] = outNodeProps;
+                    }
+
+                    foreach (var pKvp in nKvp.Value)
+                    {
+                        ushort prop = pKvp.Key;
+                        double targetVal = pKvp.Value;
+                        double baseVal = (baseNodeProps != null && baseNodeProps.ContainsKey(prop)) ? baseNodeProps[prop] : targetVal;
+                        outNodeProps[prop] = baseVal + (targetVal - baseVal) * mix;
+                    }
+                }
+            }
+
+            if (basePose != null)
+            {
+                foreach (var nKvp in basePose)
+                {
+                    uint nodeId = nKvp.Key;
+                    if (targetPose == null || !targetPose.ContainsKey(nodeId))
+                    {
+                        Dictionary<ushort, double> outNodeProps;
+                        if (!outPose.TryGetValue(nodeId, out outNodeProps))
+                        {
+                            outNodeProps = new Dictionary<ushort, double>();
+                            outPose[nodeId] = outNodeProps;
+                        }
+                        foreach (var pKvp in nKvp.Value)
+                        {
+                            outNodeProps[pKvp.Key] = pKvp.Value;
+                        }
+                    }
+                    else
+                    {
+                        Dictionary<ushort, double> targetNodeProps = targetPose[nodeId];
+                        Dictionary<ushort, double> outNodeProps = outPose[nodeId];
+                        foreach (var pKvp in nKvp.Value)
+                        {
+                            if (!targetNodeProps.ContainsKey(pKvp.Key))
+                            {
+                                outNodeProps[pKvp.Key] = pKvp.Value;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

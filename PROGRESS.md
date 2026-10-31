@@ -1,7 +1,7 @@
 # Kerf Studio — Progress & Modernization Handover Document
 
 **Last Updated:** November 1, 2026  
-**Status:** Completed / Milestone 21 Achieved  
+**Status:** Completed / Milestone 22 Achieved  
 **Target:** Modern GPU-Accelerated Desktop Vector Design Application with Native Rust Graphics Engine (100% Desktop-Only)
 
 ---
@@ -806,11 +806,74 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
   - Layers detach and reparent to other frames or the canvas root only when dragged "long out" beyond the $80\text{px}$ threshold.
 
 ### 3. Automated Verification Suite
-- **Total Tests:** 37
-- **Passing:** 37 (100%)
+- **Total Tests:** 38
+- **Passing:** 38 (100%)
 - **Failing:** 0
 - Added `TestCornerRadiusNodesAndFigmaAutoLayoutFlexbox` verifying:
   - Corner radius handle positioning and hit-testing across variable zoom scales ($1.0\times$, $2.0\times$).
   - Auto Layout frame encompassing the exact combined bounding dimensions of multi-frame selections with measured gaps.
   - Height resize persistence in Fixed mode without snapping back up.
   - Flexbox children reordering cleanly along the flex axis.
+
+---
+
+## 22. Rive-Style Animation Engine & State Machine Runtime (`testdata/newreq.md`)
+
+### 1. Architectural Independence & Modular Design
+- **Complete Decoupling:** Implemented an independent, standalone animation and state machine runtime that does not depend on WPF Visuals, UI controls, or existing design canvas plumbing.
+- **Dual Rust + C# Acceleration:**
+  - High-performance native Rust core in `crates/kerf_core/src/animation.rs` and `crates/kerf_core/src/state_machine.rs` with C-ABI FFI exports in `lib.rs`.
+  - Matching pure C# managed engine in `src/Engine/Animation/` (`AnimationTypes.cs`, `CubicBezierEase.cs`, `StateMachineTypes.cs`, `StateMachineRuntime.cs`, `SmartAnimateCompiler.cs`, `PropertyBinder.cs`, `AnimationTimelineController.cs`, `AnimationNativeBridge.cs`).
+
+### 2. Animation System Algorithm (Section 5)
+- **Keyframe Interpolation & Exact Bézier Solver:**
+  - `InterpMode`: `Hold`, `Linear`, and `Cubic { x1, y1, x2, y2 }`.
+  - Implemented exact numerical cubic Bézier ease solver: solves $x(s) = u$ using 8 Newton-Raphson steps with a 20-iteration bisection fallback, evaluating $y(s)$ to machine precision.
+- **Track Sampling:**
+  - Fast logarithmic binary search over sorted keyframe arrays.
+- **Clips & Loop Modes:**
+  - `LoopMode::OneShot`: Clamps time to $[0, \text{duration}]$.
+  - `LoopMode::Loop`: Continuous modulo wrapping over duration.
+  - `LoopMode::PingPong`: Direction-flipping boundary bounce.
+
+### 3. State Machine Runtime Algorithm (Section 6)
+- **Inputs & Lifecycle:**
+  - `InputKind::Bool`, `InputKind::Number`, and `InputKind::Trigger`.
+  - Triggers automatically clear (`fired = false`) after exactly one update tick.
+- **State Kinds:**
+  - `Entry`, `Exit`, `Any`, `Animation`, `Blend1D` (threshold-based 1D blend space), `BlendDirect` (multi-weight clip summation).
+- **Transitions & Deterministic Execution:**
+  - Evaluates conditions (`Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`) with epsilon tolerance ($1\times 10^{-5}$).
+  - Evaluates normalized exit times ($progress \ge exit\_time$).
+  - Zero-duration transition chains resolved in a single frame with a 100-step cycle guard.
+  - Ordered candidate precedence: current state transitions first, followed by Any state transitions.
+- **Interrupt Snapshotting:**
+  - When an in-flight transition is interrupted mid-blend, the runtime snapshots the current interpolated pose into a temporary base pose, blending cleanly into the new target without visual pops.
+- **Pointer Event Listeners (Section 6.6):**
+  - Targets node IDs on pointer events (`Down`, `Up`, `Move`, `Enter`, `Exit`) and dispatches configured actions (`SetBool`, `SetNumber`, `Fire`).
+
+### 4. Figma-Style Prototype Bridge & Property Binding (Section 7)
+- **Smart Animate Compiler (`SmartAnimateCompiler.cs`):**
+  - Matches layers between frames by identity and spatial path, detects differing properties, and generates cubic-eased transition tracks (`0 -> duration`).
+  - Supports automatic fade-in and fade-out for elements unique to one frame.
+- **Property Binder (`PropertyBinder.cs`):**
+  - Decoupled property adapter mapping animated numeric values directly to model objects (`LayerNode`) or arbitrary delegates.
+- **Timeline Controller (`AnimationTimelineController.cs`):**
+  - Multi-speed, multi-framerate playback controller supporting `Play`, `Pause`, `Stop`, `Seek`, `Step`, and deterministic frame-by-frame event subscriptions.
+
+### 5. Automated Verification Suite
+- **Total Tests:** 38
+- **Passing:** 38 (100%)
+- **Failing:** 0
+- Added `TestRiveAnimationAndStateMachineEngine` verifying:
+  - Cubic Bézier solver accuracy and standard easing presets.
+  - Track sampling and interpolation across Hold, Linear, and Cubic keyframes.
+  - Loop modes (`OneShot`, `Loop`, `PingPong`) boundary physics.
+  - State machine transition triggers and single-frame trigger reset semantics.
+  - Zero-duration transition chains and cycle guards.
+  - Mid-blend transition interruption snapshotting.
+  - 1D blend space evaluation between clip thresholds.
+  - Pointer event listener dispatch.
+  - Smart Animate prototype compiler transition track generation.
+  - PropertyBinder layer updates.
+  - Native Rust C-ABI roundtrip execution via `AnimationNativeBridge`.
