@@ -105,10 +105,27 @@ namespace Kerf.Tools
             return HandleType.None;
         }
 
+        public static Point[] GetCornerRadiusHandlePositions(Rect bounds, double currentRadius, double zoomScale)
+        {
+            if (bounds.Width < 20 || bounds.Height < 20) return new Point[0];
+            double maxRadius = Math.Min(bounds.Width, bounds.Height) / 2.0;
+            double cr = Math.Max(0.0, Math.Min(currentRadius, maxRadius));
+            double minOffset = 12.0 / Math.Max(0.1, zoomScale);
+            double offset = Math.Max(minOffset, Math.Min(minOffset + cr * 0.4, maxRadius * 0.7));
+
+            return new Point[]
+            {
+                new Point(bounds.X + offset, bounds.Y + offset),
+                new Point(bounds.X + bounds.Width - offset, bounds.Y + offset),
+                new Point(bounds.X + bounds.Width - offset, bounds.Y + bounds.Height - offset),
+                new Point(bounds.X + offset, bounds.Y + bounds.Height - offset)
+            };
+        }
+
         public static bool HitTestCornerRadiusHandle(Point pt, Rect bounds, double rotation, double currentRadius, double zoomScale)
         {
             if (bounds.Width < 20 || bounds.Height < 20) return false;
-            double tolerance = (HitTolerance + HandleSize / 2.0) / Math.Max(0.1, zoomScale);
+            double tolerance = (HitTolerance + HandleSize) / Math.Max(0.1, zoomScale);
             var center = new Point(bounds.X + bounds.Width / 2.0, bounds.Y + bounds.Height / 2.0);
 
             Point localPt = pt;
@@ -119,18 +136,7 @@ namespace Kerf.Tools
                 localPt = mat.Transform(pt);
             }
 
-            double maxRadius = Math.Min(bounds.Width, bounds.Height) / 2.0;
-            double cr = Math.Min(currentRadius, maxRadius);
-            double offset = Math.Max(10.0, Math.Min(14.0 + cr * 0.4, maxRadius * 0.7));
-
-            Point[] crPoints = new Point[]
-            {
-                new Point(bounds.X + offset, bounds.Y + offset),
-                new Point(bounds.X + bounds.Width - offset, bounds.Y + offset),
-                new Point(bounds.X + bounds.Width - offset, bounds.Y + bounds.Height - offset),
-                new Point(bounds.X + offset, bounds.Y + bounds.Height - offset)
-            };
-
+            var crPoints = GetCornerRadiusHandlePositions(bounds, currentRadius, zoomScale);
             foreach (var p in crPoints)
             {
                 if (Math.Abs(localPt.X - p.X) <= tolerance && Math.Abs(localPt.Y - p.Y) <= tolerance)

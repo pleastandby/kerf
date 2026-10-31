@@ -501,6 +501,33 @@ namespace Kerf.Tools
             double totalH = Math.Max(1, maxY - minY);
             var mode = (totalW >= totalH) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
 
+            // Order layers spatially depending on mode
+            var ordered = (mode == AutoLayoutMode.Horizontal)
+                ? selectedLayers.OrderBy(l => l.X).ToList()
+                : selectedLayers.OrderBy(l => l.Y).ToList();
+
+            // Measure natural gap between items along primary axis to preserve exact outer span
+            double measuredGap = 0.0;
+            if (ordered.Count > 1)
+            {
+                if (mode == AutoLayoutMode.Horizontal)
+                {
+                    double sumW = ordered.Sum(l => l.Width);
+                    measuredGap = Math.Max(0.0, (totalW - sumW) / (ordered.Count - 1));
+                }
+                else
+                {
+                    double sumH = ordered.Sum(l => l.Height);
+                    measuredGap = Math.Max(0.0, (totalH - sumH) / (ordered.Count - 1));
+                }
+            }
+
+            // Calculate exact padding envelope from outer bounds
+            double padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
+            double padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
+            double padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
+            double padBottom = Math.Max(0.0, maxY - ordered.Max(l => l.Y + l.Height));
+
             var frame = new LayerNode
             {
                 Id = Guid.NewGuid().ToString().Substring(0, 8),
@@ -514,11 +541,11 @@ namespace Kerf.Tools
                 AutoLayout = new AutoLayoutData
                 {
                     Mode = mode,
-                    Gap = 0.0, // Default 0px gap between items
-                    PaddingTop = 0.0,
-                    PaddingRight = 0.0,
-                    PaddingBottom = 0.0,
-                    PaddingLeft = 0.0,
+                    Gap = Math.Round(measuredGap, 1),
+                    PaddingTop = Math.Round(padTop, 1),
+                    PaddingRight = Math.Round(padRight, 1),
+                    PaddingBottom = Math.Round(padBottom, 1),
+                    PaddingLeft = Math.Round(padLeft, 1),
                     AlignItems = AlignItems.Start,
                     JustifyContent = JustifyContent.Start,
                     SizingH = SizingMode.Hug,
@@ -527,11 +554,6 @@ namespace Kerf.Tools
                 Fills = new List<Paint>(), // No fill by default for Auto Layout frames
                 Children = new List<LayerNode>()
             };
-
-            // Order layers spatially depending on mode
-            var ordered = (mode == AutoLayoutMode.Horizontal)
-                ? selectedLayers.OrderBy(l => l.X).ToList()
-                : selectedLayers.OrderBy(l => l.Y).ToList();
 
             var first = ordered[0];
             LayerNode parent;

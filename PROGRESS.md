@@ -1,7 +1,7 @@
 # Kerf Studio — Progress & Modernization Handover Document
 
-**Last Updated:** October 29, 2026  
-**Status:** Completed / Milestone 20 Achieved  
+**Last Updated:** November 1, 2026  
+**Status:** Completed / Milestone 21 Achieved  
 **Target:** Modern GPU-Accelerated Desktop Vector Design Application with Native Rust Graphics Engine (100% Desktop-Only)
 
 ---
@@ -763,8 +763,8 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
   - In `StudioView.MoveLayerHierarchy()` and card drop handlers: Guarded against `dropped == layer || dropped.Id == layer.Id`.
 
 ### 3. Automated Verification Suite
-- **Total Tests:** 36
-- **Passing:** 36 (100%)
+- **Total Tests:** 37
+- **Passing:** 37 (100%)
 - **Failing:** 0
 - Added `TestVisualReparentingAcrossHierarchyAndUndoRedo` verifying:
   - Nested multi-frame layer reordering across hierarchies.
@@ -772,3 +772,45 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
   - Full Undo/Redo cycles restoring visual parents accurately.
   - Rapid 20x back-and-forth stress reordering without leaks or errors.
   - Non-container parenting and descendant cyclic nesting prevention.
+
+---
+
+## 21. Corner Radius On-Canvas Handles & Figma-Grade Auto Layout Flexbox Model
+
+### 1. Corner Radius On-Canvas Handle Widgets (Rectangles & Frames)
+- **Root Cause Analysis:**
+  - The corner radius handles were visually rendered on canvas using a zoom-dependent inward offset `offset = Math.Max(12.0 / _zoomScale, Math.Min(12.0 / _zoomScale + cr * 0.4, ...))`.
+  - However, `TransformEngine.HitTestCornerRadiusHandle` computed handle positions using unscaled offset coordinates `offset = Math.Max(12.0, ...)`, causing hit-testing to diverge from the rendered handle circles at any zoom level other than 1.0x.
+- **Architectural Solution:**
+  - Unified corner radius handle positioning in `TransformEngine.GetCornerRadiusHandlePositions(Rect bounds, double currentRadius, double zoomScale)`, ensuring mathematically identical coordinates for rendering in `StudioView.RenderSelectionOverlay` and hit-testing in `TransformEngine.HitTestCornerRadiusHandle`.
+  - Added interactive hover feedback displaying `Cursors.Hand` when hovering over any corner radius node.
+  - On mouse down, activates `HandleType.CornerRadius` and captures mouse. During drag, calculates radial distance deltas from the shape center, updating `CornerRadius` smoothly between `0px` and `min(W, H) / 2`.
+  - Synchronizes 4-corner radii (`TopLeft`, `TopRight`, `BottomRight`, `BottomLeft`) with canvas invalidation and live property inspector scrub updates.
+  - Added `ModifyCornerRadiusCommand` to `CommandHistory.cs` for complete Undo/Redo support on corner handle dragging.
+
+### 2. Figma-Grade Auto Layout Flexbox Model
+- **Frame Encompassing All Included Layers (`Shift + A` / `AutoAlignSelection`):**
+  - Updated `AutoLayoutEngine.AutoAlignSelection` to calculate the exact spatial envelope of selected layers:
+    $$\text{totalW} = \max(X + W) - \min(X), \quad \text{totalH} = \max(Y + H) - \min(Y)$$
+  - Dynamically measures natural gaps between layers along the primary axis:
+    $$\text{measuredGap} = \frac{\text{totalSpan} - \sum \text{layerSpan}}{N - 1}$$
+  - Computes outer padding offsets from layer bounds, guaranteeing the generated Auto Layout frame matches the exact envelope of all wrapped frames and items.
+- **Resizing Without Jumping (CSS Flexbox Sizing Modes):**
+  - Resizing an Auto Layout frame horizontally or vertically switches the resized axis to `SizingMode.Fixed` (`n.AutoLayout.SizingH = SizingMode.Fixed` / `n.AutoLayout.SizingV = SizingMode.Fixed`) before triggering `AutoLayoutEngine.Reflow()`.
+  - Prevents the frame from jumping or snapping back to content hug height when dragging the bottom or corner resize handles.
+  - Added interactive Horizontal and Vertical sizing dropdowns (`Hug contents` / `Fixed size`) to `CreateAutoLayoutCard` in the Property Inspector.
+  - Linked Property Inspector width (`W`) and height (`H`) scrub fields to toggle `SizingMode.Fixed` on scrub.
+- **Sticky Parenting & Flexbox Child Reordering:**
+  - In `StudioView.CheckAutoReparentLayersOnDrop`, implemented Figma-style sticky parenting with an $80\text{px}$ threshold. Layers dragged within $80\text{px}$ of their parent frame remain inside the Auto Layout container.
+  - While inside the Auto Layout frame, child layers reorder along the flex axis live according to mouse drag positions (`OrderBy(c => c.X + c.Width / 2.0)` or `OrderBy(c => c.Y + c.Height / 2.0)`), reflowing siblings with snappy, flexible CSS flexbox positioning.
+  - Layers detach and reparent to other frames or the canvas root only when dragged "long out" beyond the $80\text{px}$ threshold.
+
+### 3. Automated Verification Suite
+- **Total Tests:** 37
+- **Passing:** 37 (100%)
+- **Failing:** 0
+- Added `TestCornerRadiusNodesAndFigmaAutoLayoutFlexbox` verifying:
+  - Corner radius handle positioning and hit-testing across variable zoom scales ($1.0\times$, $2.0\times$).
+  - Auto Layout frame encompassing the exact combined bounding dimensions of multi-frame selections with measured gaps.
+  - Height resize persistence in Fixed mode without snapping back up.
+  - Flexbox children reordering cleanly along the flex axis.

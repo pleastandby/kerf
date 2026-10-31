@@ -63,6 +63,7 @@ namespace Kerf.Tests
             RunTest("Batch 7 Requirements: Polished Rounded UI, Simplified Figma Gradient Controls, and Pen Tool Vector Edit Engine", TestBatch7Requirements_PolishedUI_FigmaGradient_PenToolVectorEdit);
             RunTest("Batch 8 Requirements: Effects Collapse & Icon Labels, Instant Templates & Frame Selection No Fill", TestBatch8Requirements_EffectsCollapseIcons_Templates_FrameSelection);
             RunTest("Visual Hierarchy Reparenting & Nested Undo/Redo Engine Synchronization", TestVisualReparentingAcrossHierarchyAndUndoRedo);
+            RunTest("Corner Radius On-Canvas Handles & Figma Auto Layout Flexbox Model", TestCornerRadiusNodesAndFigmaAutoLayoutFlexbox);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -1061,13 +1062,14 @@ namespace Kerf.Tests
             Assert(autoWrapFrame != null, "AutoAlignSelection should return a new Auto Layout frame");
             Assert(autoWrapFrame.Type == ElementType.Frame, "Wrapped node is a Frame");
             Assert(autoWrapFrame.AutoLayout != null && autoWrapFrame.AutoLayout.Mode == AutoLayoutMode.Horizontal, "Auto layout mode is Horizontal for side-by-side elements");
-            Assert(autoWrapFrame.AutoLayout.Gap == 0.0, "Auto Layout default gap must be 0px");
+            Assert(autoWrapFrame.Width == 130.0, "Auto Layout frame must be the size of both frames included");
+            Assert(autoWrapFrame.AutoLayout.Gap == 10.0, "Auto Layout gap measured from distance between frames to preserve bounding size");
             Assert(autoWrapFrame.Fills == null || autoWrapFrame.Fills.Count == 0, "Auto Layout frame must have no fill by default");
             Assert(autoWrapFrame.Children.Count == 2, "Wrapped frame contains both selected layers");
             Assert(page.Layers.Contains(autoWrapFrame), "Wrapped frame is added to page layers");
             Assert(!page.Layers.Contains(r1) && !page.Layers.Contains(r2), "Original items moved out of root page layers into frame");
             Assert(r1.X == autoWrapFrame.X, "First item aligned at start");
-            Assert(r2.X == r1.X + r1.Width, "Items equally distributed with 0px default gap");
+            Assert(r2.X == r1.X + r1.Width + autoWrapFrame.AutoLayout.Gap, "Items distributed with measured gap");
         }
 
         private static void TestTouchpadPanAndZoomCalculations()
@@ -2160,6 +2162,50 @@ namespace Kerf.Tests
             });
             cycleCmd.Execute();
             Assert(childFrame.Children == null || !childFrame.Children.Contains(frameA), "Child Frame must never contain its own ancestor Frame A");
+        }
+
+        private static void TestCornerRadiusNodesAndFigmaAutoLayoutFlexbox()
+        {
+            // 1. Corner Radius handle positioning & hit-testing across zoom scales
+            var rectBounds = new Rect(100, 100, 200, 150);
+            var crPts1 = TransformEngine.GetCornerRadiusHandlePositions(rectBounds, 0.0, 1.0);
+            Assert(crPts1.Length == 4, "Must generate exactly 4 corner radius handle positions");
+            Assert(TransformEngine.HitTestCornerRadiusHandle(crPts1[0], rectBounds, 0.0, 0.0, 1.0), "Hit-test succeeds at top-left corner handle at 1.0x zoom");
+            Assert(TransformEngine.HitTestCornerRadiusHandle(crPts1[1], rectBounds, 0.0, 0.0, 1.0), "Hit-test succeeds at top-right corner handle at 1.0x zoom");
+
+            // Test zoom scaling consistency (e.g. 2.0x zoom)
+            var crPtsZoom = TransformEngine.GetCornerRadiusHandlePositions(rectBounds, 20.0, 2.0);
+            Assert(TransformEngine.HitTestCornerRadiusHandle(crPtsZoom[0], rectBounds, 0.0, 20.0, 2.0), "Hit-test succeeds at 2.0x zoom");
+
+            // 2. Auto Layout frame must be the size of both frames included
+            var page = new Page();
+            var frame1 = new LayerNode { Id = "f1", Name = "Card 1", Type = ElementType.Frame, X = 50, Y = 50, Width = 100, Height = 80 };
+            var frame2 = new LayerNode { Id = "f2", Name = "Card 2", Type = ElementType.Frame, X = 200, Y = 50, Width = 120, Height = 90 };
+            page.Layers.Add(frame1);
+            page.Layers.Add(frame2);
+
+            var wrapped = AutoLayoutEngine.AutoAlignSelection(page, new List<LayerNode> { frame1, frame2 });
+            Assert(wrapped != null, "AutoAlignSelection wraps frames");
+            Assert(wrapped.Width == 270.0, string.Format("Auto Layout frame width must encompass both frames included (50 to 320 = 270), got {0}", wrapped.Width));
+            Assert(wrapped.Height == 90.0, string.Format("Auto Layout frame height must encompass both frames included (max 90), got {0}", wrapped.Height));
+            Assert(wrapped.AutoLayout.Gap == 50.0, string.Format("Auto Layout measured gap between frames must be 50, got {0}", wrapped.AutoLayout.Gap));
+
+            // 3. Auto Layout Frame resizing does NOT jump back up when dragging height down
+            // When user drags bottom handle, height becomes 250, SizingV becomes Fixed
+            wrapped.AutoLayout.SizingV = SizingMode.Fixed;
+            wrapped.Height = 250.0;
+            AutoLayoutEngine.Reflow(wrapped);
+            Assert(wrapped.Height == 250.0, "Resized Auto Layout frame height stays fixed at 250px and does not jump up");
+
+            // 4. Flexbox children inside Auto Layout reorder cleanly
+            frame2.X = 0.0; // dragged before frame1 (center 60 < center 100)
+            if (wrapped.AutoLayout.Mode == AutoLayoutMode.Horizontal)
+            {
+                wrapped.Children = wrapped.Children.OrderBy(c => c.X + c.Width / 2.0).ToList();
+            }
+            AutoLayoutEngine.Reflow(wrapped);
+            Assert(wrapped.Children[0] == frame2, "Child frames reorder according to drag position along flex axis");
+            Assert(wrapped.Children[1] == frame1, "Second child follows first in flexbox flow");
         }
     }
 }

@@ -1,4 +1,2 @@
-1. Add an option to collapse and expand the effects controls in the effects panel
-2. The label texts of the parameteres on the effects panel goes outside the space, replace it with icons instead, much better than texts for understanding.
-3. The projects are not saved especially the prebuilt templates are not found. Fix this y either removing the exisiting templates or adding new ones
-4. The frame selection defaultly puts a white fill onto objects change that using the othermd file
+1. The corder radius nodes are not working for frame and rectangle but the corder curve on effects panel is working.
+2. The autolayout frame should the the size of the both frames included, also the auto layouted frames cannot be moved easily out of the frame unless you drag it long out of the autolayout frame like in figma, the layout should be just like css flexbox, when i drag the size of the autolayout frame down, it'll jump up, i want the layout to stay same just like figma auto layout do it according to the exact model in figma, flexible, not laggy and snappy

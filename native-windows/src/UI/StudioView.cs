@@ -1933,8 +1933,26 @@ namespace Kerf.UI
             row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
             row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var wBox = ScrubControls.CreateScrubField("W", primary.Width, val => { primary.Width = Math.Max(1, val); InvalidateAndRefresh(primary); }, min: 1);
-            var hBox = ScrubControls.CreateScrubField("H", primary.Height, val => { primary.Height = Math.Max(1, val); InvalidateAndRefresh(primary); }, min: 1);
+            var wBox = ScrubControls.CreateScrubField("W", primary.Width, val =>
+            {
+                primary.Width = Math.Max(1, val);
+                if (primary.AutoLayout != null && primary.AutoLayout.Mode != AutoLayoutMode.None)
+                {
+                    primary.AutoLayout.SizingH = SizingMode.Fixed;
+                    AutoLayoutEngine.Reflow(primary);
+                }
+                InvalidateAndRefresh(primary);
+            }, min: 1);
+            var hBox = ScrubControls.CreateScrubField("H", primary.Height, val =>
+            {
+                primary.Height = Math.Max(1, val);
+                if (primary.AutoLayout != null && primary.AutoLayout.Mode != AutoLayoutMode.None)
+                {
+                    primary.AutoLayout.SizingV = SizingMode.Fixed;
+                    AutoLayoutEngine.Reflow(primary);
+                }
+                InvalidateAndRefresh(primary);
+            }, min: 1);
             Grid.SetColumn(wBox, 0); Grid.SetColumn(hBox, 2);
             row2.Children.Add(wBox); row2.Children.Add(hBox);
             _propertyInspectorStack.Children.Add(row2);
@@ -2255,6 +2273,42 @@ namespace Kerf.UI
 
             if (layout.Mode != AutoLayoutMode.None)
             {
+                // Sizing Modes (Width & Height: Hug contents / Fixed size)
+                var sizingGrid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+                sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var sizingHCombo = CreateModernComboBox(26);
+                sizingHCombo.Items.Add(CreateModernComboBoxItem("W: Fixed"));
+                sizingHCombo.Items.Add(CreateModernComboBoxItem("W: Hug"));
+                sizingHCombo.SelectedIndex = (layout.SizingH == SizingMode.Hug) ? 1 : 0;
+                sizingHCombo.SelectionChanged += (s, e) =>
+                {
+                    layout.SizingH = (sizingHCombo.SelectedIndex == 1) ? SizingMode.Hug : SizingMode.Fixed;
+                    AutoLayoutEngine.Reflow(frame);
+                    InvalidateAndRefresh(frame);
+                    RefreshPropertyInspector();
+                };
+                Grid.SetColumn(sizingHCombo, 0);
+                sizingGrid.Children.Add(sizingHCombo);
+
+                var sizingVCombo = CreateModernComboBox(26);
+                sizingVCombo.Items.Add(CreateModernComboBoxItem("H: Fixed"));
+                sizingVCombo.Items.Add(CreateModernComboBoxItem("H: Hug"));
+                sizingVCombo.SelectedIndex = (layout.SizingV == SizingMode.Hug) ? 1 : 0;
+                sizingVCombo.SelectionChanged += (s, e) =>
+                {
+                    layout.SizingV = (sizingVCombo.SelectedIndex == 1) ? SizingMode.Hug : SizingMode.Fixed;
+                    AutoLayoutEngine.Reflow(frame);
+                    InvalidateAndRefresh(frame);
+                    RefreshPropertyInspector();
+                };
+                Grid.SetColumn(sizingVCombo, 2);
+                sizingGrid.Children.Add(sizingVCombo);
+
+                stack.Children.Add(sizingGrid);
+
                 stack.Children.Add(CreateNumberField("Gap", layout.Gap, val =>
                 {
                     layout.Gap = Math.Max(-500.0, val);
@@ -4435,6 +4489,42 @@ namespace Kerf.UI
             {
                 Point center = new Point(layer.X + layer.Width / 2.0, layer.Y + layer.Height / 2.0);
 
+                LayerNode currentParent = !string.IsNullOrEmpty(layer.ParentId) ? page.FindLayerById(layer.ParentId) : null;
+                bool isInsideAutoLayout = currentParent != null && currentParent.AutoLayout != null && currentParent.AutoLayout.Mode != AutoLayoutMode.None;
+
+                if (isInsideAutoLayout)
+                {
+                    var pBounds = currentParent.GetBounds();
+                    // Figma sticky parenting: requires dragging > 80px long out of the autolayout frame to detach
+                    double longDragThreshold = 80.0;
+                    Rect stickyBounds = new Rect(
+                        pBounds.X - longDragThreshold,
+                        pBounds.Y - longDragThreshold,
+                        pBounds.Width + longDragThreshold * 2.0,
+                        pBounds.Height + longDragThreshold * 2.0
+                    );
+
+                    if (stickyBounds.Contains(center))
+                    {
+                        // Stays inside current auto layout frame!
+                        // Live reorder siblings based on drag position
+                        if (currentParent.Children != null && currentParent.Children.Count > 1)
+                        {
+                            if (currentParent.AutoLayout.Mode == AutoLayoutMode.Horizontal)
+                            {
+                                currentParent.Children = currentParent.Children.OrderBy(c => c.X + c.Width / 2.0).ToList();
+                            }
+                            else if (currentParent.AutoLayout.Mode == AutoLayoutMode.Vertical)
+                            {
+                                currentParent.Children = currentParent.Children.OrderBy(c => c.Y + c.Height / 2.0).ToList();
+                            }
+                        }
+                        AutoLayoutEngine.Reflow(currentParent);
+                        anyReparented = true;
+                        continue;
+                    }
+                }
+
                 LayerNode targetFrame = null;
                 for (int i = allFrames.Count - 1; i >= 0; i--)
                 {
@@ -4452,10 +4542,30 @@ namespace Kerf.UI
                 {
                     if (layer.ParentId != targetFrame.Id)
                     {
+                        var oldParent = !string.IsNullOrEmpty(layer.ParentId) ? page.FindLayerById(layer.ParentId) : null;
                         page.RemoveLayerEverywhere(layer);
                         layer.ParentId = targetFrame.Id;
                         if (targetFrame.Children == null) targetFrame.Children = new List<LayerNode>();
                         targetFrame.Children.Add(layer);
+
+                        if (targetFrame.AutoLayout != null && targetFrame.AutoLayout.Mode != AutoLayoutMode.None)
+                        {
+                            if (targetFrame.AutoLayout.Mode == AutoLayoutMode.Horizontal)
+                            {
+                                targetFrame.Children = targetFrame.Children.OrderBy(c => c.X + c.Width / 2.0).ToList();
+                            }
+                            else if (targetFrame.AutoLayout.Mode == AutoLayoutMode.Vertical)
+                            {
+                                targetFrame.Children = targetFrame.Children.OrderBy(c => c.Y + c.Height / 2.0).ToList();
+                            }
+                            AutoLayoutEngine.Reflow(targetFrame);
+                        }
+
+                        if (oldParent != null && oldParent.AutoLayout != null && oldParent.AutoLayout.Mode != AutoLayoutMode.None)
+                        {
+                            AutoLayoutEngine.Reflow(oldParent);
+                        }
+
                         anyReparented = true;
                     }
                 }
@@ -4463,9 +4573,16 @@ namespace Kerf.UI
                 {
                     if (!string.IsNullOrEmpty(layer.ParentId))
                     {
+                        var oldParent = page.FindLayerById(layer.ParentId);
                         page.RemoveLayerEverywhere(layer);
                         layer.ParentId = null;
                         page.Layers.Add(layer);
+
+                        if (oldParent != null && oldParent.AutoLayout != null && oldParent.AutoLayout.Mode != AutoLayoutMode.None)
+                        {
+                            AutoLayoutEngine.Reflow(oldParent);
+                        }
+
                         anyReparented = true;
                     }
                 }
@@ -4639,6 +4756,10 @@ namespace Kerf.UI
                             _startCornerRadius = primary.CornerRadius;
                             _transformStartMouse = canvasPt;
                             _transformStartBounds = primary.GetBounds();
+                            if (_canvasHost != null)
+                            {
+                                _canvasHost.CaptureMouse();
+                            }
                             return;
                         }
                     }
@@ -5008,7 +5129,12 @@ namespace Kerf.UI
                     double startDist = Math.Sqrt(Math.Pow(_transformStartMouse.X - center.X, 2) + Math.Pow(_transformStartMouse.Y - center.Y, 2));
                     double curDist = Math.Sqrt(Math.Pow(canvasPt.X - center.X, 2) + Math.Pow(canvasPt.Y - center.Y, 2));
                     double delta = startDist - curDist;
-                    primary.CornerRadius = Math.Max(0.0, Math.Min(maxRadius, _startCornerRadius + delta));
+                    double newR = Math.Max(0.0, Math.Min(maxRadius, _startCornerRadius + delta));
+                    primary.CornerRadius = Math.Round(newR, 1);
+                    primary.CornerRadiusTopLeft = primary.CornerRadius;
+                    primary.CornerRadiusTopRight = primary.CornerRadius;
+                    primary.CornerRadiusBottomRight = primary.CornerRadius;
+                    primary.CornerRadiusBottomLeft = primary.CornerRadius;
                     _sceneGraph.InvalidateNode(primary.Id);
                     RefreshCanvas();
                     RefreshPropertyInspector();
@@ -5041,6 +5167,29 @@ namespace Kerf.UI
                         n.Width = res.Bounds.Width;
                         n.Height = res.Bounds.Height;
                         n.Rotation = res.Rotation;
+
+                        // Figma Auto Layout Flexbox Resizing: switch resized axis to Fixed and reflow live!
+                        if (n.AutoLayout != null && n.AutoLayout.Mode != AutoLayoutMode.None)
+                        {
+                            bool widthResized = (_activeHandle == HandleType.MiddleLeft || _activeHandle == HandleType.MiddleRight ||
+                                                 _activeHandle == HandleType.TopLeft || _activeHandle == HandleType.TopRight ||
+                                                 _activeHandle == HandleType.BottomLeft || _activeHandle == HandleType.BottomRight);
+                            bool heightResized = (_activeHandle == HandleType.TopCenter || _activeHandle == HandleType.BottomCenter ||
+                                                  _activeHandle == HandleType.TopLeft || _activeHandle == HandleType.TopRight ||
+                                                  _activeHandle == HandleType.BottomLeft || _activeHandle == HandleType.BottomRight);
+
+                            if (widthResized)
+                            {
+                                n.AutoLayout.SizingH = SizingMode.Fixed;
+                            }
+                            if (heightResized)
+                            {
+                                n.AutoLayout.SizingV = SizingMode.Fixed;
+                            }
+
+                            AutoLayoutEngine.Reflow(n);
+                        }
+
                         if (n.Type == ElementType.Path && n.Geometry != null)
                         {
                             BezierVectorEngine.ScaleGeometry(n.Geometry, oldBounds, res.Bounds);
@@ -5276,6 +5425,21 @@ namespace Kerf.UI
                 RefreshPropertyInspector();
             }
 
+            // Hover cursor for Figma-style Corner Radius Handles
+            if (_selectedLayers.Count == 1 && _activeTool == ToolType.Select && !_isTransforming && !_isPanning && !_isDrawingNew && !_isDraggingGradientHandle)
+            {
+                var primary = _selectedLayers[0];
+                if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Group || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
+                {
+                    if (TransformEngine.HitTestCornerRadiusHandle(canvasPt, primary.GetBounds(), primary.Rotation, primary.CornerRadius, _zoomScale))
+                    {
+                        if (_canvasHost != null) _canvasHost.Cursor = Cursors.Hand;
+                        _lastMousePos = screenPt;
+                        return;
+                    }
+                }
+            }
+
             // Hover cursor for Figma-style Gradient Rollers & Handles (ONLY when editing gradient!)
             if (_editingGradientPaint != null && _editingGradientLayer != null && _selectedLayers.Contains(_editingGradientLayer) && _activeTool == ToolType.Select && !_isTransforming && !_isPanning && !_isDrawingNew && !_isDraggingGradientHandle)
             {
@@ -5455,9 +5619,36 @@ namespace Kerf.UI
 
             if (_isTransforming)
             {
+                if (_canvasHost != null && _canvasHost.IsMouseCaptured)
+                {
+                    _canvasHost.ReleaseMouseCapture();
+                }
                 _isTransforming = false;
                 var handleUsed = _activeHandle;
                 _activeHandle = HandleType.None;
+
+                if (handleUsed == HandleType.CornerRadius)
+                {
+                    if (_selectedLayers.Count == 1 && Math.Abs(_selectedLayers[0].CornerRadius - _startCornerRadius) > 0.01)
+                    {
+                        var primary = _selectedLayers[0];
+                        double afterR = primary.CornerRadius;
+                        double beforeR = _startCornerRadius;
+                        History.Execute(new ModifyCornerRadiusCommand(primary, beforeR, afterR, () =>
+                        {
+                            _sceneGraph.InvalidateNode(primary.Id);
+                            RefreshCanvas();
+                            RefreshPropertyInspector();
+                        }));
+                    }
+                    else
+                    {
+                        History.MarkDirty();
+                        RefreshCanvas();
+                        RefreshPropertyInspector();
+                    }
+                    return;
+                }
 
                 // Record the last transformation delta for Adobe Illustrator "Transform Again" (Ctrl+D)
                 if (_dragInitialPositions.Count > 0 && _selectedLayers.Count > 0)
@@ -5933,22 +6124,12 @@ namespace Kerf.UI
                 var primary = _selectedLayers[0];
                 if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Group || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
                 {
-                    double maxRadius = Math.Min(primary.Width, primary.Height) / 2.0;
-                    double cr = Math.Min(primary.CornerRadius, maxRadius);
-                    double offset = Math.Max(10.0 / _zoomScale, Math.Min(14.0 / _zoomScale + cr * 0.4, maxRadius * 0.7));
-                    double crRadius = 3.5 / _zoomScale;
+                    var crPoints = TransformEngine.GetCornerRadiusHandlePositions(union, primary.CornerRadius, _zoomScale);
+                    double crRadius = 4.0 / _zoomScale;
 
                     var crBrush = Brushes.White;
                     var crPen = new Pen(new SolidColorBrush(Color.FromRgb(99, 102, 241)), 1.5 / _zoomScale);
                     crPen.Freeze();
-
-                    Point[] crPoints = new Point[]
-                    {
-                        new Point(union.X + offset, union.Y + offset),
-                        new Point(union.X + union.Width - offset, union.Y + offset),
-                        new Point(union.X + union.Width - offset, union.Y + union.Height - offset),
-                        new Point(union.X + offset, union.Y + union.Height - offset)
-                    };
 
                     foreach (var p in crPoints)
                     {

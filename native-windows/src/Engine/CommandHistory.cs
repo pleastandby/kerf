@@ -562,6 +562,49 @@ namespace Kerf.Engine
         }
     }
 
+    public class ModifyCornerRadiusCommand : ICommand
+    {
+        public string Description { get { return "Change Corner Radius"; } }
+        private readonly LayerNode _layer;
+        private readonly double _beforeRadius;
+        private readonly double _afterRadius;
+        private readonly Action _onRender;
+
+        public ModifyCornerRadiusCommand(LayerNode layer, double beforeRadius, double afterRadius, Action onRender)
+        {
+            _layer = layer;
+            _beforeRadius = beforeRadius;
+            _afterRadius = afterRadius;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_layer != null)
+            {
+                _layer.CornerRadius = _afterRadius;
+                _layer.CornerRadiusTopLeft = _afterRadius;
+                _layer.CornerRadiusTopRight = _afterRadius;
+                _layer.CornerRadiusBottomRight = _afterRadius;
+                _layer.CornerRadiusBottomLeft = _afterRadius;
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_layer != null)
+            {
+                _layer.CornerRadius = _beforeRadius;
+                _layer.CornerRadiusTopLeft = _beforeRadius;
+                _layer.CornerRadiusTopRight = _beforeRadius;
+                _layer.CornerRadiusBottomRight = _beforeRadius;
+                _layer.CornerRadiusBottomLeft = _beforeRadius;
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
     public class ModifyVectorGeometryCommand : ICommand
     {
         public string Description { get { return "Edit Vector Path"; } }
