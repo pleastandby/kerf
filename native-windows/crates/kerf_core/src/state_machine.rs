@@ -1,4 +1,4 @@
-// High-performance State Machine Runtime (Rive-style states, layers, transitions, triggers, and listeners)
+// High-performance State Machine Runtime (states, layers, transitions, triggers, and listeners)
 // Implements testdata/newreq.md Section 6 and Section 7
 
 use std::collections::HashMap;

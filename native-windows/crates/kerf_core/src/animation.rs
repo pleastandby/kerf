@@ -1,4 +1,4 @@
-// High-performance animation engine (Rive-style keyframes, clips, tracks, and easing)
+// High-performance animation engine (keyframes, clips, tracks, and easing)
 // Implements testdata/newreq.md Section 5
 
 use std::collections::HashMap;

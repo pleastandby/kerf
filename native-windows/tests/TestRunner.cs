@@ -65,8 +65,9 @@ namespace Kerf.Tests
             RunTest("Batch 8 Requirements: Effects Collapse & Icon Labels, Instant Templates & Frame Selection No Fill", TestBatch8Requirements_EffectsCollapseIcons_Templates_FrameSelection);
             RunTest("Visual Hierarchy Reparenting & Nested Undo/Redo Engine Synchronization", TestVisualReparentingAcrossHierarchyAndUndoRedo);
             RunTest("Corner Radius On-Canvas Handles & Figma Auto Layout Flexbox Model", TestCornerRadiusNodesAndFigmaAutoLayoutFlexbox);
-            RunTest("Rive Animation Engine & State Machine Runtime (newreq.md)", TestRiveAnimationAndStateMachineEngine);
+            RunTest("Vector Animation Engine & State Machine Runtime (newreq.md)", TestVectorAnimationAndStateMachineEngine);
             RunTest("Persistent Recent Projects, Save Anywhere, Safe Auto Layout Undo & Animation Tab Integration", TestMilestone23Features);
+            RunTest("Component File Persistence Across Save/Open & Real Vector State Machine (Milestone 24)", TestMilestone24Features);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -2211,7 +2212,7 @@ namespace Kerf.Tests
             Assert(wrapped.Children[1] == frame1, "Second child follows first in flexbox flow");
         }
 
-        private static void TestRiveAnimationAndStateMachineEngine()
+        private static void TestVectorAnimationAndStateMachineEngine()
         {
             // 1. Cubic Bezier Solver (Newton-Raphson + Bisection) & Easing Curves
             double easeVal = CubicBezierEase.Evaluate(0.5, 0.25, 0.1, 0.25, 1.0);
@@ -2551,6 +2552,172 @@ namespace Kerf.Tests
             // Redo reparenting
             reorderCmd.Execute();
             Assert(frameParent.Children.Count == 2, "Layer reparented again on redo with zero visual parenting errors");
+        }
+
+        private static void TestMilestone24Features()
+        {
+            // 1. Component File Persistence Across Save & Load Roundtrip
+            string tempDir = Path.Combine(Path.GetTempPath(), "KerfCompTest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string filePath = Path.Combine(tempDir, "ComponentRoundtrip.kerf");
+
+            var doc = new KerfDocument { Name = "Component Roundtrip Doc" };
+            var page = doc.GetActivePage();
+
+            // Master Component with nested children
+            var masterComp = new LayerNode
+            {
+                Id = "comp-btn-master",
+                Name = "Button Master",
+                Type = ElementType.Frame,
+                IsMasterComponent = true,
+                ComponentId = "comp-btn-master",
+                X = 100,
+                Y = 100,
+                Width = 160,
+                Height = 48,
+                CornerRadius = 8
+            };
+            masterComp.Fills.Clear();
+            masterComp.Fills.Add(Paint.Solid("#7B61FF")); // Purple
+
+            var label = new LayerNode
+            {
+                Id = "lbl-text",
+                Name = "Label",
+                Type = ElementType.Text,
+                ParentId = masterComp.Id,
+                X = 120,
+                Y = 114,
+                Width = 120,
+                Height = 20
+            };
+            label.Typography.Text = "Submit";
+            masterComp.Children.Add(label);
+            page.Layers.Add(masterComp);
+
+            // Component Instance
+            var compInstance = new LayerNode
+            {
+                Id = "comp-btn-inst-1",
+                Name = "Button Instance",
+                Type = ElementType.ComponentInstance,
+                IsMasterComponent = false,
+                ComponentId = "comp-btn-master",
+                X = 320,
+                Y = 100,
+                Width = 160,
+                Height = 48
+            };
+            page.Layers.Add(compInstance);
+
+            // Save and load
+            StorageManager.SaveAtomic(doc, filePath);
+            Assert(File.Exists(filePath), "Document with components persisted to disk");
+
+            var loadedDoc = StorageManager.LoadDocument(filePath);
+            Assert(loadedDoc != null, "Document loaded successfully");
+
+            var allComps = loadedDoc.GetAllComponents();
+            Assert(allComps.Count == 1, string.Format("GetAllComponents must find 1 master component, found {0}", allComps.Count));
+            Assert(allComps[0].IsMasterComponent, "Master component flag preserved across save/open");
+            Assert(allComps[0].ComponentId == "comp-btn-master", "ComponentId preserved across save/open");
+            Assert(allComps[0].Children != null && allComps[0].Children.Count == 1, "Master component children preserved across save/open");
+
+            var loadedPage = loadedDoc.GetActivePage();
+            var foundMaster = loadedPage.FindMasterComponent("comp-btn-master");
+            Assert(foundMaster != null, "FindMasterComponent locates master component in loaded page");
+
+            var foundInstances = loadedPage.FindInstancesOfComponent("comp-btn-master");
+            Assert(foundInstances.Count == 1, "FindInstancesOfComponent locates instance in loaded page");
+            Assert(foundInstances[0].Type == ElementType.ComponentInstance, "Instance Type preserved as ComponentInstance");
+
+            // Verify GpuRenderer builds valid geometry for ComponentInstance
+            var renderer = new GpuRenderer();
+            var geo = renderer.BuildGeometry(foundInstances[0]);
+            Assert(geo != null, "GpuRenderer BuildGeometry returns valid non-null geometry for ComponentInstance");
+
+            // 2. Real Vector State Machine Multi-State Transitions
+            var smDef = new StateMachineDefinition("TestSM");
+            int inHover = smDef.AddInput(MachineInput.Bool("isHovered", false));
+            int inPress = smDef.AddInput(MachineInput.Bool("isPressed", false));
+            int inClick = smDef.AddInput(MachineInput.Trigger("clickTrigger"));
+            int inReset = smDef.AddInput(MachineInput.Trigger("resetTrigger"));
+
+            var layer = new MachineLayer("Base");
+            int sIdle = layer.AddState(new MachineState(0, "Idle", StateKind.Animation, 0));
+            int sHover = layer.AddState(new MachineState(1, "Hover", StateKind.Animation, 1));
+            int sPressed = layer.AddState(new MachineState(2, "Pressed", StateKind.Animation, 2));
+            int sActive = layer.AddState(new MachineState(3, "Active", StateKind.Animation, 3));
+
+            // Idle -> Hover (isHovered == 1.0)
+            var t1 = new StateTransition(sIdle, sHover, 0.1);
+            t1.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 1.0));
+            layer.AddTransition(t1);
+
+            // Hover -> Idle (isHovered == 0.0)
+            var t2 = new StateTransition(sHover, sIdle, 0.1);
+            t2.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 0.0));
+            layer.AddTransition(t2);
+
+            // Hover -> Pressed (isPressed == 1.0)
+            var t3 = new StateTransition(sHover, sPressed, 0.05);
+            t3.Conditions.Add(new TransitionCondition(inPress, ConditionOp.Eq, 1.0));
+            layer.AddTransition(t3);
+
+            // Pressed -> Active (clickTrigger)
+            var t4 = new StateTransition(sPressed, sActive, 0.1);
+            t4.Conditions.Add(new TransitionCondition(inClick, ConditionOp.Eq, 1.0));
+            layer.AddTransition(t4);
+
+            smDef.AddLayer(layer);
+
+            var cIdle = new Clip(0, "Idle", 1.0);
+            var cHov = new Clip(1, "Hover", 1.0);
+            var cPres = new Clip(2, "Pressed", 1.0);
+            var cAct = new Clip(3, "Active", 1.0);
+            var smClips = new List<Clip> { cIdle, cHov, cPres, cAct };
+
+            var smRuntime = new StateMachineRuntime(smDef, smClips);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+
+            // Initial State: Idle
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sIdle, "Initial state is Idle");
+
+            // Toggle isHovered -> transitions to Hover
+            smRuntime.SetBool(inHover, true);
+            smRuntime.Update(0.016, pose);
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition != null && smRuntime.LayerRuntimes[0].ActiveTransition.ToState == sHover, "State machine initiates transition to Hover");
+
+            // Complete transition duration (0.1s)
+            smRuntime.Update(0.1, pose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sHover, "State machine completes transition to Hover");
+
+            // Toggle isPressed -> transitions to Pressed
+            smRuntime.SetBool(inPress, true);
+            smRuntime.Update(0.016, pose);
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition != null && smRuntime.LayerRuntimes[0].ActiveTransition.ToState == sPressed, "State machine transitions from Hover to Pressed");
+            smRuntime.Update(0.06, pose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sPressed, "State reaches Pressed");
+
+            // Fire clickTrigger -> transitions to Active
+            smRuntime.FireTrigger(inClick);
+            smRuntime.Update(0.016, pose);
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition != null && smRuntime.LayerRuntimes[0].ActiveTransition.ToState == sActive, "State machine transitions to Active on clickTrigger");
+            smRuntime.Update(0.12, pose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sActive, "State reaches Active");
+
+            // 3. Pointer Event Listener Dispatch
+            uint targetNode = 999;
+            var listener = new NodeListener(targetNode, PointerEventKind.Enter);
+            listener.Actions.Add(new ListenerAction(ActionKind.SetBool, inHover, 1.0));
+            smDef.Listeners.Add(listener);
+
+            smRuntime.SetBool(inHover, false);
+            smRuntime.OnPointerEvent(targetNode, PointerEventKind.Enter);
+            Assert(smRuntime.GetInputValue(inHover) == 1.0, "OnPointerEvent dispatches Enter event to set isHovered input");
+
+            try { Directory.Delete(tempDir, true); } catch { }
         }
     }
 }

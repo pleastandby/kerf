@@ -30,12 +30,23 @@ namespace Kerf.Model
                 var dict = serializer.Deserialize<Dictionary<string, object>>(json);
                 if (dict == null) return new KerfDocument();
 
-                if (dict.ContainsKey("SchemaVersion") && dict["SchemaVersion"].ToString().StartsWith("3."))
+                string schema = null;
+                if (dict.ContainsKey("SchemaVersion") && dict["SchemaVersion"] != null) schema = dict["SchemaVersion"].ToString();
+                else if (dict.ContainsKey("schemaVersion") && dict["schemaVersion"] != null) schema = dict["schemaVersion"].ToString();
+
+                if (!string.IsNullOrEmpty(schema) && schema.StartsWith("3."))
                 {
-                    var doc = serializer.Deserialize<KerfDocument>(json);
-                    if (doc != null && doc.Pages != null && doc.Pages.Count > 0)
+                    try
                     {
-                        return doc;
+                        var doc = serializer.Deserialize<KerfDocument>(json);
+                        if (doc != null && doc.Pages != null && doc.Pages.Count > 0)
+                        {
+                            return doc;
+                        }
+                    }
+                    catch
+                    {
+                        // Fall back to dictionary migration below
                     }
                 }
 
@@ -46,10 +57,14 @@ namespace Kerf.Model
 
                 var targetPage = migrated.GetActivePage();
 
-                // Check if JSON has "pages" (React format)
-                if (dict.ContainsKey("pages") && dict["pages"] is System.Collections.ArrayList)
+                // Check if JSON has "Pages" or "pages"
+                object pagesRaw = null;
+                if (dict.ContainsKey("Pages")) pagesRaw = dict["Pages"];
+                else if (dict.ContainsKey("pages")) pagesRaw = dict["pages"];
+
+                if (pagesRaw is System.Collections.ArrayList)
                 {
-                    var pagesList = (System.Collections.ArrayList)dict["pages"];
+                    var pagesList = (System.Collections.ArrayList)pagesRaw;
                     migrated.Pages.Clear();
 
                     foreach (var pageObj in pagesList)
@@ -58,11 +73,21 @@ namespace Kerf.Model
                         {
                             var pDict = (Dictionary<string, object>)pageObj;
                             var page = new Page();
-                            if (pDict.ContainsKey("id")) page.Id = pDict["id"].ToString();
-                            if (pDict.ContainsKey("name")) page.Name = pDict["name"].ToString();
-                            if (pDict.ContainsKey("elements") && pDict["elements"] is System.Collections.ArrayList)
+                            if (pDict.ContainsKey("Id")) page.Id = pDict["Id"].ToString();
+                            else if (pDict.ContainsKey("id")) page.Id = pDict["id"].ToString();
+
+                            if (pDict.ContainsKey("Name")) page.Name = pDict["Name"].ToString();
+                            else if (pDict.ContainsKey("name")) page.Name = pDict["name"].ToString();
+
+                            object layersRaw = null;
+                            if (pDict.ContainsKey("Layers")) layersRaw = pDict["Layers"];
+                            else if (pDict.ContainsKey("layers")) layersRaw = pDict["layers"];
+                            else if (pDict.ContainsKey("Elements")) layersRaw = pDict["Elements"];
+                            else if (pDict.ContainsKey("elements")) layersRaw = pDict["elements"];
+
+                            if (layersRaw is System.Collections.ArrayList)
                             {
-                                var elemList = (System.Collections.ArrayList)pDict["elements"];
+                                var elemList = (System.Collections.ArrayList)layersRaw;
                                 foreach (var elObj in elemList)
                                 {
                                     if (elObj is Dictionary<string, object>)
@@ -84,27 +109,24 @@ namespace Kerf.Model
                         migrated.Pages.Add(targetPage);
                     }
                 }
-                // Check if JSON has "Elements" (WPF v2.4 format)
-                else if (dict.ContainsKey("Elements") && dict["Elements"] is System.Collections.ArrayList)
+                // Check if JSON has root "Layers", "layers", "Elements", or "elements"
+                else
                 {
-                    var elemList = (System.Collections.ArrayList)dict["Elements"];
-                    foreach (var elObj in elemList)
+                    object rootLayersRaw = null;
+                    if (dict.ContainsKey("Layers")) rootLayersRaw = dict["Layers"];
+                    else if (dict.ContainsKey("layers")) rootLayersRaw = dict["layers"];
+                    else if (dict.ContainsKey("Elements")) rootLayersRaw = dict["Elements"];
+                    else if (dict.ContainsKey("elements")) rootLayersRaw = dict["elements"];
+
+                    if (rootLayersRaw is System.Collections.ArrayList)
                     {
-                        if (elObj is Dictionary<string, object>)
+                        var elemList = (System.Collections.ArrayList)rootLayersRaw;
+                        foreach (var elObj in elemList)
                         {
-                            targetPage.Layers.Add(MigrateElementDict((Dictionary<string, object>)elObj));
-                        }
-                    }
-                }
-                // Check if JSON has "elements" (React flat format)
-                else if (dict.ContainsKey("elements") && dict["elements"] is System.Collections.ArrayList)
-                {
-                    var elemList = (System.Collections.ArrayList)dict["elements"];
-                    foreach (var elObj in elemList)
-                    {
-                        if (elObj is Dictionary<string, object>)
-                        {
-                            targetPage.Layers.Add(MigrateElementDict((Dictionary<string, object>)elObj));
+                            if (elObj is Dictionary<string, object>)
+                            {
+                                targetPage.Layers.Add(MigrateElementDict((Dictionary<string, object>)elObj));
+                            }
                         }
                     }
                 }
@@ -254,6 +276,31 @@ namespace Kerf.Model
                 }
             }
 
+            // Component & Instance metadata
+            string compId = GetString(d, "ComponentId", "componentId", null);
+            if (!string.IsNullOrEmpty(compId)) node.ComponentId = compId;
+            node.IsMasterComponent = GetBool(d, "IsMasterComponent", "isMasterComponent", false);
+
+            // Nested Children (Frames, Groups, Components)
+            object childrenRaw = null;
+            if (d.ContainsKey("Children")) childrenRaw = d["Children"];
+            else if (d.ContainsKey("children")) childrenRaw = d["children"];
+
+            if (childrenRaw is System.Collections.ArrayList)
+            {
+                var chList = (System.Collections.ArrayList)childrenRaw;
+                node.Children = new List<LayerNode>();
+                foreach (var item in chList)
+                {
+                    if (item is Dictionary<string, object>)
+                    {
+                        var childNode = MigrateElementDict((Dictionary<string, object>)item);
+                        childNode.ParentId = node.Id;
+                        node.Children.Add(childNode);
+                    }
+                }
+            }
+
             // Flags
             node.IsVisible = GetBool(d, "IsVisible", "visible", true);
             node.IsLocked = GetBool(d, "IsLocked", "locked", false);
@@ -267,6 +314,7 @@ namespace Kerf.Model
             if (string.IsNullOrEmpty(t)) return ElementType.Rectangle;
             t = t.Trim().ToLowerInvariant();
 
+            if (t.Contains("componentinstance") || t.Contains("instance")) return ElementType.ComponentInstance;
             if (t.Contains("frame")) return ElementType.Frame;
             if (t.Contains("group")) return ElementType.Group;
             if (t.Contains("ellipse") || t.Contains("circle")) return ElementType.Ellipse;

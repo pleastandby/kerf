@@ -1025,6 +1025,7 @@ namespace Kerf.Engine
                 case ElementType.Frame:
                 case ElementType.Group:
                 case ElementType.Image:
+                case ElementType.ComponentInstance:
                     if (node.CornerRadius > 0.0)
                     {
                         return new RectangleGeometry(new Rect(x, y, w, h), node.CornerRadius, node.CornerRadius);

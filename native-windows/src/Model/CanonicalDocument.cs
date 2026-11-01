@@ -1138,5 +1138,48 @@ namespace Kerf.Model
                 }
             }
         }
+
+        public List<LayerNode> GetAllComponents()
+        {
+            var list = new List<LayerNode>();
+            if (Pages != null)
+            {
+                foreach (var page in Pages)
+                {
+                    if (page.Layers != null)
+                    {
+                        CollectComponentsRecursive(page.Layers, list);
+                    }
+                }
+            }
+            return list;
+        }
+
+        private void CollectComponentsRecursive(List<LayerNode> nodes, List<LayerNode> output)
+        {
+            if (nodes == null) return;
+            foreach (var n in nodes)
+            {
+                if (n.IsMasterComponent)
+                {
+                    output.Add(n);
+                }
+                if (n.Children != null && n.Children.Count > 0)
+                {
+                    CollectComponentsRecursive(n.Children, output);
+                }
+            }
+        }
+
+        public LayerNode FindMasterComponent(string componentId)
+        {
+            if (string.IsNullOrEmpty(componentId) || Pages == null) return null;
+            foreach (var page in Pages)
+            {
+                var master = page.FindMasterComponent(componentId);
+                if (master != null) return master;
+            }
+            return null;
+        }
     }
 }

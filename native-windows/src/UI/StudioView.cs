@@ -63,6 +63,25 @@ namespace Kerf.UI
         private double _timelinePixelsPerSecond = 260.0;
         private bool _isScrubbingTimeline = false;
 
+        // Left Sidebar Tabs (Layers vs Assets)
+        private bool _isAssetsTabActive = false;
+        private Border _layersTabBtn;
+        private Border _assetsTabBtn;
+        private FrameworkElement _layersViewContainer;
+        private FrameworkElement _assetsViewContainer;
+        private StackPanel _assetsListStack;
+        private TextBox _assetsSearchBox;
+        private TextBlock _assetsCountBlock;
+
+        // Interactive Vector State Machine Canvas Binding
+        private uint _lastHoverNodeId = 0;
+        private bool _interactiveCanvasEnabled = true;
+        private TextBlock _stateMachineStatusBadge;
+        private StackPanel _stateMachineInputsStack;
+        private StackPanel _stateMachineStatesStack;
+        private Border _canvasInteractBtn;
+        private TextBlock _canvasInteractText;
+
         // Document & Engine
         public KerfDocument Document { get; private set; }
         public string CurrentFilePath { get; private set; }
@@ -619,43 +638,56 @@ namespace Kerf.UI
             };
 
             var grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(42) }); // Title / actions
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Search / filter bar
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Scrollable list
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(42) }); // Header Toolbar
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Content View Host
 
-            // 1. Header Toolbar
-            var headerDock = new DockPanel { Margin = new Thickness(12, 0, 8, 0), LastChildFill = false };
+            // 1. Header Toolbar with [ Layers ] | [ Assets ] Pill Switcher
+            var headerDock = new DockPanel { Margin = new Thickness(8, 0, 8, 0), LastChildFill = false };
 
-            var titleStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            var title = new TextBlock
+            var tabStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+
+            _layersTabBtn = new Border
             {
-                Text = "Layers",
-                FontSize = 13,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = Brushes.White,
-                VerticalAlignment = VerticalAlignment.Center
+                Background = new SolidColorBrush(Color.FromRgb(48, 56, 78)),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(10, 4, 10, 4),
+                Margin = new Thickness(0, 0, 4, 0),
+                Cursor = Cursors.Hand
             };
-            titleStack.Children.Add(title);
+            var layersTabTextStack = new StackPanel { Orientation = Orientation.Horizontal };
+            var layersTitle = new TextBlock { Text = "Layers", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White };
+            _layerCountBlock = new TextBlock { Text = " (0)", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)), Margin = new Thickness(2, 0, 0, 0) };
+            layersTabTextStack.Children.Add(layersTitle);
+            layersTabTextStack.Children.Add(_layerCountBlock);
+            _layersTabBtn.Child = layersTabTextStack;
+            _layersTabBtn.MouseLeftButtonUp += (s, e) => SwitchLeftSidebarTab(false);
+            tabStack.Children.Add(_layersTabBtn);
 
-            _layerCountBlock = new TextBlock
+            _assetsTabBtn = new Border
             {
-                Text = "(0)",
-                FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(120, 135, 165)),
-                Margin = new Thickness(6, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center
+                Background = Brushes.Transparent,
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(10, 4, 10, 4),
+                Cursor = Cursors.Hand
             };
-            titleStack.Children.Add(_layerCountBlock);
-            DockPanel.SetDock(titleStack, Dock.Left);
-            headerDock.Children.Add(titleStack);
+            var assetsTabTextStack = new StackPanel { Orientation = Orientation.Horizontal };
+            var assetsTitle = new TextBlock { Text = "Assets", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(160, 175, 205)) };
+            _assetsCountBlock = new TextBlock { Text = " (0)", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(120, 135, 165)), Margin = new Thickness(2, 0, 0, 0) };
+            assetsTabTextStack.Children.Add(assetsTitle);
+            assetsTabTextStack.Children.Add(_assetsCountBlock);
+            _assetsTabBtn.Child = assetsTabTextStack;
+            _assetsTabBtn.MouseLeftButtonUp += (s, e) => SwitchLeftSidebarTab(true);
+            tabStack.Children.Add(_assetsTabBtn);
 
-            // Layer actions (Up, Down, Duplicate, Group, Ungroup, Delete)
+            DockPanel.SetDock(tabStack, Dock.Left);
+            headerDock.Children.Add(tabStack);
+
+            // Layer actions
             var actionStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             actionStack.Children.Add(CreateSmallButton("▲", "Bring Forward (Ctrl + ])", () => MoveSelectedLayerZ(true, false)));
             actionStack.Children.Add(CreateSmallButton("▼", "Send Backward (Ctrl + [)", () => MoveSelectedLayerZ(false, false)));
             actionStack.Children.Add(CreateSmallButton("⧉", "Duplicate (Ctrl + D)", () => DuplicateSelectedLayers()));
             actionStack.Children.Add(CreateSmallButton("📁", "Group (Ctrl + G)", () => GroupSelectedLayers()));
-            actionStack.Children.Add(CreateSmallButton("⎘", "Ungroup (Ctrl + Shift + G)", () => UngroupSelectedLayers()));
             actionStack.Children.Add(CreateSmallButton("🗑", "Delete (Delete)", () => DeleteSelectedLayers()));
             DockPanel.SetDock(actionStack, Dock.Right);
             headerDock.Children.Add(actionStack);
@@ -663,12 +695,18 @@ namespace Kerf.UI
             Grid.SetRow(headerDock, 0);
             grid.Children.Add(headerDock);
 
-            // 2. Search & Filter Bar
-            var filterStack = new StackPanel { Margin = new Thickness(10, 0, 10, 8) };
+            // 2. View Containers Host
+            var contentHost = new Grid();
 
+            // A. Layers View Container
+            var layersGrid = new Grid();
+            layersGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Search / Filter
+            layersGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // List
+
+            var filterStack = new StackPanel { Margin = new Thickness(10, 0, 10, 8) };
             var searchBorder = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(42, 48, 66)), // #2A3042
+                Background = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(62, 70, 96)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5),
@@ -691,31 +729,125 @@ namespace Kerf.UI
             searchBorder.Child = _layerSearchBox;
             filterStack.Children.Add(searchBorder);
 
-            // Filter Chips (All, Frames, Shapes, Text)
+            // Filter Chips (All, Frames, Shapes, Text, Components)
             var chipPanel = new StackPanel { Orientation = Orientation.Horizontal };
             chipPanel.Children.Add(CreateFilterChip("All", "all"));
             chipPanel.Children.Add(CreateFilterChip("Frames", "frames"));
             chipPanel.Children.Add(CreateFilterChip("Shapes", "shapes"));
             chipPanel.Children.Add(CreateFilterChip("Text", "text"));
+            chipPanel.Children.Add(CreateFilterChip("Components", "components"));
             filterStack.Children.Add(chipPanel);
 
-            Grid.SetRow(filterStack, 1);
-            grid.Children.Add(filterStack);
+            Grid.SetRow(filterStack, 0);
+            layersGrid.Children.Add(filterStack);
 
-            // 3. Scrollable List
-            var scroll = new ScrollViewer
+            var scrollLayers = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             };
             _layerListStack = new StackPanel { Margin = new Thickness(8, 0, 8, 12) };
-            scroll.Content = _layerListStack;
+            scrollLayers.Content = _layerListStack;
+            Grid.SetRow(scrollLayers, 1);
+            layersGrid.Children.Add(scrollLayers);
 
-            Grid.SetRow(scroll, 2);
-            grid.Children.Add(scroll);
+            _layersViewContainer = layersGrid;
+            contentHost.Children.Add(_layersViewContainer);
+
+            // B. Assets / Components View Container
+            var assetsGrid = new Grid();
+            assetsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Search / Create bar
+            assetsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // List
+
+            var assetsFilterStack = new StackPanel { Margin = new Thickness(10, 0, 10, 8) };
+            var assetsSearchBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(62, 70, 96)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(6, 4, 6, 4),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            _assetsSearchBox = new TextBox
+            {
+                Background = Brushes.Transparent,
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            _assetsSearchBox.TextChanged += (s, e) => RefreshAssetsList();
+            assetsSearchBorder.Child = _assetsSearchBox;
+            assetsFilterStack.Children.Add(assetsSearchBorder);
+
+            var newCompBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(40, 123, 97, 255)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(123, 97, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 4, 8, 4),
+                Cursor = Cursors.Hand
+            };
+            newCompBtn.Child = new TextBlock
+            {
+                Text = "❖ Create Component (Ctrl+Alt+K)",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(196, 181, 253)),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            newCompBtn.MouseLeftButtonUp += (s, e) => CreateComponentFromSelection();
+            assetsFilterStack.Children.Add(newCompBtn);
+
+            Grid.SetRow(assetsFilterStack, 0);
+            assetsGrid.Children.Add(assetsFilterStack);
+
+            var scrollAssets = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            };
+            _assetsListStack = new StackPanel { Margin = new Thickness(8, 0, 8, 12) };
+            scrollAssets.Content = _assetsListStack;
+            Grid.SetRow(scrollAssets, 1);
+            assetsGrid.Children.Add(scrollAssets);
+
+            _assetsViewContainer = assetsGrid;
+            _assetsViewContainer.Visibility = Visibility.Collapsed;
+            contentHost.Children.Add(_assetsViewContainer);
+
+            Grid.SetRow(contentHost, 1);
+            grid.Children.Add(contentHost);
 
             border.Child = grid;
             return border;
+        }
+
+        private void SwitchLeftSidebarTab(bool showAssets)
+        {
+            _isAssetsTabActive = showAssets;
+            if (_layersTabBtn != null)
+            {
+                _layersTabBtn.Background = !showAssets ? new SolidColorBrush(Color.FromRgb(48, 56, 78)) : Brushes.Transparent;
+            }
+            if (_assetsTabBtn != null)
+            {
+                _assetsTabBtn.Background = showAssets ? new SolidColorBrush(Color.FromRgb(48, 56, 78)) : Brushes.Transparent;
+            }
+            if (_layersViewContainer != null)
+            {
+                _layersViewContainer.Visibility = !showAssets ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (_assetsViewContainer != null)
+            {
+                _assetsViewContainer.Visibility = showAssets ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (showAssets)
+            {
+                RefreshAssetsList();
+            }
         }
 
         private Button CreateFilterChip(string label, string filterType)
@@ -774,6 +906,10 @@ namespace Kerf.UI
             if (_layerFilterType == "text")
             {
                 return node.Type == ElementType.Text;
+            }
+            if (_layerFilterType == "components")
+            {
+                return node.IsMasterComponent || node.Type == ElementType.ComponentInstance || !string.IsNullOrEmpty(node.ComponentId);
             }
 
             return true;
@@ -862,6 +998,158 @@ namespace Kerf.UI
             }
         }
 
+        public void RefreshAssetsList()
+        {
+            if (_assetsListStack == null || Document == null) return;
+            _assetsListStack.Children.Clear();
+
+            var components = Document.GetAllComponents();
+            if (_assetsCountBlock != null)
+            {
+                _assetsCountBlock.Text = string.Format(" ({0})", components.Count);
+            }
+
+            string search = (_assetsSearchBox != null) ? _assetsSearchBox.Text.Trim() : "";
+            if (!string.IsNullOrEmpty(search))
+            {
+                components = components.Where(c => c.Name != null && c.Name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+            }
+
+            if (components.Count == 0)
+            {
+                var emptyCard = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(14),
+                    Margin = new Thickness(0, 10, 0, 0)
+                };
+                var emptyStack = new StackPanel();
+                emptyStack.Children.Add(new TextBlock
+                {
+                    Text = "❖ No Components Yet",
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(168, 85, 247)),
+                    Margin = new Thickness(0, 0, 0, 6)
+                });
+                emptyStack.Children.Add(new TextBlock
+                {
+                    Text = string.IsNullOrEmpty(search)
+                        ? "Select any layer or frame and press Ctrl+Alt+K (or right-click → Create Component) to create reusable master components."
+                        : "No components match your search filter.",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175)),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                emptyCard.Child = emptyStack;
+                _assetsListStack.Children.Add(emptyCard);
+                return;
+            }
+
+            foreach (var comp in components)
+            {
+                var card = CreateAssetComponentCard(comp);
+                if (card != null) _assetsListStack.Children.Add(card);
+            }
+        }
+
+        private FrameworkElement CreateAssetComponentCard(LayerNode comp)
+        {
+            if (comp == null) return null;
+
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(40, 46, 64)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(58, 66, 92)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(10, 8, 10, 8),
+                Margin = new Thickness(0, 0, 0, 6),
+                Cursor = Cursors.Hand
+            };
+
+            var dock = new DockPanel { LastChildFill = true };
+
+            // Left: Component Glyph (❖)
+            var icon = VectorIcons.CreateIcon(VectorIcons.ComponentGeometry, new SolidColorBrush(Color.FromRgb(168, 85, 247)), null, 14, 1.4);
+            icon.Margin = new Thickness(0, 2, 8, 0);
+            DockPanel.SetDock(icon, Dock.Left);
+            dock.Children.Add(icon);
+
+            // Right: Insert Button
+            var insertBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(123, 97, 255)), // Figma purple
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 3, 8, 3),
+                Cursor = Cursors.Hand,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var btnText = new TextBlock
+            {
+                Text = "+ Insert",
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White
+            };
+            insertBtn.Child = btnText;
+            insertBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                CreateComponentInstance(comp);
+            };
+            DockPanel.SetDock(insertBtn, Dock.Right);
+            dock.Children.Add(insertBtn);
+
+            // Center: Name and Dimensions
+            var textStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var nameBlock = new TextBlock
+            {
+                Text = comp.Name ?? "Component",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            textStack.Children.Add(nameBlock);
+
+            var dimBlock = new TextBlock
+            {
+                Text = string.Format("{0:0} × {1:0} px", comp.Width, comp.Height),
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+            textStack.Children.Add(dimBlock);
+            dock.Children.Add(textStack);
+
+            card.Child = dock;
+
+            card.MouseEnter += (s, e) =>
+            {
+                card.Background = new SolidColorBrush(Color.FromRgb(48, 56, 78));
+                card.BorderBrush = new SolidColorBrush(Color.FromRgb(123, 97, 255));
+            };
+            card.MouseLeave += (s, e) =>
+            {
+                card.Background = new SolidColorBrush(Color.FromRgb(40, 46, 64));
+                card.BorderBrush = new SolidColorBrush(Color.FromRgb(58, 66, 92));
+            };
+
+            card.MouseLeftButtonUp += (s, e) =>
+            {
+                _selectedLayers.Clear();
+                _selectedLayers.Add(comp);
+                OnSelectionChanged();
+                RefreshCanvas();
+            };
+
+            return card;
+        }
+
+
+
         public void RefreshLayersList()
         {
             if (_layerListStack == null) return;
@@ -874,6 +1162,8 @@ namespace Kerf.UI
             {
                 _layerCountBlock.Text = string.Format("({0})", page.CountAllLayers());
             }
+
+            RefreshAssetsList();
 
             int count = 0;
             // Display in reverse order (topmost layer on top of UI list)
@@ -2081,10 +2371,10 @@ namespace Kerf.UI
                 _propertyInspectorStack.Children.Add(CreateAutoLayoutChildCard(primary, parentNode));
             }
 
-            // 3. Multiple Fills Section (Rive / Figma style)
+            // 3. Multiple Fills Section (Figma style)
             BuildFillsSection(primary);
 
-            // 4. Multiple Strokes Section (Rive / Figma style)
+            // 4. Multiple Strokes Section (Figma style)
             BuildStrokesSection(primary);
 
             // 5. Effects Section (Drop Shadow & Blur)
@@ -4696,6 +4986,19 @@ namespace Kerf.UI
 
             if (button == MouseButton.Left)
             {
+                // In Animate mode, route click directly into State Machine
+                if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
+                {
+                    var hit = _sceneGraph.HitTest(canvasPt);
+                    if (hit != null)
+                    {
+                        uint hitId = (uint)Math.Abs(hit.Id.GetHashCode());
+                        _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Down);
+                    }
+                    _timelineController.ActiveStateMachine.SetBool(1, true); // isPressed
+                    TriggerStateMachineStep();
+                }
+
                 // 1. Vector Edit Mode interaction (if currently vector editing a path)
                 if (_isVectorEditing && _editingVectorNode != null && _editingVectorNode.Geometry != null)
                 {
@@ -4994,6 +5297,26 @@ namespace Kerf.UI
         public void HandleCanvasMouseMove(Point screenPt)
         {
             Point canvasPt = ScreenToCanvas(screenPt);
+
+            if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
+            {
+                var hit = _sceneGraph.HitTest(canvasPt);
+                uint hitId = (hit != null) ? (uint)Math.Abs(hit.Id.GetHashCode()) : 0;
+                if (hitId != _lastHoverNodeId)
+                {
+                    if (_lastHoverNodeId != 0)
+                    {
+                        _timelineController.ActiveStateMachine.OnPointerEvent(_lastHoverNodeId, PointerEventKind.Exit);
+                    }
+                    if (hitId != 0)
+                    {
+                        _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Enter);
+                    }
+                    _lastHoverNodeId = hitId;
+                    _timelineController.ActiveStateMachine.SetBool(0, hitId != 0); // isHovered
+                    TriggerStateMachineStep();
+                }
+            }
 
             // Marquee / Rectangle selection dragging
             if (_isMarqueeSelecting)
@@ -5544,6 +5867,20 @@ namespace Kerf.UI
                     cm.IsOpen = true;
                 }
                 return;
+            }
+
+            if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
+            {
+                Point canvasPt = ScreenToCanvas(screenPt);
+                var hit = _sceneGraph.HitTest(canvasPt);
+                if (hit != null)
+                {
+                    uint hitId = (uint)Math.Abs(hit.Id.GetHashCode());
+                    _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Up);
+                }
+                _timelineController.ActiveStateMachine.SetBool(1, false); // isPressed = false
+                _timelineController.ActiveStateMachine.FireTrigger(3); // clickTrigger
+                TriggerStateMachineStep();
             }
 
             if (_isDraggingGradientHandle)
@@ -8149,7 +8486,7 @@ namespace Kerf.UI
             };
             var modeToggleText = new TextBlock
             {
-                Text = "Rive State Machine ⚙",
+                Text = "State Machine ⚙",
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.White
@@ -8191,80 +8528,352 @@ namespace Kerf.UI
             var border = new Border
             {
                 Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
-                Padding = new Thickness(16, 12, 16, 12)
+                BorderBrush = new SolidColorBrush(Color.FromRgb(36, 42, 60)),
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(16, 10, 16, 12)
             };
 
-            var stack = new StackPanel();
+            var mainGrid = new Grid();
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Header & Status Bar
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Inputs & Controls
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // States & Transitions
+
+            // 1. Header Toolbar
+            var headerDock = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 10) };
+
+            var titleStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var titleIcon = new TextBlock
+            {
+                Text = "⚡ ",
+                FontSize = 13,
+                Foreground = new SolidColorBrush(Color.FromRgb(245, 158, 11))
+            };
+            titleStack.Children.Add(titleIcon);
 
             var title = new TextBlock
             {
-                Text = "Rive Interactive State Machine (Live Canvas Transitions)",
+                Text = "Interactive Vector State Machine",
                 FontSize = 13,
                 FontWeight = FontWeights.Bold,
                 Foreground = Brushes.White,
-                Margin = new Thickness(0, 0, 0, 8)
+                VerticalAlignment = VerticalAlignment.Center
             };
-            stack.Children.Add(title);
+            titleStack.Children.Add(title);
 
-            var desc = new TextBlock
+            // Active State Live Badge
+            _stateMachineStatusBadge = new TextBlock
             {
-                Text = "Click triggers or toggle inputs below to drive real-time animation transitions independent of design tree:",
+                Text = "● Active State: Idle",
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
-                Margin = new Thickness(0, 0, 0, 12)
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94)), // Emerald
+                Margin = new Thickness(12, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
             };
-            stack.Children.Add(desc);
+            titleStack.Children.Add(_stateMachineStatusBadge);
 
-            var inputsStack = new StackPanel { Orientation = Orientation.Horizontal };
+            DockPanel.SetDock(titleStack, Dock.Left);
+            headerDock.Children.Add(titleStack);
 
-            // Trigger "Click"
-            var trgBtn = new Border
+            // Right side: Interactive Canvas Toggle & Step Frame
+            var rightStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+
+            _canvasInteractBtn = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(139, 92, 246)), // Purple
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(12, 6, 12, 6),
-                Margin = new Thickness(0, 0, 10, 0),
+                Background = new SolidColorBrush(Color.FromArgb(40, 34, 197, 94)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(34, 197, 94)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 3, 8, 3),
+                Margin = new Thickness(0, 0, 8, 0),
                 Cursor = Cursors.Hand
             };
-            trgBtn.Child = new TextBlock { Text = "⚡ Fire Trigger 'clickTrigger'", FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
-            trgBtn.MouseLeftButtonUp += (s, e) =>
+            _canvasInteractText = new TextBlock
             {
-                if (_timelineController != null && _timelineController.ActiveStateMachine != null)
-                {
-                    _timelineController.ActiveStateMachine.FireTrigger(1);
-                    StartAnimationTimer();
-                }
+                Text = "Canvas Interaction: ON",
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(74, 222, 128))
             };
-            inputsStack.Children.Add(trgBtn);
+            _canvasInteractBtn.Child = _canvasInteractText;
+            _canvasInteractBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                _interactiveCanvasEnabled = !_interactiveCanvasEnabled;
+                _canvasInteractText.Text = _interactiveCanvasEnabled ? "Canvas Interaction: ON" : "Canvas Interaction: OFF";
+                _canvasInteractBtn.Background = _interactiveCanvasEnabled
+                    ? new SolidColorBrush(Color.FromArgb(40, 34, 197, 94))
+                    : new SolidColorBrush(Color.FromArgb(40, 100, 116, 139));
+                _canvasInteractBtn.BorderBrush = _interactiveCanvasEnabled
+                    ? new SolidColorBrush(Color.FromRgb(34, 197, 94))
+                    : new SolidColorBrush(Color.FromRgb(100, 116, 139));
+                _canvasInteractText.Foreground = _interactiveCanvasEnabled
+                    ? new SolidColorBrush(Color.FromRgb(74, 222, 128))
+                    : new SolidColorBrush(Color.FromRgb(148, 163, 184));
+            };
+            rightStack.Children.Add(_canvasInteractBtn);
 
-            // Boolean Toggle "isHovered"
-            var boolBtn = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(37, 99, 235)), // Blue
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(12, 6, 12, 6),
-                Margin = new Thickness(0, 0, 10, 0),
-                Cursor = Cursors.Hand
-            };
-            var boolText = new TextBlock { Text = "Toggle Bool 'isHovered' (Off)", FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
-            boolBtn.Child = boolText;
-            bool isHovState = false;
-            boolBtn.MouseLeftButtonUp += (s, e) =>
-            {
-                isHovState = !isHovState;
-                boolText.Text = string.Format("Toggle Bool 'isHovered' ({0})", isHovState ? "ON" : "Off");
-                boolBtn.Background = isHovState ? new SolidColorBrush(Color.FromRgb(16, 185, 129)) : new SolidColorBrush(Color.FromRgb(37, 99, 235));
-                if (_timelineController != null && _timelineController.ActiveStateMachine != null)
-                {
-                    _timelineController.ActiveStateMachine.SetBool(0, isHovState);
-                    StartAnimationTimer();
-                }
-            };
-            inputsStack.Children.Add(boolBtn);
+            var tickBtn = CreateSmallTimelineButton("▶ Step Frame (0.016s)", () => TriggerStateMachineStep());
+            rightStack.Children.Add(tickBtn);
 
-            stack.Children.Add(inputsStack);
-            border.Child = stack;
+            DockPanel.SetDock(rightStack, Dock.Right);
+            headerDock.Children.Add(rightStack);
+
+            Grid.SetRow(headerDock, 0);
+            mainGrid.Children.Add(headerDock);
+
+            // 2. Inputs & Triggers Row
+            var inputsRow = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+            var inputsHeader = new TextBlock
+            {
+                Text = "STATE MACHINE INPUTS (CLICK OR TOGGLE TO TRIGGER POSE TRANSITIONS):",
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            inputsRow.Children.Add(inputsHeader);
+
+            _stateMachineInputsStack = new StackPanel { Orientation = Orientation.Horizontal };
+            BuildStateMachineInputsControls();
+            inputsRow.Children.Add(_stateMachineInputsStack);
+
+            Grid.SetRow(inputsRow, 1);
+            mainGrid.Children.Add(inputsRow);
+
+            // 3. States & Transitions Graph Row
+            var statesRow = new StackPanel();
+            var statesHeader = new TextBlock
+            {
+                Text = "MACHINE STATES & TRANSITION GRAPH (CLICK STATE TO PREVIEW POSE):",
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            statesRow.Children.Add(statesHeader);
+
+            _stateMachineStatesStack = new StackPanel { Orientation = Orientation.Horizontal };
+            BuildStateMachineStatesGraph();
+            statesRow.Children.Add(_stateMachineStatesStack);
+
+            Grid.SetRow(statesRow, 2);
+            mainGrid.Children.Add(statesRow);
+
+            border.Child = mainGrid;
             return border;
+        }
+
+        private void BuildStateMachineInputsControls()
+        {
+            if (_stateMachineInputsStack == null) return;
+            _stateMachineInputsStack.Children.Clear();
+
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null)
+            {
+                EnsureTimelineControllerInitialized();
+            }
+
+            var sm = _timelineController.ActiveStateMachine;
+            if (sm == null || sm.Definition == null) return;
+
+            for (int i = 0; i < sm.Definition.Inputs.Count; i++)
+            {
+                int inIdx = i;
+                var input = sm.Definition.Inputs[i];
+
+                if (input.Kind == InputKind.Trigger)
+                {
+                    var trgBtn = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromRgb(139, 92, 246)), // Purple
+                        CornerRadius = new CornerRadius(5),
+                        Padding = new Thickness(10, 5, 10, 5),
+                        Margin = new Thickness(0, 0, 8, 0),
+                        Cursor = Cursors.Hand
+                    };
+                    var tb = new TextBlock
+                    {
+                        Text = "⚡ " + input.Name,
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = Brushes.White
+                    };
+                    trgBtn.Child = tb;
+                    trgBtn.MouseLeftButtonUp += (s, e) =>
+                    {
+                        sm.FireTrigger(inIdx);
+                        TriggerStateMachineStep();
+                    };
+                    _stateMachineInputsStack.Children.Add(trgBtn);
+                }
+                else if (input.Kind == InputKind.Bool)
+                {
+                    bool isVal = input.Value > 0.5;
+                    var boolBtn = new Border
+                    {
+                        Background = isVal ? new SolidColorBrush(Color.FromRgb(16, 185, 129)) : new SolidColorBrush(Color.FromRgb(37, 99, 235)),
+                        CornerRadius = new CornerRadius(5),
+                        Padding = new Thickness(10, 5, 10, 5),
+                        Margin = new Thickness(0, 0, 8, 0),
+                        Cursor = Cursors.Hand
+                    };
+                    var tb = new TextBlock
+                    {
+                        Text = string.Format("⏻ {0}: {1}", input.Name, isVal ? "ON" : "OFF"),
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = Brushes.White
+                    };
+                    boolBtn.Child = tb;
+                    boolBtn.MouseLeftButtonUp += (s, e) =>
+                    {
+                        bool newVal = !(sm.GetInputValue(inIdx) > 0.5);
+                        sm.SetBool(inIdx, newVal);
+                        tb.Text = string.Format("⏻ {0}: {1}", input.Name, newVal ? "ON" : "OFF");
+                        boolBtn.Background = newVal ? new SolidColorBrush(Color.FromRgb(16, 185, 129)) : new SolidColorBrush(Color.FromRgb(37, 99, 235));
+                        TriggerStateMachineStep();
+                    };
+                    _stateMachineInputsStack.Children.Add(boolBtn);
+                }
+                else if (input.Kind == InputKind.Number)
+                {
+                    var numStack = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Margin = new Thickness(0, 0, 10, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    var label = new TextBlock
+                    {
+                        Text = "🎚 " + input.Name + ": ",
+                        FontSize = 11,
+                        Foreground = new SolidColorBrush(Color.FromRgb(200, 210, 235)),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    numStack.Children.Add(label);
+
+                    var slider = new Slider
+                    {
+                        Minimum = 0.0,
+                        Maximum = 2.0,
+                        Value = input.Value,
+                        Width = 90,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    slider.ValueChanged += (s, e) =>
+                    {
+                        sm.SetNumber(inIdx, slider.Value);
+                        TriggerStateMachineStep();
+                    };
+                    numStack.Children.Add(slider);
+                    _stateMachineInputsStack.Children.Add(numStack);
+                }
+            }
+        }
+
+        private void BuildStateMachineStatesGraph()
+        {
+            if (_stateMachineStatesStack == null) return;
+            _stateMachineStatesStack.Children.Clear();
+
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            if (sm.Definition == null || sm.Definition.Layers.Count == 0) return;
+
+            var layer = sm.Definition.Layers[0];
+            int curState = (sm.LayerRuntimes.Count > 0) ? sm.LayerRuntimes[0].CurrentState : 0;
+
+            for (int s = 0; s < layer.States.Count; s++)
+            {
+                int stateIdx = s;
+                var st = layer.States[s];
+                bool isActive = (stateIdx == curState);
+
+                var chip = new Border
+                {
+                    Background = isActive ? new SolidColorBrush(Color.FromArgb(60, 34, 197, 94)) : new SolidColorBrush(Color.FromRgb(33, 39, 54)),
+                    BorderBrush = isActive ? new SolidColorBrush(Color.FromRgb(34, 197, 94)) : new SolidColorBrush(Color.FromRgb(50, 60, 85)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(10, 5, 10, 5),
+                    Margin = new Thickness(0, 0, 6, 0),
+                    Cursor = Cursors.Hand
+                };
+                var tb = new TextBlock
+                {
+                    Text = (isActive ? "● " : "○ ") + st.Name,
+                    FontSize = 11,
+                    FontWeight = isActive ? FontWeights.Bold : FontWeights.Normal,
+                    Foreground = isActive ? new SolidColorBrush(Color.FromRgb(74, 222, 128)) : new SolidColorBrush(Color.FromRgb(180, 195, 220))
+                };
+                chip.Child = tb;
+                chip.MouseLeftButtonUp += (s2, e2) =>
+                {
+                    if (sm.LayerRuntimes.Count > 0)
+                    {
+                        sm.LayerRuntimes[0].CurrentState = stateIdx;
+                        sm.LayerRuntimes[0].ActiveTransition = null;
+                        TriggerStateMachineStep();
+                    }
+                };
+                _stateMachineStatesStack.Children.Add(chip);
+
+                if (s < layer.States.Count - 1)
+                {
+                    var arrow = new TextBlock
+                    {
+                        Text = "➔",
+                        FontSize = 11,
+                        Foreground = new SolidColorBrush(Color.FromRgb(100, 115, 145)),
+                        Margin = new Thickness(0, 0, 6, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    _stateMachineStatesStack.Children.Add(arrow);
+                }
+            }
+        }
+
+        private void UpdateStateMachineStatusUI()
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            if (sm.Definition == null || sm.Definition.Layers.Count == 0 || sm.LayerRuntimes.Count == 0) return;
+
+            var lr = sm.LayerRuntimes[0];
+            var layerDef = sm.Definition.Layers[0];
+            string curName = (lr.CurrentState >= 0 && lr.CurrentState < layerDef.States.Count)
+                ? layerDef.States[lr.CurrentState].Name
+                : "Idle";
+
+            if (_stateMachineStatusBadge != null)
+            {
+                if (lr.ActiveTransition != null)
+                {
+                    string toName = (lr.ActiveTransition.ToState >= 0 && lr.ActiveTransition.ToState < layerDef.States.Count)
+                        ? layerDef.States[lr.ActiveTransition.ToState].Name
+                        : "Target";
+                    _stateMachineStatusBadge.Text = string.Format("● Transitioning: {0} ➔ {1} ({2:F2}s)", curName, toName, lr.ActiveTransition.Elapsed);
+                    _stateMachineStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(245, 158, 11)); // Amber
+                }
+                else
+                {
+                    _stateMachineStatusBadge.Text = string.Format("● Active State: {0}", curName);
+                    _stateMachineStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94)); // Emerald
+                }
+            }
+
+            BuildStateMachineStatesGraph();
+        }
+
+        private void TriggerStateMachineStep()
+        {
+            if (_timelineController != null)
+            {
+                _timelineController.Step(0.016);
+                UpdateStateMachineStatusUI();
+                RefreshTimelineCanvas();
+                StartAnimationTimer();
+            }
         }
 
         private void ToggleTimelineMode()
@@ -8457,25 +9066,106 @@ namespace Kerf.UI
 
             _timelineController.ActiveClip = defaultClip;
 
-            // State Machine Runtime Setup
-            var smDef = new StateMachineDefinition("Interactive SM");
-            int hoverInIdx = smDef.AddInput(MachineInput.Bool("isHovered", false));
-            int clickInIdx = smDef.AddInput(MachineInput.Trigger("clickTrigger"));
-            int speedInIdx = smDef.AddInput(MachineInput.Number("speedMultiplier", 1.0));
+            // Multi-State Distinct Clips: Idle, Hover, Pressed, Active
+            var clipIdle = new Clip(0, "Idle Pose", 1.0);
+            var clipHover = new Clip(1, "Hover Pose", 1.0);
+            var clipPressed = new Clip(2, "Pressed Pose", 1.0);
+            var clipActive = new Clip(3, "Active Pose", 1.0);
+
+            if (pageLayers != null && pageLayers.Count > 0)
+            {
+                var target = pageLayers[0];
+                uint targetId = (uint)Math.Abs(target.Id.GetHashCode());
+
+                // Idle: Rest position and scale
+                var trkIdleRot = new AnimTrack(targetId, (ushort)PropKey.Rotation);
+                trkIdleRot.AddKeyframe(Keyframe.Linear(0.0, 0.0));
+                clipIdle.Tracks.Add(trkIdleRot);
+
+                var trkIdleY = new AnimTrack(targetId, (ushort)PropKey.Y);
+                trkIdleY.AddKeyframe(Keyframe.Linear(0.0, target.Y));
+                clipIdle.Tracks.Add(trkIdleY);
+
+                // Hover: Elevated -8px
+                var trkHovRot = new AnimTrack(targetId, (ushort)PropKey.Rotation);
+                trkHovRot.AddKeyframe(Keyframe.Linear(0.0, 0.0));
+                clipHover.Tracks.Add(trkHovRot);
+
+                var trkHovY = new AnimTrack(targetId, (ushort)PropKey.Y);
+                trkHovY.AddKeyframe(Keyframe.Cubic(0.0, target.Y - 10.0, 0.25, 0.1, 0.25, 1.0));
+                clipHover.Tracks.Add(trkHovY);
+
+                // Pressed: Down +4px, opacity 0.85
+                var trkPresY = new AnimTrack(targetId, (ushort)PropKey.Y);
+                trkPresY.AddKeyframe(Keyframe.Linear(0.0, target.Y + 4.0));
+                clipPressed.Tracks.Add(trkPresY);
+
+                var trkPresOp = new AnimTrack(targetId, (ushort)PropKey.Opacity);
+                trkPresOp.AddKeyframe(Keyframe.Linear(0.0, Math.Max(0.2, target.Opacity * 0.85)));
+                clipPressed.Tracks.Add(trkPresOp);
+
+                // Active: Rotated 15 deg
+                var trkActRot = new AnimTrack(targetId, (ushort)PropKey.Rotation);
+                trkActRot.AddKeyframe(Keyframe.Cubic(0.0, 15.0, 0.34, 1.56, 0.64, 1.0));
+                clipActive.Tracks.Add(trkActRot);
+
+                var trkActY = new AnimTrack(targetId, (ushort)PropKey.Y);
+                trkActY.AddKeyframe(Keyframe.Linear(0.0, target.Y));
+                clipActive.Tracks.Add(trkActY);
+            }
+
+            // Real Vector State Machine Definition Setup
+            var smDef = new StateMachineDefinition("Interactive Vector SM");
+            int inHover = smDef.AddInput(MachineInput.Bool("isHovered", false));
+            int inPress = smDef.AddInput(MachineInput.Bool("isPressed", false));
+            int inActive = smDef.AddInput(MachineInput.Bool("isActive", false));
+            int inClick = smDef.AddInput(MachineInput.Trigger("clickTrigger"));
+            int inReset = smDef.AddInput(MachineInput.Trigger("resetTrigger"));
+            int inSpeed = smDef.AddInput(MachineInput.Number("speed", 1.0));
 
             var smLayer = new MachineLayer("Base Layer");
-            int idleIdx = smLayer.AddState(new MachineState(0, "Idle", StateKind.Animation, 0));
-            int activeIdx = smLayer.AddState(new MachineState(1, "Active", StateKind.Animation, 0));
+            int stEntry = smLayer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int stIdle = smLayer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
+            int stHover = smLayer.AddState(new MachineState(2, "Hover", StateKind.Animation, 1));
+            int stPressed = smLayer.AddState(new MachineState(3, "Pressed", StateKind.Animation, 2));
+            int stActive = smLayer.AddState(new MachineState(4, "Active", StateKind.Animation, 3));
+            int stAny = smLayer.AddState(new MachineState(5, "Any", StateKind.Any));
 
-            var t1 = new StateTransition(idleIdx, activeIdx, 0.3);
-            t1.Conditions.Add(new TransitionCondition(hoverInIdx, ConditionOp.Eq, 1.0));
-            var t2 = new StateTransition(activeIdx, idleIdx, 0.3);
-            t2.Conditions.Add(new TransitionCondition(hoverInIdx, ConditionOp.Eq, 0.0));
-            smLayer.AddTransition(t1);
-            smLayer.AddTransition(t2);
+            // Entry -> Idle (instant)
+            smLayer.AddTransition(new StateTransition(stEntry, stIdle, 0.0));
+
+            // Idle -> Hover (isHovered == true)
+            var tIdleHov = new StateTransition(stIdle, stHover, 0.25);
+            tIdleHov.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 1.0));
+            smLayer.AddTransition(tIdleHov);
+
+            // Hover -> Idle (isHovered == false)
+            var tHovIdle = new StateTransition(stHover, stIdle, 0.25);
+            tHovIdle.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 0.0));
+            smLayer.AddTransition(tHovIdle);
+
+            // Hover -> Pressed (isPressed == true)
+            var tHovPress = new StateTransition(stHover, stPressed, 0.10);
+            tHovPress.Conditions.Add(new TransitionCondition(inPress, ConditionOp.Eq, 1.0));
+            smLayer.AddTransition(tHovPress);
+
+            // Pressed -> Active (clickTrigger)
+            var tPressAct = new StateTransition(stPressed, stActive, 0.25);
+            tPressAct.Conditions.Add(new TransitionCondition(inClick, ConditionOp.Eq, 1.0));
+            smLayer.AddTransition(tPressAct);
+
+            // Active -> Idle (clickTrigger or resetTrigger)
+            var tActIdle = new StateTransition(stActive, stIdle, 0.30);
+            tActIdle.Conditions.Add(new TransitionCondition(inClick, ConditionOp.Eq, 1.0));
+            smLayer.AddTransition(tActIdle);
+
+            // Any -> Idle (resetTrigger)
+            var tAnyReset = new StateTransition(stAny, stIdle, 0.20);
+            tAnyReset.Conditions.Add(new TransitionCondition(inReset, ConditionOp.Eq, 1.0));
+            smLayer.AddTransition(tAnyReset);
 
             smDef.AddLayer(smLayer);
-            var clips = new List<Clip> { defaultClip };
+            var clips = new List<Clip> { clipIdle, clipHover, clipPressed, clipActive };
             _timelineController.ActiveStateMachine = new StateMachineRuntime(smDef, clips);
         }
 

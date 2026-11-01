@@ -365,7 +365,7 @@ pub extern "C" fn kerf_render_liquid_glass(
 }
 
 // ---------------------------------------------------------------------------
-// Animation & State Machine C ABI (Rive-style Engine - testdata/newreq.md)
+// Animation & State Machine C ABI (Vector State Machine Engine - testdata/newreq.md)
 // ---------------------------------------------------------------------------
 
 pub struct NativeEngineContext {

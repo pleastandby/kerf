@@ -251,7 +251,7 @@ This document captures the current state, technical decisions, completed feature
    - Snaps to exact pixel alignment when within a 6px threshold.
    - Renders vivid dashed magenta alignment guide lines (`#F43F5E`) on the canvas overlay during drag.
 
-4. **Multiple Fills, Multiple Strokes & Gradients like Rive (`StudioView.cs`, `GpuRenderer.cs`):**
+4. **Multiple Fills, Multiple Strokes & Advanced Vector Gradients (`StudioView.cs`, `GpuRenderer.cs`):**
    - **Fills Inspector:** Dedicated section with `+` button; allows stacking multiple fills (Solid, Linear Gradient, Radial Gradient). Includes per-fill visibility eye toggles, opacity scrubbers, gradient angle scrubbers, gradient stop color pickers, and delete buttons.
    - **Strokes Inspector:** Dedicated section with `+` button; allows stacking multiple strokes with independent color/gradient, width, inside/center/outside alignment, line caps (flat, round, square), and visibility toggles.
    - **Rendering Pipeline:** `GpuRenderer.cs` renders all fills in painter's order and applies all strokes with hardware clipping. Supports vector glyph geometry for rich multi-fill and multi-stroke typography.
@@ -817,7 +817,7 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
 
 ---
 
-## 22. Rive-Style Animation Engine & State Machine Runtime (`testdata/newreq.md`)
+## 22. High-Performance Vector Animation Engine & State Machine Runtime (`testdata/newreq.md`)
 
 ### 1. Architectural Independence & Modular Design
 - **Complete Decoupling:** Implemented an independent, standalone animation and state machine runtime that does not depend on WPF Visuals, UI controls, or existing design canvas plumbing.
@@ -879,7 +879,7 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
   - Native Rust C-ABI roundtrip execution via `AnimationNativeBridge`.
 
 
-## 23. Save Anywhere, Safe Auto Layout Undo, Persistent Recents & Rive-Style Animation Tab
+## 23. Save Anywhere, Safe Auto Layout Undo, Persistent Recents & Animation Tab
 
 ### 1. Save Anywhere & Cross-Version File Compatibility
 - **Universal Project Persistence:**
@@ -900,7 +900,7 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
   - Pruned descendant layers from multi-selection when parents are selected.
   - Wrapped single non-frame layers in an Auto Layout frame with Figma-standard 10px padding (`Width = W + 20`, `Height = H + 20`) rather than collapsing with 0px padding.
 
-### 4. Rive-Style Animation Tab & Interactive Timeline in Studio UI
+### 4. Vector Animation Tab & Interactive Timeline in Studio UI
 - **Dual Studio Modes:**
   - Added segmented `[ Design ] | [ Animate ]` pill switcher in the top navigation bar.
 - **Docked Timeline Panel:**
@@ -922,3 +922,61 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
   - Auto Layout multi-layer wrap and single-layer wrap with Figma-standard padding.
   - Command undo/redo bounds restoration without scene graph desynchronization.
   - Visual hierarchy reparenting and `DrawingVisual` recreation immunity under stress.
+
+
+## 24. Component File Persistence, Assets Panel & Real Interactive Vector State Machine
+
+### 1. Component File Persistence Across Save & Open
+- **Full Metadata & Hierarchy Serialization:**
+  - Updated DocumentMigrations.cs to preserve IsMasterComponent, ComponentId, and ElementType.ComponentInstance across document schema versions and migrations.
+  - Implemented recursive child element migration in MigrateElementDict ensuring all nested children within master components and frames are preserved.
+  - Added case ElementType.ComponentInstance: to GpuRenderer.BuildGeometry ensuring component instances are rendered on canvas with accurate geometry, fills, strokes, and children rather than vanishing.
+  - Added KerfDocument.GetAllComponents() and Page.FindMasterComponent to locate master components and their instances across the entire file.
+
+### 2. Left Sidebar Assets / Components Panel
+- **Figma-Style [ Layers ] | [ Assets ] Segmented Tabs:**
+  - Added segmented switcher in the left sidebar allowing instant toggling between the layer tree and the component library.
+  - **Assets View:**
+    - Live component search box.
+    - Lists all master components in the project with purple component diamond glyph (❖), component name, dimensions, and instant + Insert action button.
+    - Empty state guide card explaining how to create components (<kbd>Ctrl+Alt+K</kbd>).
+  - Added [ Components ] filter chip in the Layers panel filter bar alongside [ All ], [ Frames ], [ Shapes ], and [ Text ].
+
+### 3. Real Interactive Vector State Machine Engine
+- **Engine Architecture & Dual Acceleration:**
+  - Replaced dummy controls with a complete, fully interactive state machine controller driven by StateMachineRuntime and SIMD native acceleration.
+  - **4 Distinct Animation Clips:** Idle Pose (rest bounds), Hover Pose (elevated $-10\text{px}$), Pressed Pose (compressed $+4\text{px}$, opacity .85$), and Active Pose (rotated ^\circ$ with cubic ease overshoot).
+  - **6 Interactive Machine Inputs:** isHovered (Bool), isPressed (Bool), isActive (Bool), clickTrigger (Trigger), 
+esetTrigger (Trigger), and speed (Number slider).
+  - **6 Defined States:** Entry, Idle, Hover, Pressed, Active, and Any.
+  - **Full Transition Graph:**
+    - Entry ➔ Idle (instant .0\text{s}$)
+    - Idle ➔ Hover on isHovered == 1.0 (.25\text{s}$ cubic easing)
+    - Hover ➔ Idle on isHovered == 0.0 (.25\text{s}$ cubic easing)
+    - Hover ➔ Pressed on isPressed == 1.0 (.10\text{s}$)
+    - Pressed ➔ Active on clickTrigger (.25\text{s}$)
+    - Active ➔ Idle on clickTrigger (.30\text{s}$)
+    - Any ➔ Idle on 
+esetTrigger (.20\text{s}$)
+- **Live Canvas Pointer Event Routing:**
+  - In Animate mode, hovering, clicking, and releasing over canvas layers hit-tests the layer and dispatches PointerEventKind.Enter, Down, Up, and Exit directly to the active state machine runtime.
+  - Real-time pose blending interpolates properties smoothly at 60 FPS without visual pops.
+- **Rich State Machine UI:**
+  - Active state live badge (● Active State: Idle / ● Transitioning: Idle ➔ Hover).
+  - Interactive inputs controls (clickable triggers, toggle switches, smooth numeric sliders).
+  - State graph chips with active state highlighting and click-to-preview capability.
+  - Canvas interaction toggle button (Canvas Interaction: ON / OFF).
+
+### 4. Removal of All External Brand References
+- Completely eliminated any mention of external engine brands across all source code, tests, Rust engine comments, and documentation, establishing the proprietary **Kerf Interactive Vector State Machine Engine**.
+
+### 5. Automated Verification Suite
+- **Total Tests:** 40
+- **Passing:** 40 (100%)
+- **Failing:** 0
+- Added TestMilestone24Features verifying:
+  - Document save and load roundtrip with master components, nested text layers, and component instances.
+  - GetAllComponents(), FindMasterComponent(), and FindInstancesOfComponent() accuracy.
+  - GpuRenderer.BuildGeometry validity for ComponentInstance.
+  - Multi-state state machine transitions across Idle, Hover, Pressed, and Active.
+  - NodeListener pointer event dispatch to state machine inputs.
