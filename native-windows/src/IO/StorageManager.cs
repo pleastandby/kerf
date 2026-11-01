@@ -115,6 +115,7 @@ namespace Kerf.IO
 
             string json = File.ReadAllText(filePath, Encoding.UTF8);
             var doc = DocumentMigrations.MigrateToCanonical(json);
+            AddRecentProject(filePath);
             return doc;
         }
 
@@ -192,68 +193,168 @@ namespace Kerf.IO
             }
         }
 
+        public static string RecentProjectsRegistryPath
+        {
+            get
+            {
+                if (!Directory.Exists(AppDataFolder)) Directory.CreateDirectory(AppDataFolder);
+                return IOPath.Combine(AppDataFolder, "recent_projects.json");
+            }
+        }
+
+        public static void AddRecentProject(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath)) return;
+            try
+            {
+                filePath = IOPath.GetFullPath(filePath);
+                if (!File.Exists(filePath)) return;
+
+                var serializer = new JavaScriptSerializer();
+                var list = new List<string>();
+                string regPath = RecentProjectsRegistryPath;
+                if (File.Exists(regPath))
+                {
+                    try
+                    {
+                        string json = File.ReadAllText(regPath, Encoding.UTF8);
+                        var loaded = serializer.Deserialize<List<string>>(json);
+                        if (loaded != null) list = loaded;
+                    }
+                    catch { }
+                }
+
+                // Remove duplicate case-insensitively
+                list.RemoveAll(p => string.Equals(p, filePath, StringComparison.OrdinalIgnoreCase));
+                list.Insert(0, filePath);
+
+                if (list.Count > 50)
+                {
+                    list = list.Take(50).ToList();
+                }
+
+                File.WriteAllText(regPath, serializer.Serialize(list), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        public static void SaveAs(KerfDocument doc, string targetFilePath)
+        {
+            SaveAtomic(doc, targetFilePath);
+            AddRecentProject(targetFilePath);
+        }
+
         public static List<ProjectMetadata> GetRecentProjects()
         {
             var list = new List<ProjectMetadata>();
-            if (!Directory.Exists(ProjectsFolder)) return list;
-
-            var files = Directory.GetFiles(ProjectsFolder, "*.kerf", SearchOption.TopDirectoryOnly);
+            var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var serializer = new JavaScriptSerializer();
 
-            foreach (var file in files)
+            // 1. Load recent projects from persistent registry (Desktop, Documents, External Drives, etc.)
+            var validRecentPaths = new List<string>();
+            string regPath = RecentProjectsRegistryPath;
+            if (File.Exists(regPath))
             {
                 try
                 {
-                    var fi = new FileInfo(file);
-                    var meta = new ProjectMetadata
+                    string json = File.ReadAllText(regPath, Encoding.UTF8);
+                    var paths = serializer.Deserialize<List<string>>(json);
+                    if (paths != null)
                     {
-                        FilePath = file,
-                        Name = IOPath.GetFileNameWithoutExtension(file),
-                        LastModified = fi.LastWriteTime,
-                        FileSizeBytes = fi.Length,
-                        LayerCount = 0,
-                        SchemaVersion = "3.0.0"
-                    };
-
-                    // Fast probe first 1000 bytes
-                    using (var reader = new StreamReader(file, Encoding.UTF8))
-                    {
-                        var headerBuf = new char[1024];
-                        int read = reader.Read(headerBuf, 0, 1024);
-                        var headerStr = new string(headerBuf, 0, read);
-                        int nIdx = headerStr.IndexOf("\"Name\":", StringComparison.OrdinalIgnoreCase);
-                        if (nIdx < 0) nIdx = headerStr.IndexOf("\"name\":", StringComparison.OrdinalIgnoreCase);
-                        if (nIdx >= 0)
+                        foreach (var path in paths)
                         {
-                            int colonIdx = headerStr.IndexOf(":", nIdx);
-                            if (colonIdx >= 0)
+                            if (!string.IsNullOrEmpty(path) && File.Exists(path) && seenPaths.Add(path))
                             {
-                                int startQuote = headerStr.IndexOf("\"", colonIdx);
-                                if (startQuote >= 0)
+                                validRecentPaths.Add(path);
+                                var meta = ProbeProjectMetadata(path);
+                                if (meta != null) list.Add(meta);
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // 2. Also enumerate default internal ProjectsFolder
+            if (Directory.Exists(ProjectsFolder))
+            {
+                try
+                {
+                    var files = Directory.GetFiles(ProjectsFolder, "*.kerf", SearchOption.TopDirectoryOnly);
+                    foreach (var file in files)
+                    {
+                        if (seenPaths.Add(file))
+                        {
+                            validRecentPaths.Add(file);
+                            var meta = ProbeProjectMetadata(file);
+                            if (meta != null) list.Add(meta);
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Sync back valid recent paths so dead paths are pruned and new internal paths remembered across updates
+            try
+            {
+                File.WriteAllText(regPath, serializer.Serialize(validRecentPaths), Encoding.UTF8);
+            }
+            catch { }
+
+            return list.OrderByDescending(p => p.LastModified).ToList();
+        }
+
+        private static ProjectMetadata ProbeProjectMetadata(string file)
+        {
+            try
+            {
+                var fi = new FileInfo(file);
+                var meta = new ProjectMetadata
+                {
+                    FilePath = file,
+                    Name = IOPath.GetFileNameWithoutExtension(file),
+                    LastModified = fi.LastWriteTime,
+                    FileSizeBytes = fi.Length,
+                    LayerCount = 0,
+                    SchemaVersion = "3.0.0"
+                };
+
+                // Fast probe first 1000 bytes
+                using (var reader = new StreamReader(file, Encoding.UTF8))
+                {
+                    var headerBuf = new char[1024];
+                    int read = reader.Read(headerBuf, 0, 1024);
+                    var headerStr = new string(headerBuf, 0, read);
+                    int nIdx = headerStr.IndexOf("\"Name\":", StringComparison.OrdinalIgnoreCase);
+                    if (nIdx < 0) nIdx = headerStr.IndexOf("\"name\":", StringComparison.OrdinalIgnoreCase);
+                    if (nIdx >= 0)
+                    {
+                        int colonIdx = headerStr.IndexOf(":", nIdx);
+                        if (colonIdx >= 0)
+                        {
+                            int startQuote = headerStr.IndexOf('"', colonIdx);
+                            if (startQuote >= 0)
+                            {
+                                int endQuote = headerStr.IndexOf('"', startQuote + 1);
+                                if (endQuote > startQuote)
                                 {
-                                    int endQuote = headerStr.IndexOf("\"", startQuote + 1);
-                                    if (endQuote > startQuote)
+                                    string foundName = headerStr.Substring(startQuote + 1, endQuote - startQuote - 1).Trim();
+                                    if (!string.IsNullOrEmpty(foundName))
                                     {
-                                        string foundName = headerStr.Substring(startQuote + 1, endQuote - startQuote - 1).Trim();
-                                        if (!string.IsNullOrEmpty(foundName))
-                                        {
-                                            meta.Name = foundName;
-                                        }
+                                        meta.Name = foundName;
                                     }
                                 }
                             }
                         }
                     }
+                }
 
-                    list.Add(meta);
-                }
-                catch
-                {
-                    // Skip corrupt file in listing
-                }
+                return meta;
             }
-
-            return list.OrderByDescending(p => p.LastModified).ToList();
+            catch
+            {
+                return null;
+            }
         }
 
         public static void EnsureDefaultTemplates()

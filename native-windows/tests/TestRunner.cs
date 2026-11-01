@@ -66,6 +66,7 @@ namespace Kerf.Tests
             RunTest("Visual Hierarchy Reparenting & Nested Undo/Redo Engine Synchronization", TestVisualReparentingAcrossHierarchyAndUndoRedo);
             RunTest("Corner Radius On-Canvas Handles & Figma Auto Layout Flexbox Model", TestCornerRadiusNodesAndFigmaAutoLayoutFlexbox);
             RunTest("Rive Animation Engine & State Machine Runtime (newreq.md)", TestRiveAnimationAndStateMachineEngine);
+            RunTest("Persistent Recent Projects, Save Anywhere, Safe Auto Layout Undo & Animation Tab Integration", TestMilestone23Features);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -2424,6 +2425,132 @@ namespace Kerf.Tests
 
                 AnimationNativeBridge.kerf_anim_context_destroy(nativeCtx);
             }
+        }
+
+        private static void TestMilestone23Features()
+        {
+            // 1. Persistent Recent Projects & Save Anywhere
+            string testDir = Path.Combine(Path.GetTempPath(), "KerfTests_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(testDir);
+            string extFile = Path.Combine(testDir, "CustomProjectAnywhere.kerf");
+
+            var testDoc = new KerfDocument { Name = "CustomProjectAnywhere" };
+            var p1 = testDoc.GetActivePage();
+            p1.Layers.Add(new LayerNode { Name = "Card", Type = ElementType.Rectangle, X = 10, Y = 10, Width = 200, Height = 100 });
+
+            StorageManager.SaveAs(testDoc, extFile);
+            Assert(File.Exists(extFile), "Document successfully saved to arbitrary external path");
+
+            var recents = StorageManager.GetRecentProjects();
+            bool foundExt = false;
+            foreach (var r in recents)
+            {
+                if (string.Equals(r.FilePath, extFile, StringComparison.OrdinalIgnoreCase))
+                {
+                    foundExt = true;
+                    Assert(r.Name == "CustomProjectAnywhere", "Recent project name probed accurately from file");
+                    break;
+                }
+            }
+            Assert(foundExt, "External project path tracked in persistent recent projects registry");
+
+            // Clean up test file
+            try { File.Delete(extFile); Directory.Delete(testDir); } catch { }
+
+            // 2. Safe Auto Layout Multi-Selection Envelope & Complete Undo/Redo
+            var page = new Page { Id = "test-page", Name = "Page 1" };
+            var r1 = new LayerNode { Id = "rect-1", Name = "Rect 1", Type = ElementType.Rectangle, X = 100, Y = 50, Width = 120, Height = 60 };
+            var r2 = new LayerNode { Id = "rect-2", Name = "Rect 2", Type = ElementType.Rectangle, X = 250, Y = 70, Width = 80, Height = 40 };
+            page.Layers.Add(r1);
+            page.Layers.Add(r2);
+
+            var selList = new List<LayerNode> { r1, r2 };
+            bool renderCalled = false;
+            var autoCmd = AutoLayoutEngine.CreateAutoLayoutCommand(page, selList, () => { renderCalled = true; });
+            Assert(autoCmd != null, "CreateAutoLayoutCommand returns valid ICommand");
+
+            autoCmd.Execute();
+            Assert(renderCalled, "Execute triggered render / synchronization callback");
+            Assert(page.Layers.Count == 1, "Page root has 1 Auto Layout Frame wrapping selected layers");
+            var frame = page.Layers[0];
+            Assert(frame.Type == ElementType.Frame, "Created wrapper is an ElementType.Frame");
+            Assert(frame.AutoLayout != null && frame.AutoLayout.Mode != AutoLayoutMode.None, "Frame has active AutoLayout data");
+            Assert(frame.Children.Count == 2, "Frame contains both wrapped layers as children");
+            Assert(frame.Width >= 230.0, string.Format("Frame bounding envelope encompasses all layers (expected >= 230, got {0})", frame.Width));
+
+            // Test Undo (Unexecute)
+            renderCalled = false;
+            autoCmd.Unexecute();
+            Assert(renderCalled, "Unexecute triggered render / synchronization callback");
+            Assert(page.Layers.Count == 2, "Unexecute restored original 2 layers to page root");
+            Assert(page.Layers.Contains(r1) && page.Layers.Contains(r2), "Both original layers restored to page");
+            Assert(r1.X == 100 && r1.Y == 50 && r1.Width == 120 && r1.Height == 60, "Layer 1 exact bounds restored on Undo");
+            Assert(r2.X == 250 && r2.Y == 70 && r2.Width == 80 && r2.Height == 40, "Layer 2 exact bounds restored on Undo");
+            Assert(string.IsNullOrEmpty(r1.ParentId) && string.IsNullOrEmpty(r2.ParentId), "ParentIds reset to root on Undo");
+
+            // Test Redo (Execute again)
+            autoCmd.Execute();
+            Assert(page.Layers.Count == 1, "Redo re-wrapped layers into Auto Layout Frame");
+            Assert(page.Layers[0].Children.Count == 2, "Redo restored children inside frame");
+
+            // 3. Single Layer Auto Layout Wrap with Figma Padding
+            var singlePage = new Page { Id = "page-single", Name = "Single Page" };
+            var singleBox = new LayerNode { Id = "box-1", Name = "Box", Type = ElementType.Rectangle, X = 80, Y = 60, Width = 150, Height = 90 };
+            singlePage.Layers.Add(singleBox);
+
+            var wrapCmd = AutoLayoutEngine.CreateAutoLayoutCommand(singlePage, new List<LayerNode> { singleBox }, () => { });
+            Assert(wrapCmd != null, "Single layer Auto Layout command created");
+            wrapCmd.Execute();
+            Assert(singlePage.Layers.Count == 1, "Single layer wrapped into frame");
+            var singleFrame = singlePage.Layers[0];
+            Assert(singleFrame.Width == 170.0, string.Format("Single layer wrapped with standard padding: expected 170, got {0}", singleFrame.Width));
+            Assert(singleFrame.Height == 110.0, string.Format("Single layer wrapped with standard padding: expected 110, got {0}", singleFrame.Height));
+
+            // Undo single wrap
+            wrapCmd.Unexecute();
+            Assert(singlePage.Layers.Count == 1 && singlePage.Layers[0] == singleBox, "Single layer restored on Undo");
+            Assert(singleBox.Width == 150 && singleBox.Height == 90, "Single layer bounds preserved");
+
+            // 4. RetainedSceneGraph Visual Re-attachment Immunity
+            var sceneGraph = new RetainedSceneGraph(new GpuRenderer());
+            sceneGraph.Synchronize(page);
+            Assert(sceneGraph.RootVisual.Children.Count > 0, "Scene graph synchronized initial layout");
+
+            // Mutate and re-synchronize multiple times
+            autoCmd.Unexecute();
+            sceneGraph.Synchronize(page);
+            Assert(sceneGraph.RootVisual.Children.Count == 2, "Scene graph synchronized undone hierarchy with zero visual parenting exceptions");
+
+            autoCmd.Execute();
+            sceneGraph.Synchronize(page);
+            Assert(sceneGraph.RootVisual.Children.Count == 1, "Scene graph synchronized redone hierarchy seamlessly");
+
+            // 5. Layer Reparenting / Reordering & Scene Graph Sync (MoveLayerHierarchy)
+            var reorderPage = new Page();
+            var frameParent = new LayerNode { Id = "frame1", Type = ElementType.Frame, Name = "Frame 1", Width = 300, Height = 200 };
+            var childA = new LayerNode { Id = "childA", Type = ElementType.Rectangle, Name = "Child A", Width = 50, Height = 50 };
+            var childB = new LayerNode { Id = "childB", Type = ElementType.Rectangle, Name = "Child B", Width = 50, Height = 50 };
+            frameParent.Children.Add(childA);
+            childA.ParentId = frameParent.Id;
+            reorderPage.Layers.Add(frameParent);
+            reorderPage.Layers.Add(childB);
+
+            sceneGraph.Synchronize(reorderPage);
+
+            // Move childB into frameParent
+            var reorderCmd = new ReorderLayerCommand(reorderPage, childB, null, 1, frameParent.Id, 1, () => sceneGraph.Synchronize(reorderPage));
+            reorderCmd.Execute();
+            Assert(frameParent.Children.Count == 2, "Layer reparented into frame");
+            Assert(childB.ParentId == frameParent.Id, "Child parent ID updated");
+
+            // Undo reparenting
+            reorderCmd.Unexecute();
+            Assert(frameParent.Children.Count == 1, "Frame children restored on undo");
+            Assert(reorderPage.Layers.Count == 2, "Root layers restored on undo");
+
+            // Redo reparenting
+            reorderCmd.Execute();
+            Assert(frameParent.Children.Count == 2, "Layer reparented again on redo with zero visual parenting errors");
         }
     }
 }

@@ -877,3 +877,48 @@ The automated test runner (`native-windows/build.bat --test`) verifies all 33 cr
   - Smart Animate prototype compiler transition track generation.
   - PropertyBinder layer updates.
   - Native Rust C-ABI roundtrip execution via `AnimationNativeBridge`.
+
+
+## 23. Save Anywhere, Safe Auto Layout Undo, Persistent Recents & Rive-Style Animation Tab
+
+### 1. Save Anywhere & Cross-Version File Compatibility
+- **Universal Project Persistence:**
+  - Added native Open (<kbd>Ctrl+O</kbd>), Save (<kbd>Ctrl+S</kbd>), and Save As... (<kbd>Ctrl+Shift+S</kbd>) file dialogs with `.kerf` filter.
+  - Projects can be saved to and loaded from any directory across disk (Desktop, Documents, external drives), operating identically to Photoshop (`.psd`) and After Effects (`.aep`).
+  - Added persistent `recent_projects.json` in `AppData\Local\KerfStudio\` that preserves external file paths across application updates and reinstalls.
+  - Backward and forward compatibility: Canonical JSON schema parsing handles legacy and future schemas gracefully with zero project data loss.
+
+### 2. Auto Layout Undo Crash Elimination & Visual Collection Reparenting Immunity
+- **Root Cause Resolution:**
+  - Resolved `System.ArgumentException: Specified Visual is already a child of another Visual or the root of a CompositionTarget. at System.Windows.Media.VisualCollection.Add(Visual visual)` during layer reordering, drag-and-drop, and undo/redo operations.
+  - Implemented `AutoLayoutSelectionCommand` and `ToggleAutoLayoutCommand` in `CommandHistory.cs` to fully encapsulate forward/backward bounds, child orders, parent IDs, and container lists under the Command Pattern.
+  - In `RetainedSceneGraph.cs`, completely detaches visuals before synchronizing and catches `ArgumentException` on attachment, safely reallocating a fresh unparented `DrawingVisual` via `ResetVisual()`.
+
+### 3. Figma-Standard Auto Layout Sizing on Single Layer Selection
+- **Multi-Selection & Padding Fixes:**
+  - Added <kbd>Ctrl</kbd>+Click multi-selection support on the canvas alongside <kbd>Shift</kbd>+Click to prevent accidental deselection.
+  - Pruned descendant layers from multi-selection when parents are selected.
+  - Wrapped single non-frame layers in an Auto Layout frame with Figma-standard 10px padding (`Width = W + 20`, `Height = H + 20`) rather than collapsing with 0px padding.
+
+### 4. Rive-Style Animation Tab & Interactive Timeline in Studio UI
+- **Dual Studio Modes:**
+  - Added segmented `[ Design ] | [ Animate ]` pill switcher in the top navigation bar.
+- **Docked Timeline Panel:**
+  - Appears smoothly docked at the bottom of the studio (height 220px) when entering `Animate` mode.
+  - **Transport Bar:** Play/Pause (<kbd>Space</kbd>), Stop, Loop mode (`Loop`/`Once`/`PingPong`), time readout (`0.00s / 2.00s`), Scrubber slider.
+  - **Speed Multipliers:** `0.5x`, `1.0x`, `2.0x`.
+  - **Keyframing:** `◆ + Keyframe` button recording active property values of selected layer at current playhead time into active clip.
+  - **Property Tracks:** Stack for selected layer (`Position X`, `Position Y`, `Width`, `Height`, `Rotation`, `Opacity`, `Corner Radius`).
+  - **Time Ruler & Lanes:** Interactive time ruler, draggable playhead, live canvas scrubbing, and keyframe diamonds (`◆`).
+  - **Interactive State Machine Panel:** Direct triggering and toggling of inputs (`clickTrigger`, `isHovered`) with live state evaluation.
+
+### 5. Automated Verification Suite
+- **Total Tests:** 39
+- **Passing:** 39 (100%)
+- **Failing:** 0
+- Added `TestMilestone23Features` verifying:
+  - Universal path project saving and reloading via `StorageManager.SaveAs`.
+  - External file registry in persistent `recent_projects.json`.
+  - Auto Layout multi-layer wrap and single-layer wrap with Figma-standard padding.
+  - Command undo/redo bounds restoration without scene graph desynchronization.
+  - Visual hierarchy reparenting and `DrawingVisual` recreation immunity under stress.

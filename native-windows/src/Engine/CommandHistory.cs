@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using Kerf.Model;
+using Kerf.Tools;
 
 namespace Kerf.Engine
 {
@@ -842,6 +843,139 @@ namespace Kerf.Engine
             if (_onRender != null) _onRender();
         }
     }
+
+    public class AutoLayoutSelectionCommand : ICommand
+    {
+        public string Description { get { return "Add Auto Layout"; } }
+
+        public class ChildRecord
+        {
+            public LayerNode Layer;
+            public string OriginalParentId;
+            public int OriginalIndex;
+            public double OriginalX;
+            public double OriginalY;
+            public double OriginalWidth;
+            public double OriginalHeight;
+        }
+
+        private readonly Page _page;
+        private readonly LayerNode _frame;
+        private readonly List<ChildRecord> _records;
+        private readonly string _frameParentId;
+        private readonly int _frameInsertIndex;
+        private readonly Action _onRender;
+
+        public AutoLayoutSelectionCommand(Page page, LayerNode frame, List<ChildRecord> records, string frameParentId, int frameInsertIndex, Action onRender)
+        {
+            _page = page;
+            _frame = frame;
+            _records = records;
+            _frameParentId = frameParentId;
+            _frameInsertIndex = frameInsertIndex;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            List<LayerNode> frameContainer;
+            if (string.IsNullOrEmpty(_frameParentId))
+            {
+                frameContainer = _page.Layers;
+            }
+            else
+            {
+                var p = _page.FindLayerById(_frameParentId);
+                frameContainer = (p != null && p.Children != null) ? p.Children : _page.Layers;
+            }
+
+            foreach (var rec in _records)
+            {
+                _page.RemoveLayerEverywhere(rec.Layer);
+                rec.Layer.ParentId = _frame.Id;
+                if (_frame.Children == null) _frame.Children = new List<LayerNode>();
+                if (!_frame.Children.Contains(rec.Layer)) _frame.Children.Add(rec.Layer);
+            }
+
+            _frame.ParentId = _frameParentId;
+            int insertIdx = Math.Max(0, Math.Min(_frameInsertIndex, frameContainer.Count));
+            if (!frameContainer.Contains(_frame))
+            {
+                frameContainer.Insert(insertIdx, _frame);
+            }
+
+            AutoLayoutEngine.Reflow(_frame);
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            _page.RemoveLayerEverywhere(_frame);
+            if (_frame.Children != null)
+            {
+                _frame.Children.Clear();
+            }
+
+            // Restore all wrapped layers back to their original parent containers and coordinates
+            foreach (var rec in _records)
+            {
+                rec.Layer.X = rec.OriginalX;
+                rec.Layer.Y = rec.OriginalY;
+                rec.Layer.Width = rec.OriginalWidth;
+                rec.Layer.Height = rec.OriginalHeight;
+                rec.Layer.ParentId = rec.OriginalParentId;
+
+                List<LayerNode> origContainer;
+                if (string.IsNullOrEmpty(rec.OriginalParentId))
+                {
+                    origContainer = _page.Layers;
+                }
+                else
+                {
+                    var p = _page.FindLayerById(rec.OriginalParentId);
+                    origContainer = (p != null && p.Children != null) ? p.Children : _page.Layers;
+                }
+
+                int idx = Math.Max(0, Math.Min(rec.OriginalIndex, origContainer.Count));
+                if (!origContainer.Contains(rec.Layer))
+                {
+                    origContainer.Insert(idx, rec.Layer);
+                }
+            }
+
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class ToggleAutoLayoutCommand : ICommand
+    {
+        public string Description { get { return "Toggle Auto Layout"; } }
+        private readonly LayerNode _frame;
+        private readonly AutoLayoutData _oldLayout;
+        private readonly AutoLayoutData _newLayout;
+        private readonly Action _onRender;
+
+        public ToggleAutoLayoutCommand(LayerNode frame, AutoLayoutData oldLayout, AutoLayoutData newLayout, Action onRender)
+        {
+            _frame = frame;
+            _oldLayout = oldLayout != null ? oldLayout.Clone() : null;
+            _newLayout = newLayout != null ? newLayout.Clone() : null;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            _frame.AutoLayout = _newLayout != null ? _newLayout.Clone() : null;
+            AutoLayoutEngine.Reflow(_frame);
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            _frame.AutoLayout = _oldLayout != null ? _oldLayout.Clone() : null;
+            AutoLayoutEngine.Reflow(_frame);
+            if (_onRender != null) _onRender();
+        }
+    }
+
 }
-
-

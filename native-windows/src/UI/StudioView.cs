@@ -15,6 +15,8 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using System.Windows.Interop;
 using Kerf.Engine;
+using Kerf.Engine.Animation;
+using AnimTrack = Kerf.Engine.Animation.Track;
 using Kerf.IO;
 using Kerf.Model;
 using Kerf.Tools;
@@ -37,6 +39,29 @@ namespace Kerf.UI
     {
         public event Action RequestHomeNavigation;
         public event Action<string> DocumentSaved;
+        // Studio Mode (Design vs Animate)
+        public enum StudioMode { Design, Animate }
+        private StudioMode _currentStudioMode = StudioMode.Design;
+        private Border _designTabButton;
+        private Border _animateTabButton;
+        private FrameworkElement _timelinePanel;
+        private AnimationTimelineController _timelineController;
+        private DispatcherTimer _animationTimer;
+
+        // Timeline UI components
+        private TextBlock _timelinePlayBtnText;
+        private TextBlock _timelineTimeText;
+        private Slider _timelineScrubber;
+        private TextBlock _timelineClipText;
+        private TextBlock _timelineLoopText;
+        private TextBlock _timelineSpeedText;
+        private StackPanel _timelineTracksStack;
+        private Canvas _timelineCanvasHost;
+        private FrameworkElement _timelineTracksContainer;
+        private FrameworkElement _stateMachineContainer;
+        private bool _isStateMachineMode = false;
+        private double _timelinePixelsPerSecond = 260.0;
+        private bool _isScrubbingTimeline = false;
 
         // Document & Engine
         public KerfDocument Document { get; private set; }
@@ -234,20 +259,31 @@ namespace Kerf.UI
             Grid.SetColumn(layersPanel, 0);
             workspaceGrid.Children.Add(layersPanel);
 
-            // Center: Canvas Host + Floating Tool Island
+            // Center: Canvas Host + Floating Tool Island + Bottom Timeline Dock
             _canvasContainer = new Grid();
+            _canvasContainer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            _canvasContainer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var canvasGrid = new Grid();
             _renderer = new GpuRenderer();
             _sceneGraph = new RetainedSceneGraph(_renderer);
 
             _canvasHost = new RetainedCanvasHost(_sceneGraph, this);
-            _canvasContainer.Children.Add(_canvasHost);
+            canvasGrid.Children.Add(_canvasHost);
 
             // Floating Tool Island at top-center of canvas
             var toolIsland = CreateToolIsland();
             toolIsland.HorizontalAlignment = HorizontalAlignment.Center;
             toolIsland.VerticalAlignment = VerticalAlignment.Top;
             toolIsland.Margin = new Thickness(0, 16, 0, 0);
-            _canvasContainer.Children.Add(toolIsland);
+            canvasGrid.Children.Add(toolIsland);
+
+            Grid.SetRow(canvasGrid, 0);
+            _canvasContainer.Children.Add(canvasGrid);
+
+            _timelinePanel = CreateTimelinePanel();
+            Grid.SetRow(_timelinePanel, 1);
+            _canvasContainer.Children.Add(_timelinePanel);
 
             Grid.SetColumn(_canvasContainer, 1);
             workspaceGrid.Children.Add(_canvasContainer);
@@ -372,9 +408,23 @@ namespace Kerf.UI
             var redoBtn = CreateIconButton(VectorIcons.RedoGeometry, "Redo (Ctrl+Y)", () => Redo());
             var saveBtn = CreateIconButton(VectorIcons.SaveGeometry, "Save (Ctrl+S)", () => SaveCurrentDocument());
 
+            var saveAsBtn = CreateTextButton("Save As", () => SaveAsCurrentDocument());
+            saveAsBtn.ToolTip = "Save As Anywhere (Ctrl+Shift+S)";
+            saveAsBtn.Margin = new Thickness(4, 0, 4, 0);
+
+            var openBtn = CreateIconButton(VectorIcons.FolderGeometry, "Open Project (Ctrl+O)", () => OpenProjectFileDialog());
+
             leftStack.Children.Add(undoBtn);
             leftStack.Children.Add(redoBtn);
             leftStack.Children.Add(saveBtn);
+            leftStack.Children.Add(saveAsBtn);
+            leftStack.Children.Add(openBtn);
+
+            var sepMode = CreateSeparator();
+            leftStack.Children.Add(sepMode);
+
+            var modeSwitcher = CreateModeSwitcher();
+            leftStack.Children.Add(modeSwitcher);
 
             DockPanel.SetDock(leftStack, Dock.Left);
             dock.Children.Add(leftStack);
@@ -4885,7 +4935,9 @@ namespace Kerf.UI
                     var hit = _sceneGraph.HitTest(canvasPt);
                     if (hit != null)
                     {
-                        if (Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift))
+                        bool isMulti = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift)
+                                    || Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+                        if (isMulti)
                         {
                             if (_selectedLayers.Contains(hit)) _selectedLayers.Remove(hit);
                             else _selectedLayers.Add(hit);
@@ -4918,7 +4970,9 @@ namespace Kerf.UI
                     }
                     else
                     {
-                        if (!Keyboard.IsKeyDown(Key.LeftShift) && !Keyboard.IsKeyDown(Key.RightShift))
+                        bool isMultiEmpty = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift)
+                                         || Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+                        if (!isMultiEmpty)
                         {
                             _selectedLayers.Clear();
                             OnSelectionChanged();
@@ -6468,6 +6522,11 @@ namespace Kerf.UI
             RefreshCanvas();
             RefreshLayersList();
             RefreshPropertyInspector();
+            if (_currentStudioMode == StudioMode.Animate)
+            {
+                RefreshTimelineTracks();
+                RefreshTimelineCanvas();
+            }
         }
 
         #endregion
@@ -6498,23 +6557,13 @@ namespace Kerf.UI
         {
             if (string.IsNullOrEmpty(CurrentFilePath))
             {
-                var dlg = new SaveFileDialog
-                {
-                    Filter = "Kerf Design Files (*.kerf)|*.kerf",
-                    FileName = (string.IsNullOrEmpty(Document.Name) ? "Untitled Project" : Document.Name) + ".kerf",
-                    InitialDirectory = StorageManager.ProjectsFolder
-                };
-                if (dlg.ShowDialog() == true)
-                {
-                    CurrentFilePath = dlg.FileName;
-                    Document.Name = System.IO.Path.GetFileNameWithoutExtension(dlg.FileName);
-                }
-                else return false;
+                return SaveAsCurrentDocument();
             }
 
             try
             {
                 StorageManager.SaveAtomic(Document, CurrentFilePath);
+                StorageManager.AddRecentProject(CurrentFilePath);
                 History.MarkClean();
                 StorageManager.ClearAutosave(CurrentFilePath);
                 if (DocumentSaved != null) DocumentSaved(CurrentFilePath);
@@ -6525,6 +6574,100 @@ namespace Kerf.UI
             {
                 MessageBox.Show("Failed to save project: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
+            }
+        }
+
+        public bool SaveAsCurrentDocument()
+        {
+            if (Document == null) return false;
+            var dlg = new SaveFileDialog
+            {
+                Filter = "Kerf Design Files (*.kerf)|*.kerf|All Files (*.*)|*.*",
+                FileName = (string.IsNullOrEmpty(Document.Name) ? "Untitled Project" : Document.Name) + ".kerf",
+                Title = "Save Kerf Design As..."
+            };
+
+            if (!string.IsNullOrEmpty(CurrentFilePath))
+            {
+                string dir = System.IO.Path.GetDirectoryName(CurrentFilePath);
+                if (System.IO.Directory.Exists(dir)) dlg.InitialDirectory = dir;
+            }
+            else
+            {
+                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
+
+            if (dlg.ShowDialog() == true)
+            {
+                CurrentFilePath = dlg.FileName;
+                Document.Name = System.IO.Path.GetFileNameWithoutExtension(dlg.FileName);
+                _titleBlock.Text = Document.Name;
+                _titleTextBox.Text = Document.Name;
+                try
+                {
+                    StorageManager.SaveAs(Document, CurrentFilePath);
+                    History.MarkClean();
+                    StorageManager.ClearAutosave(CurrentFilePath);
+                    if (DocumentSaved != null) DocumentSaved(CurrentFilePath);
+                    MessageBox.Show("Project saved successfully to:\n" + CurrentFilePath, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Failed to save project: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        public void OpenProjectFileDialog()
+        {
+            if (Document != null && History.IsDirty)
+            {
+                var res = MessageBox.Show(
+                    string.Format("Do you want to save changes to \"{0}\" before opening another project?", Document.Name),
+                    "Kerf Studio",
+                    MessageBoxButton.YesNoCancel,
+                    MessageBoxImage.Question);
+
+                if (res == MessageBoxResult.Yes)
+                {
+                    if (!SaveCurrentDocument()) return;
+                }
+                else if (res == MessageBoxResult.Cancel)
+                {
+                    return;
+                }
+            }
+
+            var dlg = new OpenFileDialog
+            {
+                Filter = "Kerf Design Files (*.kerf)|*.kerf|All Files (*.*)|*.*",
+                Title = "Open Kerf Design File"
+            };
+
+            if (!string.IsNullOrEmpty(CurrentFilePath))
+            {
+                string dir = System.IO.Path.GetDirectoryName(CurrentFilePath);
+                if (System.IO.Directory.Exists(dir)) dlg.InitialDirectory = dir;
+            }
+            else
+            {
+                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
+
+            if (dlg.ShowDialog() == true)
+            {
+                try
+                {
+                    var doc = StorageManager.LoadDocument(dlg.FileName);
+                    LoadDocument(doc, dlg.FileName);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Failed to open file: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
         }
 
@@ -7007,17 +7150,21 @@ namespace Kerf.UI
             var page = Document.GetActivePage();
             if (page == null) return;
 
-            var frame = AutoLayoutEngine.AutoAlignSelection(page, _selectedLayers);
-            if (frame != null)
+            var cmd = AutoLayoutEngine.CreateAutoLayoutCommand(page, _selectedLayers, () =>
             {
-                _selectedLayers.Clear();
-                _selectedLayers.Add(frame);
                 _sceneGraph.Synchronize(page);
-                OnSelectionChanged();
                 RefreshCanvas();
                 RefreshLayersList();
                 RefreshPropertyInspector();
-                History.MarkDirty();
+            });
+
+            if (cmd != null)
+            {
+                History.Execute(cmd);
+                _sceneGraph.Synchronize(page);
+                RefreshCanvas();
+                RefreshLayersList();
+                RefreshPropertyInspector();
             }
         }
 
@@ -7402,6 +7549,13 @@ namespace Kerf.UI
             bool isShift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
             bool isAlt = (Keyboard.Modifiers & ModifierKeys.Alt) == ModifierKeys.Alt || Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt);
 
+            if (e.Key == Key.Space && !(e.OriginalSource is TextBox) && _currentStudioMode == StudioMode.Animate)
+            {
+                ToggleAnimationPlayback();
+                e.Handled = true;
+                return;
+            }
+
             // 1. Delete / Backspace instant layer deletion
             if (!isCtrl && !isAlt && (e.Key == Key.Delete || e.Key == Key.Back))
             {
@@ -7441,6 +7595,7 @@ namespace Kerf.UI
                 if (e.Key == Key.Z) { Undo(); e.Handled = true; }
                 else if (e.Key == Key.Y) { Redo(); e.Handled = true; }
                 else if (e.Key == Key.S) { SaveCurrentDocument(); e.Handled = true; }
+                else if (e.Key == Key.O) { OpenProjectFileDialog(); e.Handled = true; }
                 else if (e.Key == Key.D) { DuplicateSelectedLayers(); e.Handled = true; }
                 else if (e.Key == Key.E) { ShowExportDialog(); e.Handled = true; }
                 else if (e.Key == Key.G) { GroupSelectedLayers(); e.Handled = true; }
@@ -7460,6 +7615,7 @@ namespace Kerf.UI
             else if (isCtrl && isShift && !isAlt)
             {
                 if (e.Key == Key.Z) { Redo(); e.Handled = true; }
+                else if (e.Key == Key.S) { SaveAsCurrentDocument(); e.Handled = true; }
                 else if (e.Key == Key.E) { ShowExportDialog(); e.Handled = true; }
                 else if (e.Key == Key.G) { UngroupSelectedLayers(); e.Handled = true; }
                 else if (e.Key == Key.V) { PasteLayersHere(_lastRightClickCanvasPoint); e.Handled = true; }
@@ -7626,6 +7782,998 @@ namespace Kerf.UI
                     else if (e.Key == Key.OemPlus || e.Key == Key.Add) { ZoomIn(); e.Handled = true; }
                     else if (e.Key == Key.OemMinus || e.Key == Key.Subtract) { ZoomOut(); e.Handled = true; }
                 }
+            }
+        }
+
+        #endregion
+
+
+        #region Animation Tab & Timeline Engine
+
+        private FrameworkElement CreateModeSwitcher()
+        {
+            var pill = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(28, 32, 44)), // #1C202C
+                BorderBrush = new SolidColorBrush(Color.FromRgb(50, 58, 80)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(2),
+                Margin = new Thickness(8, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var stack = new StackPanel { Orientation = Orientation.Horizontal };
+
+            _designTabButton = new Border
+            {
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(Color.FromRgb(99, 102, 241)), // Active Indigo
+                Padding = new Thickness(12, 4, 12, 4),
+                Cursor = Cursors.Hand
+            };
+            var designText = new TextBlock
+            {
+                Text = "Design",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White
+            };
+            _designTabButton.Child = designText;
+            _designTabButton.MouseLeftButtonUp += (s, e) => SwitchStudioMode(StudioMode.Design);
+
+            _animateTabButton = new Border
+            {
+                CornerRadius = new CornerRadius(6),
+                Background = Brushes.Transparent,
+                Padding = new Thickness(12, 4, 12, 4),
+                Cursor = Cursors.Hand
+            };
+            var animateText = new TextBlock
+            {
+                Text = "Animate",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(160, 175, 205))
+            };
+            _animateTabButton.Child = animateText;
+            _animateTabButton.MouseLeftButtonUp += (s, e) => SwitchStudioMode(StudioMode.Animate);
+
+            stack.Children.Add(_designTabButton);
+            stack.Children.Add(_animateTabButton);
+            pill.Child = stack;
+            return pill;
+        }
+
+        public void SwitchStudioMode(StudioMode mode)
+        {
+            _currentStudioMode = mode;
+            if (mode == StudioMode.Animate)
+            {
+                if (_designTabButton != null)
+                {
+                    _designTabButton.Background = Brushes.Transparent;
+                    var dt = _designTabButton.Child as TextBlock;
+                    if (dt != null) dt.Foreground = new SolidColorBrush(Color.FromRgb(160, 175, 205));
+                }
+                if (_animateTabButton != null)
+                {
+                    _animateTabButton.Background = new SolidColorBrush(Color.FromRgb(99, 102, 241));
+                    var at = _animateTabButton.Child as TextBlock;
+                    if (at != null) at.Foreground = Brushes.White;
+                }
+
+                if (_timelinePanel != null)
+                {
+                    _timelinePanel.Visibility = Visibility.Visible;
+                }
+
+                EnsureTimelineControllerInitialized();
+                RefreshTimelineUI();
+            }
+            else
+            {
+                PauseAnimation();
+                if (_designTabButton != null)
+                {
+                    _designTabButton.Background = new SolidColorBrush(Color.FromRgb(99, 102, 241));
+                    var dt = _designTabButton.Child as TextBlock;
+                    if (dt != null) dt.Foreground = Brushes.White;
+                }
+                if (_animateTabButton != null)
+                {
+                    _animateTabButton.Background = Brushes.Transparent;
+                    var at = _animateTabButton.Child as TextBlock;
+                    if (at != null) at.Foreground = new SolidColorBrush(Color.FromRgb(160, 175, 205));
+                }
+
+                if (_timelinePanel != null)
+                {
+                    _timelinePanel.Visibility = Visibility.Collapsed;
+                }
+            }
+        }
+
+        private FrameworkElement CreateTimelinePanel()
+        {
+            var panelBorder = new Border
+            {
+                Height = 220,
+                Background = new SolidColorBrush(Color.FromRgb(22, 25, 34)), // #161922
+                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Visibility = Visibility.Collapsed // Default Design mode
+            };
+
+            var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(38) }); // Transport Bar
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Tracks & Timeline
+
+            // 1. Transport Bar
+            var transportBar = CreateTimelineTransportBar();
+            Grid.SetRow(transportBar, 0);
+            grid.Children.Add(transportBar);
+
+            // 2. Timeline Body (Tracks container or State Machine container)
+            var bodyGrid = new Grid();
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) }); // Left: Track headers
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Right: Ruler & Lanes
+
+            // Left: Track Headers Stack
+            var leftTrackBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(26, 30, 42)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                BorderThickness = new Thickness(0, 0, 1, 0)
+            };
+            var trackScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            _timelineTracksStack = new StackPanel { Margin = new Thickness(8, 4, 8, 4) };
+            trackScroll.Content = _timelineTracksStack;
+            leftTrackBorder.Child = trackScroll;
+            Grid.SetColumn(leftTrackBorder, 0);
+            bodyGrid.Children.Add(leftTrackBorder);
+
+            // Right: Ruler & Lanes Host Canvas
+            var rightCanvasBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(18, 21, 29)),
+                ClipToBounds = true
+            };
+            _timelineCanvasHost = new Canvas
+            {
+                Height = 182,
+                Cursor = Cursors.Hand
+            };
+
+            _timelineCanvasHost.MouseLeftButtonDown += (s, e) =>
+            {
+                _isScrubbingTimeline = true;
+                _timelineCanvasHost.CaptureMouse();
+                ScrubTimelineAtPoint(e.GetPosition(_timelineCanvasHost));
+            };
+            _timelineCanvasHost.MouseMove += (s, e) =>
+            {
+                if (_isScrubbingTimeline)
+                {
+                    ScrubTimelineAtPoint(e.GetPosition(_timelineCanvasHost));
+                }
+            };
+            _timelineCanvasHost.MouseLeftButtonUp += (s, e) =>
+            {
+                if (_isScrubbingTimeline)
+                {
+                    _isScrubbingTimeline = false;
+                    _timelineCanvasHost.ReleaseMouseCapture();
+                }
+            };
+
+            rightCanvasBorder.Child = _timelineCanvasHost;
+            Grid.SetColumn(rightCanvasBorder, 1);
+            bodyGrid.Children.Add(rightCanvasBorder);
+
+            _timelineTracksContainer = bodyGrid;
+            Grid.SetRow(_timelineTracksContainer, 1);
+            grid.Children.Add(_timelineTracksContainer);
+
+            // State Machine Live Testing View Container (Toggleable)
+            _stateMachineContainer = CreateStateMachineControlsPanel();
+            _stateMachineContainer.Visibility = Visibility.Collapsed;
+            Grid.SetRow(_stateMachineContainer, 1);
+            grid.Children.Add(_stateMachineContainer);
+
+            panelBorder.Child = grid;
+            return panelBorder;
+        }
+
+        private FrameworkElement CreateTimelineTransportBar()
+        {
+            var border = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(28, 32, 44)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(12, 0, 12, 0)
+            };
+
+            var dock = new DockPanel { LastChildFill = false };
+
+            // Left: Transport Buttons
+            var leftStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+
+            // Play / Pause Button
+            var playBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(34, 197, 94)), // Emerald Green
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(10, 4, 10, 4),
+                Margin = new Thickness(0, 0, 6, 0),
+                Cursor = Cursors.Hand
+            };
+            _timelinePlayBtnText = new TextBlock
+            {
+                Text = "▶ Play",
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White
+            };
+            playBtn.Child = _timelinePlayBtnText;
+            playBtn.MouseLeftButtonUp += (s, e) => ToggleAnimationPlayback();
+            leftStack.Children.Add(playBtn);
+
+            // Stop / Rewind Button
+            var stopBtn = CreateSmallTimelineButton("⏹ Stop", () => StopAnimationPlayback());
+            leftStack.Children.Add(stopBtn);
+
+            // Loop Toggle Button
+            var loopBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(38, 44, 62)),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(6, 0, 6, 0),
+                Cursor = Cursors.Hand
+            };
+            _timelineLoopText = new TextBlock
+            {
+                Text = "🔁 Loop: All",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(200, 210, 235))
+            };
+            loopBtn.Child = _timelineLoopText;
+            loopBtn.MouseLeftButtonUp += (s, e) => CycleTimelineLoopMode();
+            leftStack.Children.Add(loopBtn);
+
+            // Time Readout
+            _timelineTimeText = new TextBlock
+            {
+                Text = "0.00s / 2.00s",
+                FontFamily = new FontFamily("Consolas, Courier New"),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)), // Cyan
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 12, 0)
+            };
+            leftStack.Children.Add(_timelineTimeText);
+
+            // Interactive Scrubber Slider
+            _timelineScrubber = new Slider
+            {
+                Minimum = 0.0,
+                Maximum = 2.0,
+                Value = 0.0,
+                Width = 140,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 0, 8, 0)
+            };
+            _timelineScrubber.ValueChanged += (s, e) =>
+            {
+                if (_timelineController != null && !_timelineController.IsPlaying)
+                {
+                    _timelineController.Seek(_timelineScrubber.Value);
+                    UpdateTimelineTimeReadout();
+                    RefreshTimelineCanvas();
+                }
+            };
+            leftStack.Children.Add(_timelineScrubber);
+
+            DockPanel.SetDock(leftStack, Dock.Left);
+            dock.Children.Add(leftStack);
+
+            // Right: Clip selector, Keyframe button, Mode switch (Tracks vs State Machine)
+            var rightStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+
+            // Active Clip Badge
+            var clipBadge = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(36, 42, 60)),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            _timelineClipText = new TextBlock
+            {
+                Text = "Clip: Default Animation",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(180, 195, 220))
+            };
+            clipBadge.Child = _timelineClipText;
+            rightStack.Children.Add(clipBadge);
+
+            // Add Keyframe Button
+            var addKeyBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(99, 102, 241)), // Indigo Accent
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(10, 4, 10, 4),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = Cursors.Hand
+            };
+            var addKeyText = new TextBlock
+            {
+                Text = "◆ + Keyframe",
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White
+            };
+            addKeyBtn.Child = addKeyText;
+            addKeyBtn.MouseLeftButtonUp += (s, e) => AddKeyframeForSelectedLayer();
+            rightStack.Children.Add(addKeyBtn);
+
+            // Speed Selector Button
+            var speedBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(38, 44, 62)),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = Cursors.Hand
+            };
+            _timelineSpeedText = new TextBlock
+            {
+                Text = "1.0x",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(200, 210, 235))
+            };
+            speedBtn.Child = _timelineSpeedText;
+            speedBtn.MouseLeftButtonUp += (s, e) => CycleTimelineSpeed();
+            rightStack.Children.Add(speedBtn);
+
+            // Mode Toggle: [ Tracks ] vs [ State Machine ]
+            var modeToggleBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(48, 56, 78)),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(10, 4, 10, 4),
+                Cursor = Cursors.Hand
+            };
+            var modeToggleText = new TextBlock
+            {
+                Text = "Rive State Machine ⚙",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White
+            };
+            modeToggleBtn.Child = modeToggleText;
+            modeToggleBtn.MouseLeftButtonUp += (s, e) => ToggleTimelineMode();
+            rightStack.Children.Add(modeToggleBtn);
+
+            DockPanel.SetDock(rightStack, Dock.Right);
+            dock.Children.Add(rightStack);
+
+            border.Child = dock;
+            return border;
+        }
+
+        private Border CreateSmallTimelineButton(string text, Action onClick)
+        {
+            var btn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(38, 44, 62)),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 0, 6, 0),
+                Cursor = Cursors.Hand
+            };
+            var tb = new TextBlock
+            {
+                Text = text,
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(200, 210, 235))
+            };
+            btn.Child = tb;
+            btn.MouseLeftButtonUp += (s, e) => onClick();
+            return btn;
+        }
+
+        private FrameworkElement CreateStateMachineControlsPanel()
+        {
+            var border = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
+                Padding = new Thickness(16, 12, 16, 12)
+            };
+
+            var stack = new StackPanel();
+
+            var title = new TextBlock
+            {
+                Text = "Rive Interactive State Machine (Live Canvas Transitions)",
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            stack.Children.Add(title);
+
+            var desc = new TextBlock
+            {
+                Text = "Click triggers or toggle inputs below to drive real-time animation transitions independent of design tree:",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
+                Margin = new Thickness(0, 0, 0, 12)
+            };
+            stack.Children.Add(desc);
+
+            var inputsStack = new StackPanel { Orientation = Orientation.Horizontal };
+
+            // Trigger "Click"
+            var trgBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(139, 92, 246)), // Purple
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 6, 12, 6),
+                Margin = new Thickness(0, 0, 10, 0),
+                Cursor = Cursors.Hand
+            };
+            trgBtn.Child = new TextBlock { Text = "⚡ Fire Trigger 'clickTrigger'", FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
+            trgBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                if (_timelineController != null && _timelineController.ActiveStateMachine != null)
+                {
+                    _timelineController.ActiveStateMachine.FireTrigger(1);
+                    StartAnimationTimer();
+                }
+            };
+            inputsStack.Children.Add(trgBtn);
+
+            // Boolean Toggle "isHovered"
+            var boolBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(37, 99, 235)), // Blue
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 6, 12, 6),
+                Margin = new Thickness(0, 0, 10, 0),
+                Cursor = Cursors.Hand
+            };
+            var boolText = new TextBlock { Text = "Toggle Bool 'isHovered' (Off)", FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
+            boolBtn.Child = boolText;
+            bool isHovState = false;
+            boolBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                isHovState = !isHovState;
+                boolText.Text = string.Format("Toggle Bool 'isHovered' ({0})", isHovState ? "ON" : "Off");
+                boolBtn.Background = isHovState ? new SolidColorBrush(Color.FromRgb(16, 185, 129)) : new SolidColorBrush(Color.FromRgb(37, 99, 235));
+                if (_timelineController != null && _timelineController.ActiveStateMachine != null)
+                {
+                    _timelineController.ActiveStateMachine.SetBool(0, isHovState);
+                    StartAnimationTimer();
+                }
+            };
+            inputsStack.Children.Add(boolBtn);
+
+            stack.Children.Add(inputsStack);
+            border.Child = stack;
+            return border;
+        }
+
+        private void ToggleTimelineMode()
+        {
+            _isStateMachineMode = !_isStateMachineMode;
+            if (_isStateMachineMode)
+            {
+                _timelineTracksContainer.Visibility = Visibility.Collapsed;
+                _stateMachineContainer.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                _stateMachineContainer.Visibility = Visibility.Collapsed;
+                _timelineTracksContainer.Visibility = Visibility.Visible;
+                RefreshTimelineUI();
+            }
+        }
+
+        private void CycleTimelineLoopMode()
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (_timelineController.LoopMode == LoopMode.Loop)
+            {
+                _timelineController.LoopMode = LoopMode.OneShot;
+                _timelineLoopText.Text = "🔁 Loop: Once";
+            }
+            else if (_timelineController.LoopMode == LoopMode.OneShot)
+            {
+                _timelineController.LoopMode = LoopMode.PingPong;
+                _timelineLoopText.Text = "🔁 Loop: PingPong";
+            }
+            else
+            {
+                _timelineController.LoopMode = LoopMode.Loop;
+                _timelineLoopText.Text = "🔁 Loop: All";
+            }
+        }
+
+        private void CycleTimelineSpeed()
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (Math.Abs(_timelineController.Speed - 1.0) < 0.1)
+            {
+                _timelineController.Speed = 2.0;
+                _timelineSpeedText.Text = "2.0x";
+            }
+            else if (Math.Abs(_timelineController.Speed - 2.0) < 0.1)
+            {
+                _timelineController.Speed = 0.5;
+                _timelineSpeedText.Text = "0.5x";
+            }
+            else
+            {
+                _timelineController.Speed = 1.0;
+                _timelineSpeedText.Text = "1.0x";
+            }
+        }
+
+        private void ScrubTimelineAtPoint(Point pt)
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            double time = Math.Max(0.0, Math.Min(_timelineController.Duration, pt.X / _timelinePixelsPerSecond));
+            _timelineController.Seek(time);
+            UpdateTimelineTimeReadout();
+            UpdateTimelineScrubberPosition();
+            RefreshTimelineCanvas();
+        }
+
+        private void UpdateTimelineTimeReadout()
+        {
+            if (_timelineController == null || _timelineTimeText == null) return;
+            _timelineTimeText.Text = string.Format("{0:F2}s / {1:F2}s", _timelineController.CurrentTime, _timelineController.Duration);
+        }
+
+        private void UpdateTimelineScrubberPosition()
+        {
+            if (_timelineScrubber == null || _timelineController == null) return;
+            _timelineScrubber.Value = _timelineController.CurrentTime;
+        }
+
+        public void ToggleAnimationPlayback()
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (_timelineController.IsPlaying)
+            {
+                PauseAnimation();
+            }
+            else
+            {
+                PlayAnimation();
+            }
+        }
+
+        public void PlayAnimation()
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            _timelineController.Play();
+            if (_timelinePlayBtnText != null) _timelinePlayBtnText.Text = "⏸ Pause";
+            StartAnimationTimer();
+        }
+
+        public void PauseAnimation()
+        {
+            if (_timelineController != null) _timelineController.Pause();
+            if (_timelinePlayBtnText != null) _timelinePlayBtnText.Text = "▶ Play";
+            if (_animationTimer != null) _animationTimer.Stop();
+        }
+
+        public void StopAnimationPlayback()
+        {
+            PauseAnimation();
+            if (_timelineController != null)
+            {
+                _timelineController.Stop();
+                UpdateTimelineTimeReadout();
+                UpdateTimelineScrubberPosition();
+                RefreshTimelineCanvas();
+            }
+        }
+
+        private void StartAnimationTimer()
+        {
+            if (_animationTimer == null)
+            {
+                _animationTimer = new DispatcherTimer(DispatcherPriority.Render);
+                _animationTimer.Interval = TimeSpan.FromMilliseconds(16); // ~60 FPS
+                _animationTimer.Tick += (s, e) =>
+                {
+                    if (_timelineController != null)
+                    {
+                        if (_timelineController.IsPlaying)
+                        {
+                            _timelineController.Step(0.016);
+                            UpdateTimelineTimeReadout();
+                            UpdateTimelineScrubberPosition();
+                            RefreshTimelineCanvas();
+                        }
+                        else
+                        {
+                            PauseAnimation();
+                        }
+                    }
+                };
+            }
+            if (!_animationTimer.IsEnabled)
+            {
+                _animationTimer.Start();
+            }
+        }
+
+        private void EnsureTimelineControllerInitialized()
+        {
+            if (_timelineController != null) return;
+
+            _timelineController = new AnimationTimelineController(2.0, 60.0);
+            _timelineController.FrameUpdated += (s, pose) =>
+            {
+                var page = Document != null ? Document.GetActivePage() : null;
+                if (page != null)
+                {
+                    PropertyBinder.ApplyPoseToLayers(page.GetAllLayersFlat(), pose);
+                    _sceneGraph.InvalidateAll();
+                    RefreshCanvas();
+                    RefreshPropertyInspector();
+                }
+            };
+
+            var defaultClip = new Clip(1, "Default Animation", 2.0);
+
+            var pageLayers = (Document != null && Document.GetActivePage() != null) ? Document.GetActivePage().Layers : null;
+            if (pageLayers != null && pageLayers.Count > 0)
+            {
+                var target = pageLayers[0];
+                uint targetId = (uint)Math.Abs(target.Id.GetHashCode());
+
+                // Default Rotation track (0 -> 180 -> 360 deg)
+                var rotTrack = new AnimTrack(targetId, (ushort)PropKey.Rotation);
+                rotTrack.AddKeyframe(Keyframe.Cubic(0.0, 0.0, 0.42, 0.0, 0.58, 1.0));
+                rotTrack.AddKeyframe(Keyframe.Cubic(1.0, 180.0, 0.42, 0.0, 0.58, 1.0));
+                rotTrack.AddKeyframe(Keyframe.Cubic(2.0, 360.0, 0.42, 0.0, 0.58, 1.0));
+                defaultClip.Tracks.Add(rotTrack);
+
+                // Default Opacity track (1.0 -> 0.4 -> 1.0)
+                var opTrack = new AnimTrack(targetId, (ushort)PropKey.Opacity);
+                opTrack.AddKeyframe(Keyframe.Linear(0.0, target.Opacity));
+                opTrack.AddKeyframe(Keyframe.Linear(1.0, Math.Max(0.2, target.Opacity * 0.5)));
+                opTrack.AddKeyframe(Keyframe.Linear(2.0, target.Opacity));
+                defaultClip.Tracks.Add(opTrack);
+            }
+
+            _timelineController.ActiveClip = defaultClip;
+
+            // State Machine Runtime Setup
+            var smDef = new StateMachineDefinition("Interactive SM");
+            int hoverInIdx = smDef.AddInput(MachineInput.Bool("isHovered", false));
+            int clickInIdx = smDef.AddInput(MachineInput.Trigger("clickTrigger"));
+            int speedInIdx = smDef.AddInput(MachineInput.Number("speedMultiplier", 1.0));
+
+            var smLayer = new MachineLayer("Base Layer");
+            int idleIdx = smLayer.AddState(new MachineState(0, "Idle", StateKind.Animation, 0));
+            int activeIdx = smLayer.AddState(new MachineState(1, "Active", StateKind.Animation, 0));
+
+            var t1 = new StateTransition(idleIdx, activeIdx, 0.3);
+            t1.Conditions.Add(new TransitionCondition(hoverInIdx, ConditionOp.Eq, 1.0));
+            var t2 = new StateTransition(activeIdx, idleIdx, 0.3);
+            t2.Conditions.Add(new TransitionCondition(hoverInIdx, ConditionOp.Eq, 0.0));
+            smLayer.AddTransition(t1);
+            smLayer.AddTransition(t2);
+
+            smDef.AddLayer(smLayer);
+            var clips = new List<Clip> { defaultClip };
+            _timelineController.ActiveStateMachine = new StateMachineRuntime(smDef, clips);
+        }
+
+        private void AddKeyframeForSelectedLayer()
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            var clip = _timelineController.ActiveClip;
+            if (clip == null)
+            {
+                clip = new Clip(1, "Default Animation", 2.0);
+                _timelineController.ActiveClip = clip;
+            }
+
+            var sel = _selectedLayers.FirstOrDefault();
+            if (sel == null)
+            {
+                MessageBox.Show("Please select a layer on canvas or in the layers list to record animation keyframes.", "Kerf Studio - Animation", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            double time = _timelineController.CurrentTime;
+            uint nodeId = (uint)Math.Abs(sel.Id.GetHashCode());
+
+            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.X, time, sel.X);
+            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Y, time, sel.Y);
+            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Width, time, sel.Width);
+            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Height, time, sel.Height);
+            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Rotation, time, sel.Rotation);
+            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Opacity, time, sel.Opacity);
+            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.CornerRadius, time, sel.CornerRadius);
+
+            RefreshTimelineUI();
+        }
+
+        private static void AddOrUpdateTrackKeyframe(Clip clip, uint nodeId, ushort propertyId, double time, double val)
+        {
+            AnimTrack track = null;
+            for (int i = 0; i < clip.Tracks.Count; i++)
+            {
+                if (clip.Tracks[i].NodeId == nodeId && clip.Tracks[i].Prop == propertyId)
+                {
+                    track = clip.Tracks[i];
+                    break;
+                }
+            }
+
+            if (track == null)
+            {
+                track = new AnimTrack(nodeId, propertyId);
+                clip.Tracks.Add(track);
+            }
+
+            Keyframe existing = null;
+            for (int i = 0; i < track.Keys.Count; i++)
+            {
+                if (Math.Abs(track.Keys[i].Time - time) < 0.02)
+                {
+                    existing = track.Keys[i];
+                    break;
+                }
+            }
+
+            if (existing != null)
+            {
+                existing.Value = val;
+            }
+            else
+            {
+                track.AddKeyframe(Keyframe.Cubic(time, val, 0.42, 0.0, 0.58, 1.0));
+            }
+        }
+
+        public void RefreshTimelineUI()
+        {
+            RefreshTimelineTracks();
+            RefreshTimelineCanvas();
+            UpdateTimelineTimeReadout();
+            UpdateTimelineScrubberPosition();
+        }
+
+        private void RefreshTimelineTracks()
+        {
+            if (_timelineTracksStack == null) return;
+            _timelineTracksStack.Children.Clear();
+
+            var sel = _selectedLayers.FirstOrDefault();
+            var header = new TextBlock
+            {
+                Text = (sel != null) ? string.Format("Layer: {0}", sel.Name) : "No Layer Selected",
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            _timelineTracksStack.Children.Add(header);
+
+            if (sel != null)
+            {
+                _timelineTracksStack.Children.Add(CreateTrackRow("Position X", string.Format("{0:F1} px", sel.X)));
+                _timelineTracksStack.Children.Add(CreateTrackRow("Position Y", string.Format("{0:F1} px", sel.Y)));
+                _timelineTracksStack.Children.Add(CreateTrackRow("Width", string.Format("{0:F1} px", sel.Width)));
+                _timelineTracksStack.Children.Add(CreateTrackRow("Height", string.Format("{0:F1} px", sel.Height)));
+                _timelineTracksStack.Children.Add(CreateTrackRow("Rotation", string.Format("{0:F1} °", sel.Rotation)));
+                _timelineTracksStack.Children.Add(CreateTrackRow("Opacity", string.Format("{0:F0} %", sel.Opacity * 100)));
+                _timelineTracksStack.Children.Add(CreateTrackRow("Corner Radius", string.Format("{0:F1} px", sel.CornerRadius)));
+            }
+            else
+            {
+                var hint = new TextBlock
+                {
+                    Text = "Select a layer on canvas to view tracks & record keyframes.",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(Color.FromRgb(120, 135, 160)),
+                    TextWrapping = TextWrapping.Wrap
+                };
+                _timelineTracksStack.Children.Add(hint);
+            }
+        }
+
+        private FrameworkElement CreateTrackRow(string name, string val)
+        {
+            var grid = new Grid { Height = 20, Margin = new Thickness(0, 1, 0, 1) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var nameBlock = new TextBlock
+            {
+                Text = name,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(180, 195, 220)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(nameBlock, 0);
+            grid.Children.Add(nameBlock);
+
+            var valBlock = new TextBlock
+            {
+                Text = val,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(valBlock, 1);
+            grid.Children.Add(valBlock);
+
+            return grid;
+        }
+
+        private void RefreshTimelineCanvas()
+        {
+            if (_timelineCanvasHost == null) return;
+            _timelineCanvasHost.Children.Clear();
+
+            double duration = (_timelineController != null) ? _timelineController.Duration : 2.0;
+            double pps = _timelinePixelsPerSecond;
+            double totalWidth = duration * pps;
+
+            // 1. Time Ruler (Top 22px)
+            var rulerLine = new Line
+            {
+                X1 = 0,
+                Y1 = 22,
+                X2 = Math.Max(totalWidth + 100, 1000),
+                Y2 = 22,
+                Stroke = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                StrokeThickness = 1
+            };
+            _timelineCanvasHost.Children.Add(rulerLine);
+
+            // Tick marks & time labels every 0.25s / 0.5s
+            for (double t = 0.0; t <= duration + 0.001; t += 0.25)
+            {
+                double x = t * pps;
+                bool isMajor = (Math.Abs(t % 0.5) < 0.01);
+                var tick = new Line
+                {
+                    X1 = x,
+                    Y1 = isMajor ? 6 : 14,
+                    X2 = x,
+                    Y2 = 22,
+                    Stroke = new SolidColorBrush(isMajor ? Color.FromRgb(140, 155, 185) : Color.FromRgb(60, 70, 95)),
+                    StrokeThickness = 1
+                };
+                _timelineCanvasHost.Children.Add(tick);
+
+                if (isMajor)
+                {
+                    var label = new TextBlock
+                    {
+                        Text = string.Format("{0:0.0}s", t),
+                        FontSize = 9,
+                        Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
+                        FontFamily = new FontFamily("Consolas, Courier New")
+                    };
+                    Canvas.SetLeft(label, x + 3);
+                    Canvas.SetTop(label, 4);
+                    _timelineCanvasHost.Children.Add(label);
+                }
+            }
+
+            // 2. Track Lanes (Horizontal separator lines)
+            double rowY = 24.0;
+            for (int r = 0; r < 7; r++)
+            {
+                rowY += 21.0;
+                var laneLine = new Line
+                {
+                    X1 = 0,
+                    Y1 = rowY,
+                    X2 = Math.Max(totalWidth + 100, 1000),
+                    Y2 = rowY,
+                    Stroke = new SolidColorBrush(Color.FromRgb(30, 35, 48)),
+                    StrokeThickness = 1
+                };
+                _timelineCanvasHost.Children.Add(laneLine);
+            }
+
+            // 3. Keyframe Diamonds ◆
+            if (_timelineController != null && _timelineController.ActiveClip != null)
+            {
+                var sel = _selectedLayers.FirstOrDefault();
+                uint selId = (sel != null) ? (uint)Math.Abs(sel.Id.GetHashCode()) : 0;
+
+                foreach (var track in _timelineController.ActiveClip.Tracks)
+                {
+                    if (sel != null && track.NodeId != selId) continue;
+
+                    int propRow = GetPropRowIndex(track.Prop);
+                    double ky = 24.0 + propRow * 21.0 + 10.5;
+
+                    foreach (var kf in track.Keys)
+                    {
+                        double kx = kf.Time * pps;
+                        var diamond = new Polygon
+                        {
+                            Points = new PointCollection
+                            {
+                                new Point(kx, ky - 5),
+                                new Point(kx + 5, ky),
+                                new Point(kx, ky + 5),
+                                new Point(kx - 5, ky)
+                            },
+                            Fill = new SolidColorBrush(Color.FromRgb(251, 191, 36)), // Gold/Amber
+                            Stroke = new SolidColorBrush(Color.FromRgb(30, 35, 48)),
+                            StrokeThickness = 1,
+                            ToolTip = string.Format("Keyframe: {0:F2}s, Value: {1:F1}", kf.Time, kf.Value)
+                        };
+                        _timelineCanvasHost.Children.Add(diamond);
+                    }
+                }
+            }
+
+            // 4. Playhead Line & Scrubber Needle
+            if (_timelineController != null)
+            {
+                double px = _timelineController.CurrentTime * pps;
+
+                // Vertical Playhead Line
+                var playheadLine = new Line
+                {
+                    X1 = px,
+                    Y1 = 12,
+                    X2 = px,
+                    Y2 = 180,
+                    Stroke = new SolidColorBrush(Color.FromRgb(239, 68, 68)), // Red Playhead
+                    StrokeThickness = 1.5
+                };
+                _timelineCanvasHost.Children.Add(playheadLine);
+
+                // Playhead Head Indicator (Downward triangle)
+                var playheadHead = new Polygon
+                {
+                    Points = new PointCollection
+                    {
+                        new Point(px - 5, 2),
+                        new Point(px + 5, 2),
+                        new Point(px + 5, 8),
+                        new Point(px, 14),
+                        new Point(px - 5, 8)
+                    },
+                    Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68))
+                };
+                _timelineCanvasHost.Children.Add(playheadHead);
+            }
+        }
+
+        private static int GetPropRowIndex(ushort propKey)
+        {
+            switch ((PropKey)propKey)
+            {
+                case PropKey.X: return 0;
+                case PropKey.Y: return 1;
+                case PropKey.Width: return 2;
+                case PropKey.Height: return 3;
+                case PropKey.Rotation: return 4;
+                case PropKey.Opacity: return 5;
+                case PropKey.CornerRadius: return 6;
+                default: return 0;
             }
         }
 

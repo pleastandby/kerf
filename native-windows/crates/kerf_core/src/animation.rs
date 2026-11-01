@@ -365,3 +365,4 @@ mod tests {
         assert!((inst.time - 1.5).abs() < 1e-5);
     }
 }
+

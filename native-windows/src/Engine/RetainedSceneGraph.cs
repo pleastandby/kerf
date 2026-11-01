@@ -66,6 +66,12 @@ namespace Kerf.Engine
                 Parent.IsDirty = true;
             }
         }
+
+        public void ResetVisual()
+        {
+            Visual = new DrawingVisual();
+            IsDirty = true;
+        }
     }
 
     public class RetainedSceneGraph
@@ -163,7 +169,7 @@ namespace Kerf.Engine
                 var vNode = SyncLayerHierarchy(layer, null, visited);
                 if (vNode != null)
                 {
-                    SafeAttachVisual(_rootVisual, vNode.Visual);
+                    SafeAttachVisual(_rootVisual, vNode);
                 }
             }
         }
@@ -185,9 +191,10 @@ namespace Kerf.Engine
             }
         }
 
-        private static void SafeAttachVisual(ContainerVisual parent, Visual child)
+        private void SafeAttachVisual(ContainerVisual parent, SceneVisualNode vNode)
         {
-            if (parent == null || child == null) return;
+            if (parent == null || vNode == null || vNode.Visual == null) return;
+            var child = vNode.Visual;
             try
             {
                 var currentParent = VisualTreeHelper.GetParent(child) as ContainerVisual;
@@ -199,23 +206,22 @@ namespace Kerf.Engine
                     }
                     currentParent.Children.Remove(child);
                 }
-                parent.Children.Add(child);
+                if (!parent.Children.Contains(child))
+                {
+                    parent.Children.Add(child);
+                }
             }
             catch (ArgumentException)
             {
-                // In the rare event of lingering composition target or multi-thread delay,
-                // re-attempt detachment before attaching.
+                // In the event of lingering visual parenting or multi-thread composition attachment,
+                // allocate a fresh, unparented DrawingVisual for this node. A new visual is guaranteed
+                // to have no parent, eliminating VisualCollection.Add ArgumentException completely.
                 try
                 {
-                    var fallbackParent = VisualTreeHelper.GetParent(child) as ContainerVisual;
-                    if (fallbackParent != null)
-                    {
-                        fallbackParent.Children.Remove(child);
-                    }
-                    if (!parent.Children.Contains(child))
-                    {
-                        parent.Children.Add(child);
-                    }
+                    _visualLookup.Remove(child);
+                    vNode.ResetVisual();
+                    _visualLookup[vNode.Visual] = vNode;
+                    parent.Children.Add(vNode.Visual);
                 }
                 catch
                 {
@@ -280,7 +286,7 @@ namespace Kerf.Engine
                     if (childVNode != null)
                     {
                         vNode.Children.Add(childVNode);
-                        SafeAttachVisual(vNode.Visual, childVNode.Visual);
+                        SafeAttachVisual(vNode.Visual, childVNode);
                     }
                 }
             }

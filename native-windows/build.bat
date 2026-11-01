@@ -28,7 +28,7 @@ if not exist "%CSC%" (
 )
 
 echo [*] Compiling Native App: src/**/*.cs -^> %OUT_APP% ...
-"%CSC%" /target:winexe /platform:x64 /optimize+ /win32icon:kerf.ico /out:"%OUT_APP%" /lib:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF /r:System.dll,System.Core.dll,System.Xaml.dll,System.Web.Extensions.dll,PresentationCore.dll,PresentationFramework.dll,WindowsBase.dll src\*.cs src\Model\*.cs src\Engine\*.cs src\Tools\*.cs src\IO\*.cs src\UI\*.cs
+"%CSC%" /target:winexe /platform:x64 /optimize+ /win32icon:kerf.ico /out:"%OUT_APP%" /lib:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF /r:System.dll,System.Core.dll,System.Xaml.dll,System.Web.Extensions.dll,PresentationCore.dll,PresentationFramework.dll,WindowsBase.dll /recurse:src\*.cs
 
 if %ERRORLEVEL% NEQ 0 (
     echo [FAILED] Compilation of KerfStudio.exe failed!

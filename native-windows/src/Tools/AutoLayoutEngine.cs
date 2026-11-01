@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Kerf.Model;
+using Kerf.Engine;
 
 namespace Kerf.Tools
 {
@@ -462,10 +463,14 @@ namespace Kerf.Tools
         {
             if (page == null || selectedLayers == null || selectedLayers.Count == 0) return null;
 
+            // Filter out any layer whose ancestor is also selected
+            var topLayers = selectedLayers.Where(l => !selectedLayers.Any(other => other != l && Page.IsDescendant(other, l))).ToList();
+            if (topLayers.Count == 0) return null;
+
             // If a single frame is selected, toggle its AutoLayout mode (None -> Horizontal -> Vertical -> Horizontal)
-            if (selectedLayers.Count == 1 && selectedLayers[0].Type == ElementType.Frame)
+            if (topLayers.Count == 1 && topLayers[0].Type == ElementType.Frame)
             {
-                var singleFrame = selectedLayers[0];
+                var singleFrame = topLayers[0];
                 if (singleFrame.AutoLayout == null) singleFrame.AutoLayout = new AutoLayoutData();
 
                 if (singleFrame.AutoLayout.Mode == AutoLayoutMode.None)
@@ -485,26 +490,79 @@ namespace Kerf.Tools
                 return singleFrame;
             }
 
-            // If multiple layers selected: wrap into Auto Layout Frame
+            // If a single non-frame layer is selected: wrap into Auto Layout Frame with standard padding
+            if (topLayers.Count == 1)
+            {
+                var single = topLayers[0];
+                double pad = 10.0;
+                double fw = single.Width + pad * 2.0;
+                double fh = single.Height + pad * 2.0;
+
+                var singleWrapFrame = new LayerNode
+                {
+                    Id = Guid.NewGuid().ToString().Substring(0, 8),
+                    Name = "Auto Layout Frame",
+                    Type = ElementType.Frame,
+                    X = single.X,
+                    Y = single.Y,
+                    Width = fw,
+                    Height = fh,
+                    ClipContent = false,
+                    AutoLayout = new AutoLayoutData
+                    {
+                        Mode = AutoLayoutMode.Horizontal,
+                        Gap = 0.0,
+                        PaddingTop = pad,
+                        PaddingRight = pad,
+                        PaddingBottom = pad,
+                        PaddingLeft = pad,
+                        AlignItems = AlignItems.Start,
+                        JustifyContent = JustifyContent.Start,
+                        SizingH = SizingMode.Hug,
+                        SizingV = SizingMode.Hug
+                    },
+                    Fills = new List<Paint>(),
+                    Children = new List<LayerNode>()
+                };
+
+                LayerNode p;
+                var c = page.FindContainer(single, out p);
+                if (c == null) c = page.Layers;
+                int insIdx = c.IndexOf(single);
+                if (insIdx < 0) insIdx = c.Count;
+
+                page.RemoveLayerEverywhere(single);
+                single.ParentId = singleWrapFrame.Id;
+                singleWrapFrame.Children.Add(single);
+                singleWrapFrame.ParentId = p != null ? p.Id : null;
+
+                if (insIdx <= c.Count) c.Insert(insIdx, singleWrapFrame);
+                else c.Add(singleWrapFrame);
+
+                Reflow(singleWrapFrame);
+                return singleWrapFrame;
+            }
+
+            // If multiple layers selected: wrap full bounding envelope into Auto Layout Frame
             double minX = double.MaxValue, minY = double.MaxValue;
             double maxX = double.MinValue, maxY = double.MinValue;
 
-            foreach (var l in selectedLayers)
+            foreach (var l in topLayers)
             {
                 minX = Math.Min(minX, l.X);
                 minY = Math.Min(minY, l.Y);
-                maxX = Math.Max(maxX, l.X + Math.Max(1, l.Width));
-                maxY = Math.Max(maxY, l.Y + Math.Max(1, l.Height));
+                maxX = Math.Max(maxX, l.X + Math.Max(1.0, l.Width));
+                maxY = Math.Max(maxY, l.Y + Math.Max(1.0, l.Height));
             }
 
-            double totalW = Math.Max(1, maxX - minX);
-            double totalH = Math.Max(1, maxY - minY);
+            double totalW = Math.Max(1.0, maxX - minX);
+            double totalH = Math.Max(1.0, maxY - minY);
             var mode = (totalW >= totalH) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
 
             // Order layers spatially depending on mode
             var ordered = (mode == AutoLayoutMode.Horizontal)
-                ? selectedLayers.OrderBy(l => l.X).ToList()
-                : selectedLayers.OrderBy(l => l.Y).ToList();
+                ? topLayers.OrderBy(l => l.X).ToList()
+                : topLayers.OrderBy(l => l.Y).ToList();
 
             // Measure natural gap between items along primary axis to preserve exact outer span
             double measuredGap = 0.0;
@@ -551,7 +609,7 @@ namespace Kerf.Tools
                     SizingH = SizingMode.Hug,
                     SizingV = SizingMode.Hug
                 },
-                Fills = new List<Paint>(), // No fill by default for Auto Layout frames
+                Fills = new List<Paint>(),
                 Children = new List<LayerNode>()
             };
 
@@ -581,6 +639,188 @@ namespace Kerf.Tools
 
             Reflow(frame);
             return frame;
+        }
+
+        public static ICommand CreateAutoLayoutCommand(Page page, List<LayerNode> selectedLayers, Action onRender)
+        {
+            if (page == null || selectedLayers == null || selectedLayers.Count == 0) return null;
+
+            // Filter out any layer whose ancestor is also selected
+            var topLayers = selectedLayers.Where(l => !selectedLayers.Any(other => other != l && Page.IsDescendant(other, l))).ToList();
+            if (topLayers.Count == 0) return null;
+
+            // If a single frame is selected, create ToggleAutoLayoutCommand
+            if (topLayers.Count == 1 && topLayers[0].Type == ElementType.Frame)
+            {
+                var singleFrame = topLayers[0];
+                var oldLayout = singleFrame.AutoLayout != null ? singleFrame.AutoLayout.Clone() : new AutoLayoutData();
+                var newLayout = oldLayout.Clone();
+
+                if (oldLayout.Mode == AutoLayoutMode.None)
+                {
+                    newLayout.Mode = AutoLayoutMode.Horizontal;
+                }
+                else if (oldLayout.Mode == AutoLayoutMode.Horizontal)
+                {
+                    newLayout.Mode = AutoLayoutMode.Vertical;
+                }
+                else
+                {
+                    newLayout.Mode = AutoLayoutMode.Horizontal;
+                }
+
+                return new ToggleAutoLayoutCommand(singleFrame, oldLayout, newLayout, onRender);
+            }
+
+            // Build AutoLayoutSelectionCommand
+            if (topLayers.Count == 1)
+            {
+                var single = topLayers[0];
+                double pad = 10.0;
+                double fw = single.Width + pad * 2.0;
+                double fh = single.Height + pad * 2.0;
+
+                var singleWrapFrame = new LayerNode
+                {
+                    Id = Guid.NewGuid().ToString().Substring(0, 8),
+                    Name = "Auto Layout Frame",
+                    Type = ElementType.Frame,
+                    X = single.X,
+                    Y = single.Y,
+                    Width = fw,
+                    Height = fh,
+                    ClipContent = false,
+                    AutoLayout = new AutoLayoutData
+                    {
+                        Mode = AutoLayoutMode.Horizontal,
+                        Gap = 0.0,
+                        PaddingTop = pad,
+                        PaddingRight = pad,
+                        PaddingBottom = pad,
+                        PaddingLeft = pad,
+                        AlignItems = AlignItems.Start,
+                        JustifyContent = JustifyContent.Start,
+                        SizingH = SizingMode.Hug,
+                        SizingV = SizingMode.Hug
+                    },
+                    Fills = new List<Paint>(),
+                    Children = new List<LayerNode>()
+                };
+
+                LayerNode p;
+                var c = page.FindContainer(single, out p);
+                int insIdx = (c != null) ? c.IndexOf(single) : -1;
+                string pId = p != null ? p.Id : null;
+
+                var records = new List<AutoLayoutSelectionCommand.ChildRecord>
+                {
+                    new AutoLayoutSelectionCommand.ChildRecord
+                    {
+                        Layer = single,
+                        OriginalParentId = pId,
+                        OriginalIndex = insIdx,
+                        OriginalX = single.X,
+                        OriginalY = single.Y,
+                        OriginalWidth = single.Width,
+                        OriginalHeight = single.Height
+                    }
+                };
+
+                return new AutoLayoutSelectionCommand(page, singleWrapFrame, records, pId, insIdx, onRender);
+            }
+
+            // Multiple layers
+            double minX = double.MaxValue, minY = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue;
+
+            foreach (var l in topLayers)
+            {
+                minX = Math.Min(minX, l.X);
+                minY = Math.Min(minY, l.Y);
+                maxX = Math.Max(maxX, l.X + Math.Max(1.0, l.Width));
+                maxY = Math.Max(maxY, l.Y + Math.Max(1.0, l.Height));
+            }
+
+            double totalW = Math.Max(1.0, maxX - minX);
+            double totalH = Math.Max(1.0, maxY - minY);
+            var mode = (totalW >= totalH) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
+
+            var ordered = (mode == AutoLayoutMode.Horizontal)
+                ? topLayers.OrderBy(l => l.X).ToList()
+                : topLayers.OrderBy(l => l.Y).ToList();
+
+            double measuredGap = 0.0;
+            if (ordered.Count > 1)
+            {
+                if (mode == AutoLayoutMode.Horizontal)
+                {
+                    double sumW = ordered.Sum(l => l.Width);
+                    measuredGap = Math.Max(0.0, (totalW - sumW) / (ordered.Count - 1));
+                }
+                else
+                {
+                    double sumH = ordered.Sum(l => l.Height);
+                    measuredGap = Math.Max(0.0, (totalH - sumH) / (ordered.Count - 1));
+                }
+            }
+
+            double padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
+            double padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
+            double padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
+            double padBottom = Math.Max(0.0, maxY - ordered.Max(l => l.Y + l.Height));
+
+            var frame = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                Name = "Auto Layout Frame",
+                Type = ElementType.Frame,
+                X = minX,
+                Y = minY,
+                Width = totalW,
+                Height = totalH,
+                ClipContent = false,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = mode,
+                    Gap = Math.Round(measuredGap, 1),
+                    PaddingTop = Math.Round(padTop, 1),
+                    PaddingRight = Math.Round(padRight, 1),
+                    PaddingBottom = Math.Round(padBottom, 1),
+                    PaddingLeft = Math.Round(padLeft, 1),
+                    AlignItems = AlignItems.Start,
+                    JustifyContent = JustifyContent.Start,
+                    SizingH = SizingMode.Hug,
+                    SizingV = SizingMode.Hug
+                },
+                Fills = new List<Paint>(),
+                Children = new List<LayerNode>()
+            };
+
+            var first = ordered[0];
+            LayerNode parent;
+            var container = page.FindContainer(first, out parent);
+            int insertIdx = (container != null) ? container.IndexOf(first) : -1;
+            string frameParentId = parent != null ? parent.Id : null;
+
+            var recs = new List<AutoLayoutSelectionCommand.ChildRecord>();
+            foreach (var l in ordered)
+            {
+                LayerNode p;
+                var c = page.FindContainer(l, out p);
+                int idx = (c != null) ? c.IndexOf(l) : -1;
+                recs.Add(new AutoLayoutSelectionCommand.ChildRecord
+                {
+                    Layer = l,
+                    OriginalParentId = (p != null) ? p.Id : null,
+                    OriginalIndex = idx,
+                    OriginalX = l.X,
+                    OriginalY = l.Y,
+                    OriginalWidth = l.Width,
+                    OriginalHeight = l.Height
+                });
+            }
+
+            return new AutoLayoutSelectionCommand(page, frame, recs, frameParentId, insertIdx, onRender);
         }
     }
 }
