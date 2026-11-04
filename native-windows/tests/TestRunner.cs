@@ -68,6 +68,7 @@ namespace Kerf.Tests
             RunTest("Vector Animation Engine & State Machine Runtime (newreq.md)", TestVectorAnimationAndStateMachineEngine);
             RunTest("Persistent Recent Projects, Save Anywhere, Safe Auto Layout Undo & Animation Tab Integration", TestMilestone23Features);
             RunTest("Component File Persistence Across Save/Open & Real Vector State Machine (Milestone 24)", TestMilestone24Features);
+            RunTest("Nested Auto Layout Frames, Instant Single-Pass Stabilization, and Auto Align Undo/Redo", TestNestedAutoLayoutAndSinglePassStabilization);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -2552,7 +2553,7 @@ namespace Kerf.Tests
             // Redo reparenting
             reorderCmd.Execute();
             Assert(frameParent.Children.Count == 2, "Layer reparented again on redo with zero visual parenting errors");
-        }
+        }
 
         private static void TestMilestone24Features()
         {
@@ -2718,6 +2719,132 @@ namespace Kerf.Tests
             Assert(smRuntime.GetInputValue(inHover) == 1.0, "OnPointerEvent dispatches Enter event to set isHovered input");
 
             try { Directory.Delete(tempDir, true); } catch { }
+        }
+
+        private static void TestNestedAutoLayoutAndSinglePassStabilization()
+        {
+            var page = new Page();
+
+            // 1. Create an Outer Frame with Vertical Auto Layout (Hug height)
+            var outer = new LayerNode
+            {
+                Id = "outer",
+                Name = "Outer Container",
+                Type = ElementType.Frame,
+                X = 100,
+                Y = 100,
+                Width = 400,
+                Height = 200,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Vertical,
+                    Gap = 16.0,
+                    PaddingTop = 20.0,
+                    PaddingBottom = 20.0,
+                    PaddingLeft = 20.0,
+                    PaddingRight = 20.0,
+                    SizingH = SizingMode.Fixed,
+                    SizingV = SizingMode.Hug,
+                    AlignItems = AlignItems.Start,
+                    JustifyContent = JustifyContent.Start
+                },
+                Children = new List<LayerNode>()
+            };
+            page.Layers.Add(outer);
+
+            // Add 3 children inside outer
+            var item1 = new LayerNode { Id = "i1", Name = "Btn 1", Type = ElementType.Rectangle, X = 120, Y = 120, Width = 80, Height = 40, ParentId = "outer" };
+            var item2 = new LayerNode { Id = "i2", Name = "Btn 2", Type = ElementType.Rectangle, X = 210, Y = 120, Width = 90, Height = 40, ParentId = "outer" };
+            var item3 = new LayerNode { Id = "i3", Name = "Footer", Type = ElementType.Rectangle, X = 120, Y = 180, Width = 360, Height = 50, ParentId = "outer" };
+            outer.Children.Add(item1);
+            outer.Children.Add(item2);
+            outer.Children.Add(item3);
+
+            AutoLayoutEngine.ReflowHierarchy(page, outer);
+            Assert(outer.Height == 20 + 40 + 16 + 40 + 16 + 50 + 20, "Outer frame correctly hugs initial children");
+
+            // 2. Auto Align item1 and item2 into a nested Horizontal Auto Layout frame inside outer
+            var cmd = AutoLayoutEngine.CreateAutoLayoutCommand(page, new List<LayerNode> { item1, item2 }, null);
+            Assert(cmd != null, "AutoLayoutSelectionCommand created for nested layers");
+            var alCmd = cmd as AutoLayoutSelectionCommand;
+            Assert(alCmd != null && alCmd.CreatedFrame != null, "CreatedFrame is exposed");
+
+            cmd.Execute();
+
+            var nestedFrame = alCmd.CreatedFrame;
+            Assert(nestedFrame.ParentId == "outer", "Nested frame is child of outer container");
+            Assert(outer.Children.Contains(nestedFrame), "Outer contains nested frame");
+            Assert(!outer.Children.Contains(item1), "Outer no longer contains item1 directly");
+            Assert(!outer.Children.Contains(item2), "Outer no longer contains item2 directly");
+            Assert(nestedFrame.Children.Contains(item1) && nestedFrame.Children.Contains(item2), "Nested frame contains both items");
+            Assert(nestedFrame.AutoLayout != null && nestedFrame.AutoLayout.Mode == AutoLayoutMode.Vertical, "Nested frame auto layout is Vertical for vertically stacked items");
+
+            // Verify SINGLE-PASS STABILIZATION:
+            // In ONE single call without touching it again:
+            // Nested frame hugged height = item1 (40) + gap (16) + item2 (40) = 96
+            // Outer frame hugged height = padT (20) + nestedFrame.Height (96) + gap (16) + footer.Height (50) + padB (20) = 202
+            double expectedOuterH = 20.0 + (40.0 + 16.0 + 40.0) + 16.0 + 50.0 + 20.0;
+            Assert(outer.Height == expectedOuterH, string.Format("Outer frame hugged new nested height in ONE pass (expected {0}, got {1})", expectedOuterH, outer.Height));
+            Assert(item3.Y == nestedFrame.Y + nestedFrame.Height + 16.0, "Footer item positioned directly after nested frame");
+
+            // 3. Undo restores outer layout in single pass
+            cmd.Unexecute();
+            Assert(!outer.Children.Contains(nestedFrame), "Undo removes nested frame");
+            Assert(outer.Children.Contains(item1) && outer.Children.Contains(item2), "Undo restores item1 and item2 into outer");
+            Assert(outer.Height == 20 + 40 + 16 + 40 + 16 + 50 + 20, "Undo reflows outer container in single pass");
+
+            // 4. Multi-level deep Fill & Hug propagation
+            // Level 1: Root Frame (Fixed 500x300)
+            // Level 2: Middle Frame (Fill width, Hug height)
+            // Level 3: Inner Leaf (Fill width, Fixed 60 height)
+            var rootFrame = new LayerNode
+            {
+                Id = "root",
+                Type = ElementType.Frame,
+                X = 0,
+                Y = 0,
+                Width = 500,
+                Height = 300,
+                AutoLayout = new AutoLayoutData { Mode = AutoLayoutMode.Vertical, PaddingLeft = 10, PaddingRight = 10, PaddingTop = 10, PaddingBottom = 10, SizingH = SizingMode.Fixed, SizingV = SizingMode.Fixed },
+                Children = new List<LayerNode>()
+            };
+            var midFrame = new LayerNode
+            {
+                Id = "mid",
+                ParentId = "root",
+                Type = ElementType.Frame,
+                X = 10,
+                Y = 10,
+                Width = 100,
+                Height = 100,
+                LayoutSizingH = SizingMode.Fill,
+                AutoLayout = new AutoLayoutData { Mode = AutoLayoutMode.Horizontal, PaddingLeft = 10, PaddingRight = 10, PaddingTop = 10, PaddingBottom = 10, SizingH = SizingMode.Fill, SizingV = SizingMode.Hug },
+                Children = new List<LayerNode>()
+            };
+            var leaf = new LayerNode
+            {
+                Id = "leaf",
+                ParentId = "mid",
+                Type = ElementType.Rectangle,
+                X = 20,
+                Y = 20,
+                Width = 50,
+                Height = 60,
+                LayoutSizingH = SizingMode.Fill
+            };
+            midFrame.Children.Add(leaf);
+            rootFrame.Children.Add(midFrame);
+            page.Layers.Add(rootFrame);
+
+            AutoLayoutEngine.ReflowHierarchy(page, leaf);
+
+            // Root width = 500. Padding = 10 + 10 = 20.
+            // Mid width (Fill) = 480.
+            // Leaf width (Fill inside mid) = 480 - 20 = 460.
+            // Mid height (Hug) = 60 + 20 = 80.
+            Assert(midFrame.Width == 480.0, string.Format("Mid frame fills root width (expected 480, got {0})", midFrame.Width));
+            Assert(leaf.Width == 460.0, string.Format("Leaf fills mid frame width in single pass (expected 460, got {0})", leaf.Width));
+            Assert(midFrame.Height == 80.0, string.Format("Mid frame hugs leaf height in single pass (expected 80, got {0})", midFrame.Height));
         }
     }
 }

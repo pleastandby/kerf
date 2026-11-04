@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using Kerf.Model;
 using Kerf.Tools;
+using Kerf.Engine.Animation;
 
 namespace Kerf.Engine
 {
@@ -78,11 +79,13 @@ namespace Kerf.Engine
         public void MarkDirty()
         {
             IsDirty = true;
+            OnHistoryChanged();
         }
 
         public void MarkClean()
         {
             IsDirty = false;
+            OnHistoryChanged();
         }
 
         public CommandHistory(int maxDepth = 100)
@@ -115,6 +118,7 @@ namespace Kerf.Engine
             if (command == null) return;
 
             command.Execute();
+            IsDirty = true;
 
             if (batchCommands != null)
             {
@@ -146,6 +150,7 @@ namespace Kerf.Engine
             var cmd = undoStack.Pop();
             cmd.Unexecute();
             redoStack.Push(cmd);
+            IsDirty = true;
             OnHistoryChanged();
         }
 
@@ -156,6 +161,7 @@ namespace Kerf.Engine
             var cmd = redoStack.Pop();
             cmd.Execute();
             undoStack.Push(cmd);
+            IsDirty = true;
             OnHistoryChanged();
         }
 
@@ -163,6 +169,7 @@ namespace Kerf.Engine
         {
             undoStack.Clear();
             redoStack.Clear();
+            IsDirty = false;
             OnHistoryChanged();
         }
 
@@ -213,37 +220,65 @@ namespace Kerf.Engine
         public string Description { get { return string.Format("Add {0} layer(s)", nodes.Count); } }
         private readonly Page page;
         private readonly List<LayerNode> nodes;
+        private readonly List<string> parentIds;
+        private readonly List<int> indices;
         private readonly Action onRender;
 
         public AddLayersCommand(Page p, IEnumerable<LayerNode> toAdd, Action renderCallback = null)
         {
             page = p;
             nodes = new List<LayerNode>(toAdd);
+            parentIds = new List<string>();
+            indices = new List<int>();
+            foreach (var node in nodes)
+            {
+                LayerNode parent = null;
+                List<LayerNode> container = page != null ? page.FindContainer(node, out parent) : null;
+                parentIds.Add(parent != null ? parent.Id : node != null ? node.ParentId : null);
+                indices.Add(container != null ? container.IndexOf(node) : -1);
+            }
             onRender = renderCallback;
         }
 
         public void Execute()
         {
-            foreach (var n in nodes)
+            // On redo, restore the original sibling slot instead of appending the
+            // duplicate to the end of the parent. Sorting by saved index also keeps
+            // multi-selection duplicates in their intended order.
+            var order = Enumerable.Range(0, nodes.Count)
+                .OrderBy(i => parentIds[i] ?? string.Empty)
+                .ThenBy(i => indices[i] < 0 ? int.MaxValue : indices[i])
+                .ToList();
+            foreach (int i in order)
             {
+                var n = nodes[i];
                 if (page.FindLayerById(n.Id) == null)
                 {
-                    if (!string.IsNullOrEmpty(n.ParentId))
+                    string parentId = parentIds[i];
+                    if (!string.IsNullOrEmpty(parentId))
                     {
-                        var parent = page.FindLayerById(n.ParentId);
+                        var parent = page.FindLayerById(parentId);
                         if (parent != null)
                         {
                             if (parent.Children == null) parent.Children = new List<LayerNode>();
-                            if (!parent.Children.Contains(n)) parent.Children.Add(n);
+                            if (!parent.Children.Contains(n))
+                            {
+                                n.ParentId = parent.Id;
+                                parent.Children.Insert(Math.Max(0, Math.Min(indices[i] < 0 ? parent.Children.Count : indices[i], parent.Children.Count)), n);
+                            }
                         }
                         else
                         {
-                            if (!page.Layers.Contains(n)) page.Layers.Add(n);
+                            n.ParentId = null;
+                            if (!page.Layers.Contains(n))
+                                page.Layers.Insert(Math.Max(0, Math.Min(indices[i] < 0 ? page.Layers.Count : indices[i], page.Layers.Count)), n);
                         }
                     }
                     else
                     {
-                        if (!page.Layers.Contains(n)) page.Layers.Add(n);
+                        n.ParentId = null;
+                        if (!page.Layers.Contains(n))
+                            page.Layers.Insert(Math.Max(0, Math.Min(indices[i] < 0 ? page.Layers.Count : indices[i], page.Layers.Count)), n);
                     }
                 }
             }
@@ -563,6 +598,70 @@ namespace Kerf.Engine
         }
     }
 
+    public class MoveKeyframesCommand : ICommand
+    {
+        public string Description { get { return "Move Keyframes"; } }
+        private readonly List<Keyframe> _keys;
+        private readonly List<double> _oldTimes;
+        private readonly List<double> _newTimes;
+        private readonly List<Track> _tracks;
+        private readonly Action _onRender;
+
+        public MoveKeyframesCommand(Dictionary<Keyframe, double> before, Dictionary<Keyframe, double> after, Dictionary<Keyframe, Track> owners, Action onRender)
+        {
+            _keys = new List<Keyframe>(before.Keys);
+            _oldTimes = new List<double>();
+            _newTimes = new List<double>();
+            _tracks = new List<Track>();
+            foreach (var key in _keys)
+            {
+                _oldTimes.Add(before[key]);
+                _newTimes.Add(after != null && after.ContainsKey(key) ? after[key] : key.Time);
+                Track track;
+                if (owners != null && owners.TryGetValue(key, out track) && track != null && !_tracks.Contains(track)) _tracks.Add(track);
+            }
+            _onRender = onRender;
+        }
+
+        public void Execute() { Apply(_newTimes); }
+        public void Unexecute() { Apply(_oldTimes); }
+
+        private void Apply(List<double> times)
+        {
+            for (int i = 0; i < _keys.Count; i++) _keys[i].Time = times[i];
+            foreach (var track in _tracks)
+                if (track.Keys != null) track.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class DeleteKeyframesCommand : ICommand
+    {
+        public string Description { get { return "Delete Keyframes"; } }
+        private readonly Dictionary<Keyframe, Track> _keys;
+        private readonly Action _onRender;
+
+        public DeleteKeyframesCommand(Dictionary<Keyframe, Track> keys, Action onRender)
+        {
+            _keys = keys != null ? new Dictionary<Keyframe, Track>(keys) : new Dictionary<Keyframe, Track>();
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            foreach (var pair in _keys)
+                if (pair.Value != null && pair.Value.Keys != null) pair.Value.Keys.Remove(pair.Key);
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            foreach (var pair in _keys)
+                if (pair.Value != null) pair.Value.AddKeyframe(pair.Key);
+            if (_onRender != null) _onRender();
+        }
+    }
+
     public class ModifyCornerRadiusCommand : ICommand
     {
         public string Description { get { return "Change Corner Radius"; } }
@@ -705,9 +804,11 @@ namespace Kerf.Engine
         private readonly int _oldIndex;
         private readonly string _newParentId;
         private readonly int _newIndex;
+        private readonly bool _oldIgnoreAutoLayout;
+        private readonly bool _newIgnoreAutoLayout;
         private readonly Action _onRender;
 
-        public ReorderLayerCommand(Page page, LayerNode source, string oldParentId, int oldIndex, string newParentId, int newIndex, Action onRender)
+        public ReorderLayerCommand(Page page, LayerNode source, string oldParentId, int oldIndex, string newParentId, int newIndex, Action onRender, bool? newIgnoreAutoLayout = null)
         {
             _page = page;
             _source = source;
@@ -715,20 +816,22 @@ namespace Kerf.Engine
             _oldIndex = oldIndex;
             _newParentId = newParentId;
             _newIndex = newIndex;
+            _oldIgnoreAutoLayout = source != null && source.IgnoreAutoLayout;
+            _newIgnoreAutoLayout = newIgnoreAutoLayout.HasValue ? newIgnoreAutoLayout.Value : _oldIgnoreAutoLayout;
             _onRender = onRender;
         }
 
         public void Execute()
         {
-            MoveTo(_newParentId, _newIndex);
+            MoveTo(_newParentId, _newIndex, _newIgnoreAutoLayout);
         }
 
         public void Unexecute()
         {
-            MoveTo(_oldParentId, _oldIndex);
+            MoveTo(_oldParentId, _oldIndex, _oldIgnoreAutoLayout);
         }
 
-        private void MoveTo(string parentId, int index)
+        private void MoveTo(string parentId, int index, bool ignoreAutoLayout)
         {
             _page.RemoveLayerEverywhere(_source);
             List<LayerNode> targetList;
@@ -761,8 +864,26 @@ namespace Kerf.Engine
                 }
             }
 
+            _source.IgnoreAutoLayout = ignoreAutoLayout;
             int insertIdx = Math.Max(0, Math.Min(index, targetList.Count));
             targetList.Insert(insertIdx, _source);
+
+            // Reflow both old and new containers so nested auto layout frames update immediately
+            if (!string.IsNullOrEmpty(_oldParentId))
+            {
+                var oldP = _page.FindLayerById(_oldParentId);
+                if (oldP != null) AutoLayoutEngine.ReflowHierarchy(_page, oldP);
+            }
+            if (!string.IsNullOrEmpty(parentId))
+            {
+                var newP = _page.FindLayerById(parentId);
+                if (newP != null) AutoLayoutEngine.ReflowHierarchy(_page, newP);
+            }
+            else
+            {
+                AutoLayoutEngine.ReflowHierarchy(_page, _source);
+            }
+
             if (_onRender != null) _onRender();
         }
     }
@@ -847,6 +968,7 @@ namespace Kerf.Engine
     public class AutoLayoutSelectionCommand : ICommand
     {
         public string Description { get { return "Add Auto Layout"; } }
+        public LayerNode CreatedFrame { get { return _frame; } }
 
         public class ChildRecord
         {
@@ -904,7 +1026,7 @@ namespace Kerf.Engine
                 frameContainer.Insert(insertIdx, _frame);
             }
 
-            AutoLayoutEngine.Reflow(_frame);
+            AutoLayoutEngine.ReflowHierarchy(_page, _frame);
             if (_onRender != null) _onRender();
         }
 
@@ -943,6 +1065,23 @@ namespace Kerf.Engine
                 }
             }
 
+            if (!string.IsNullOrEmpty(_frameParentId))
+            {
+                var p = _page.FindLayerById(_frameParentId);
+                if (p != null)
+                {
+                    AutoLayoutEngine.ReflowHierarchy(_page, p);
+                }
+                else
+                {
+                    AutoLayoutEngine.ReflowAll(_page);
+                }
+            }
+            else
+            {
+                AutoLayoutEngine.ReflowAll(_page);
+            }
+
             if (_onRender != null) _onRender();
         }
     }
@@ -950,13 +1089,15 @@ namespace Kerf.Engine
     public class ToggleAutoLayoutCommand : ICommand
     {
         public string Description { get { return "Toggle Auto Layout"; } }
+        private readonly Page _page;
         private readonly LayerNode _frame;
         private readonly AutoLayoutData _oldLayout;
         private readonly AutoLayoutData _newLayout;
         private readonly Action _onRender;
 
-        public ToggleAutoLayoutCommand(LayerNode frame, AutoLayoutData oldLayout, AutoLayoutData newLayout, Action onRender)
+        public ToggleAutoLayoutCommand(Page page, LayerNode frame, AutoLayoutData oldLayout, AutoLayoutData newLayout, Action onRender)
         {
+            _page = page;
             _frame = frame;
             _oldLayout = oldLayout != null ? oldLayout.Clone() : null;
             _newLayout = newLayout != null ? newLayout.Clone() : null;
@@ -966,14 +1107,14 @@ namespace Kerf.Engine
         public void Execute()
         {
             _frame.AutoLayout = _newLayout != null ? _newLayout.Clone() : null;
-            AutoLayoutEngine.Reflow(_frame);
+            AutoLayoutEngine.ReflowHierarchy(_page, _frame);
             if (_onRender != null) _onRender();
         }
 
         public void Unexecute()
         {
             _frame.AutoLayout = _oldLayout != null ? _oldLayout.Clone() : null;
-            AutoLayoutEngine.Reflow(_frame);
+            AutoLayoutEngine.ReflowHierarchy(_page, _frame);
             if (_onRender != null) _onRender();
         }
     }

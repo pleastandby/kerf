@@ -45,6 +45,8 @@ namespace Kerf.Engine.Animation
         public double X2 { get; set; }
         public double Y2 { get; set; }
 
+        public Keyframe() : this(0.0, 0.0, InterpMode.Linear) { }
+
         public Keyframe(double time, double val, InterpMode interp, double x1 = 0.0, double y1 = 0.0, double x2 = 1.0, double y2 = 1.0)
         {
             Time = time;
@@ -76,7 +78,9 @@ namespace Kerf.Engine.Animation
     {
         public uint NodeId { get; set; }
         public ushort Prop { get; set; }
-        public List<Keyframe> Keys { get; private set; }
+        public List<Keyframe> Keys { get; set; }
+
+        public Track() : this(0, 0) { }
 
         public Track(uint nodeId, ushort prop)
         {
@@ -87,6 +91,16 @@ namespace Kerf.Engine.Animation
 
         public void AddKeyframe(Keyframe kf)
         {
+            if (kf == null) return;
+            if (Keys == null) Keys = new List<Keyframe>();
+            for (int i = 0; i < Keys.Count; i++)
+            {
+                if (Math.Abs(Keys[i].Time - kf.Time) < 1e-9)
+                {
+                    Keys[i] = kf;
+                    return;
+                }
+            }
             int idx = Keys.BinarySearch(kf, KeyframeComparer.Instance);
             if (idx < 0) idx = ~idx;
             Keys.Insert(idx, kf);
@@ -94,7 +108,7 @@ namespace Kerf.Engine.Animation
 
         public double Sample(double t)
         {
-            if (Keys.Count == 0) return 0.0;
+            if (Keys == null || Keys.Count == 0) return 0.0;
             if (t <= Keys[0].Time) return Keys[0].Value;
             if (t >= Keys[Keys.Count - 1].Time) return Keys[Keys.Count - 1].Value;
 
@@ -159,7 +173,9 @@ namespace Kerf.Engine.Animation
         public double Duration { get; set; }
         public double Fps { get; set; }
         public LoopMode LoopMode { get; set; }
-        public List<Track> Tracks { get; private set; }
+        public List<Track> Tracks { get; set; }
+
+        public Clip() : this(0, "Clip", 1.0) { }
 
         public Clip(uint id, string name, double duration, double fps = 60.0, LoopMode loopMode = LoopMode.OneShot)
         {
@@ -173,15 +189,17 @@ namespace Kerf.Engine.Animation
 
         public void AddTrack(Track track)
         {
+            if (Tracks == null) Tracks = new List<Track>();
             if (track != null) Tracks.Add(track);
         }
 
         public void SampleToPose(double t, Dictionary<uint, Dictionary<ushort, double>> outPose)
         {
-            if (outPose == null) return;
+            if (outPose == null || Tracks == null) return;
             for (int i = 0; i < Tracks.Count; i++)
             {
                 Track tr = Tracks[i];
+                if (tr == null) continue;
                 double val = tr.Sample(t);
 
                 Dictionary<ushort, double> nodeProps;
@@ -212,63 +230,66 @@ namespace Kerf.Engine.Animation
 
         public bool Advance(double dt, double duration, LoopMode loopMode)
         {
-            if (duration <= 0.0)
+            if (double.IsNaN(dt) || double.IsInfinity(dt)) dt = 0.0;
+            if (double.IsNaN(duration) || double.IsInfinity(duration) || duration <= 0.0)
             {
                 Time = 0.0;
                 return true;
             }
 
-            Time += dt * Speed * Direction;
+            if (double.IsNaN(Speed) || double.IsInfinity(Speed)) Speed = 1.0;
+            if (Direction == 0) Direction = 1;
+            double previousTime = Time;
+            double delta = dt * Speed * Direction;
+            double nextTime = previousTime + delta;
             bool completed = false;
 
             switch (loopMode)
             {
                 case LoopMode.OneShot:
-                    if (Direction >= 0 && Time >= duration)
+                    if (nextTime >= duration)
                     {
                         Time = duration;
-                        completed = true;
+                        completed = delta >= 0.0;
                     }
-                    else if (Direction < 0 && Time <= 0.0)
+                    else if (nextTime <= 0.0)
                     {
                         Time = 0.0;
-                        completed = true;
+                        completed = delta <= 0.0;
                     }
+                    else Time = nextTime;
                     break;
 
                 case LoopMode.Loop:
-                    while (Time >= duration)
-                    {
-                        Time -= duration;
-                        completed = true;
-                    }
-                    while (Time < 0.0)
-                    {
-                        Time += duration;
-                        completed = true;
-                    }
+                    Time = nextTime % duration;
+                    if (Time < 0.0) Time += duration;
+                    completed = nextTime < 0.0 || nextTime >= duration;
                     break;
 
                 case LoopMode.PingPong:
-                    while (Time > duration || Time < 0.0)
-                    {
-                        if (Time > duration)
-                        {
-                            Time = 2.0 * duration - Time;
-                            Direction = -1;
-                            completed = true;
-                        }
-                        if (Time < 0.0)
-                        {
-                            Time = -Time;
-                            Direction = 1;
-                            completed = true;
-                        }
-                    }
+                    double phase = nextTime % (duration * 2.0);
+                    if (phase < 0.0) phase += duration * 2.0;
+                    Time = phase <= duration ? phase : (duration * 2.0 - phase);
+                    Direction = (phase <= duration ? 1 : -1) * (delta < 0.0 ? -1 : 1);
+                    completed = nextTime < 0.0 || nextTime > duration;
                     break;
             }
 
             return completed;
+        }
+    }
+
+    public class AnimationProjectData
+    {
+        public List<Clip> Clips { get; set; }
+        public StateMachineDefinition StateMachine { get; set; }
+        public uint ActiveClipId { get; set; }
+
+        public AnimationProjectData()
+        {
+            Clips = new List<Clip>();
+            StateMachine = null;
+            ActiveClipId = 0;
         }
     }
 }

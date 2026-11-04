@@ -25,6 +25,8 @@ namespace Kerf.Engine.Animation
         /// </summary>
         public static double Evaluate(double u, double x1, double y1, double x2, double y2)
         {
+            x1 = Math.Max(0.0, Math.Min(1.0, x1));
+            x2 = Math.Max(0.0, Math.Min(1.0, x2));
             if (u <= 0.0) return 0.0;
             if (u >= 1.0) return 1.0;
 

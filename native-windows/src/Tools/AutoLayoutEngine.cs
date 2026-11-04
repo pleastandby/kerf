@@ -13,42 +13,111 @@ namespace Kerf.Tools
             if (page == null || page.Layers == null) return;
             foreach (var root in page.Layers)
             {
-                ReflowRecursive(root);
+                ReflowSubtreeStabilized(root);
             }
+        }
+
+        public static void ReflowHierarchy(Page page, LayerNode node)
+        {
+            if (node == null) return;
+
+            // Find topmost root ancestor in the page hierarchy
+            LayerNode root = node;
+            if (page != null)
+            {
+                var visited = new HashSet<string>();
+                while (!string.IsNullOrEmpty(root.ParentId))
+                {
+                    if (visited.Contains(root.ParentId)) break;
+                    visited.Add(root.ParentId);
+                    var p = page.FindLayerById(root.ParentId);
+                    if (p == null) break;
+                    root = p;
+                }
+            }
+
+            ReflowSubtreeStabilized(root);
         }
 
         public static void ReflowRecursive(LayerNode node)
         {
             if (node == null) return;
+            ReflowSubtreeStabilized(node);
+        }
 
-            // 1. Reflow nested children first (bottom-up) so containers hugging children get correct dimensions
+        public static void ReflowSubtreeStabilized(LayerNode root, int maxPasses = 3)
+        {
+            if (root == null) return;
+            for (int pass = 0; pass < maxPasses; pass++)
+            {
+                bool changed = ReflowPass(root);
+                if (!changed) break; // Converged
+            }
+        }
+
+        private static bool ReflowPass(LayerNode node)
+        {
+            if (node == null) return false;
+            bool changed = false;
+
+            // 1. Bottom-up: Reflow children first so parent hug dimensions are based on current child sizes
             if (node.Children != null && node.Children.Count > 0)
             {
                 for (int i = 0; i < node.Children.Count; i++)
                 {
-                    ReflowRecursive(node.Children[i]);
+                    if (ReflowPass(node.Children[i]))
+                    {
+                        changed = true;
+                    }
                 }
             }
 
             // 2. Reflow current container
             if (node.AutoLayout != null && node.AutoLayout.Mode != AutoLayoutMode.None)
             {
+                double oldW = node.Width;
+                double oldH = node.Height;
+                double oldX = node.X;
+                double oldY = node.Y;
+
                 Reflow(node);
 
-                // 3. If any child has Fill sizing and also has auto layout, reflow it with updated dimensions
-                if (node.Children != null)
+                if (Math.Abs(node.Width - oldW) > 0.001 ||
+                    Math.Abs(node.Height - oldH) > 0.001 ||
+                    Math.Abs(node.X - oldX) > 0.001 ||
+                    Math.Abs(node.Y - oldY) > 0.001)
+                {
+                    changed = true;
+                }
+
+                // 3. Top-down: If any child has Fill sizing and also has auto layout, reflow it with updated dimensions
+                if (node.Children != null && node.Children.Count > 0)
                 {
                     for (int i = 0; i < node.Children.Count; i++)
                     {
                         var child = node.Children[i];
-                        if ((child.LayoutSizingH == SizingMode.Fill || child.LayoutSizingV == SizingMode.Fill) &&
-                            child.AutoLayout != null && child.AutoLayout.Mode != AutoLayoutMode.None)
+                        if (child != null && child.AutoLayout != null && child.AutoLayout.Mode != AutoLayoutMode.None)
                         {
-                            Reflow(child);
+                            if (child.LayoutSizingH == SizingMode.Fill || child.LayoutSizingV == SizingMode.Fill)
+                            {
+                                double childOldW = child.Width;
+                                double childOldH = child.Height;
+
+                                Reflow(child);
+
+                                if (Math.Abs(child.Width - childOldW) > 0.001 ||
+                                    Math.Abs(child.Height - childOldH) > 0.001)
+                                {
+                                    changed = true;
+                                    ReflowPass(child);
+                                }
+                            }
                         }
                     }
                 }
             }
+
+            return changed;
         }
 
         public static void Reflow(LayerNode frame)
@@ -71,15 +140,24 @@ namespace Kerf.Tools
                 return;
             }
 
+            var originalBounds = new Dictionary<LayerNode, System.Windows.Rect>();
+            var originalPathGeometry = new Dictionary<LayerNode, VectorGeometry>();
+            foreach (var child in visibleChildren)
+            {
+                originalBounds[child] = new System.Windows.Rect(child.X, child.Y, Math.Max(1.0, child.Width), Math.Max(1.0, child.Height));
+                if (child.Type == ElementType.Path && child.Geometry != null)
+                    originalPathGeometry[child] = child.Geometry.Clone();
+            }
+
             var layout = frame.AutoLayout;
 
             switch (layout.Mode)
             {
                 case AutoLayoutMode.Horizontal:
-                    ReflowHorizontal(frame, visibleChildren, layout);
+                    ReflowLinear(frame, visibleChildren, layout, true);
                     break;
                 case AutoLayoutMode.Vertical:
-                    ReflowVertical(frame, visibleChildren, layout);
+                    ReflowLinear(frame, visibleChildren, layout, false);
                     break;
                 case AutoLayoutMode.Wrap:
                     ReflowWrap(frame, visibleChildren, layout);
@@ -88,6 +166,348 @@ namespace Kerf.Tools
                     ReflowGrid(frame, visibleChildren, layout);
                     break;
             }
+
+            foreach (var child in visibleChildren)
+            {
+                System.Windows.Rect oldBounds;
+                VectorGeometry oldGeometry;
+                if (child.Type == ElementType.Path && originalBounds.TryGetValue(child, out oldBounds) && originalPathGeometry.TryGetValue(child, out oldGeometry))
+                {
+                    child.Geometry = oldGeometry.Clone();
+                    BezierVectorEngine.ScaleGeometry(
+                        child.Geometry,
+                        oldBounds,
+                        new System.Windows.Rect(child.X, child.Y, Math.Max(1.0, child.Width), Math.Max(1.0, child.Height)));
+                }
+            }
+        }
+
+        private static void ReflowLinear(LayerNode frame, List<LayerNode> children, AutoLayoutData layout, bool horizontal)
+        {
+            if (children == null || children.Count == 0) return;
+
+            double gap = IsFinite(layout.Gap) ? Math.Max(0.0, layout.Gap) : 0.0;
+            double padL = SafePadding(layout.PaddingLeft);
+            double padR = SafePadding(layout.PaddingRight);
+            double padT = SafePadding(layout.PaddingTop);
+            double padB = SafePadding(layout.PaddingBottom);
+            // Sizing dependency rule: A parent set to Hug cannot remain Hug on an axis when a child is set to Fill on that same axis
+            if (horizontal)
+            {
+                if (children.Any(c => c.LayoutSizingH == SizingMode.Fill) && layout.SizingH == SizingMode.Hug)
+                    layout.SizingH = SizingMode.Fixed;
+                if (children.Any(c => c.LayoutSizingV == SizingMode.Fill) && layout.SizingV == SizingMode.Hug)
+                    layout.SizingV = SizingMode.Fixed;
+            }
+            else
+            {
+                if (children.Any(c => c.LayoutSizingV == SizingMode.Fill) && layout.SizingV == SizingMode.Hug)
+                    layout.SizingV = SizingMode.Fixed;
+                if (children.Any(c => c.LayoutSizingH == SizingMode.Fill) && layout.SizingH == SizingMode.Hug)
+                    layout.SizingH = SizingMode.Fixed;
+            }
+
+            bool hugW = layout.SizingH == SizingMode.Hug;
+            bool hugH = layout.SizingV == SizingMode.Hug;
+
+            foreach (var child in children)
+            {
+                if (hugW && child.LayoutSizingH == SizingMode.Fill)
+                    child.Width = ClampSize(GetBaseWidth(child), child.MinWidth, child.MaxWidth);
+                if (hugH && child.LayoutSizingV == SizingMode.Fill)
+                    child.Height = ClampSize(GetBaseHeight(child), child.MinHeight, child.MaxHeight);
+                child.Width = ClampSize(child.Width, child.MinWidth, child.MaxWidth);
+                child.Height = ClampSize(child.Height, child.MinHeight, child.MaxHeight);
+            }
+
+            double naturalMain = 0.0;
+            double naturalCross = 0.0;
+            for (int i = 0; i < children.Count; i++)
+            {
+                var child = children[i];
+                naturalMain += horizontal ? child.Width : child.Height;
+                naturalCross = Math.Max(naturalCross, horizontal ? child.Height : child.Width);
+                if (i > 0) naturalMain += gap;
+            }
+
+            if (hugW)
+            {
+                double desired = horizontal ? naturalMain + padL + padR : naturalCross + padL + padR;
+                frame.Width = ClampSize(desired, frame.MinWidth, frame.MaxWidth);
+            }
+            else frame.Width = ClampSize(frame.Width, frame.MinWidth, frame.MaxWidth);
+
+            if (hugH)
+            {
+                double desired = horizontal ? naturalCross + padT + padB : naturalMain + padT + padB;
+                frame.Height = ClampSize(desired, frame.MinHeight, frame.MaxHeight);
+            }
+            else frame.Height = ClampSize(frame.Height, frame.MinHeight, frame.MaxHeight);
+
+            double innerMain = Math.Max(0.0, (horizontal ? frame.Width - padL - padR : frame.Height - padT - padB));
+            double innerCross = Math.Max(0.0, (horizontal ? frame.Height - padT - padB : frame.Width - padL - padR));
+            if (!(horizontal ? hugW : hugH))
+            {
+                DistributeFill(children, horizontal, innerMain, gap);
+            }
+            if (!(horizontal ? hugH : hugW))
+            {
+                foreach (var child in children)
+                {
+                    if (horizontal && child.LayoutSizingV == SizingMode.Fill)
+                        child.Height = ClampSize(innerCross, child.MinHeight, child.MaxHeight);
+                    else if (!horizontal && child.LayoutSizingH == SizingMode.Fill)
+                        child.Width = ClampSize(innerCross, child.MinWidth, child.MaxWidth);
+                }
+            }
+
+            double usedMain = 0.0;
+            double maxBaseline = 0.0;
+            for (int i = 0; i < children.Count; i++)
+            {
+                var child = children[i];
+                usedMain += horizontal ? child.Width : child.Height;
+                if (i > 0) usedMain += gap;
+                if (layout.AlignItems == AlignItems.Baseline)
+                {
+                    double baseline = child.Type == ElementType.Text && child.Typography != null
+                        ? child.Typography.FontSize * 0.85
+                        : (horizontal ? child.Height : child.Width);
+                    maxBaseline = Math.Max(maxBaseline, baseline);
+                }
+            }
+
+            double extra = Math.Max(0.0, innerMain - usedMain);
+            double cursor = horizontal ? frame.X + padL : frame.Y + padT;
+            double effectiveGap = gap;
+            switch (layout.JustifyContent)
+            {
+                case JustifyContent.Center:
+                    cursor += extra / 2.0;
+                    break;
+                case JustifyContent.End:
+                    cursor += extra;
+                    break;
+                case JustifyContent.SpaceBetween:
+                    if (children.Count > 1) effectiveGap += extra / (children.Count - 1);
+                    break;
+                case JustifyContent.SpaceAround:
+                    if (children.Count > 0)
+                    {
+                        double step = extra / children.Count;
+                        cursor += step / 2.0;
+                        effectiveGap += step;
+                    }
+                    break;
+                case JustifyContent.SpaceEvenly:
+                    if (children.Count > 0)
+                    {
+                        double step = extra / (children.Count + 1.0);
+                        cursor += step;
+                        effectiveGap += step;
+                    }
+                    break;
+            }
+
+            foreach (var child in children)
+            {
+                double childMain = horizontal ? child.Width : child.Height;
+                double childCross = horizontal ? child.Height : child.Width;
+                double crossStart = horizontal ? frame.Y + padT : frame.X + padL;
+                double crossPosition = crossStart;
+                double crossFree = innerCross - childCross;
+                switch (layout.AlignItems)
+                {
+                    case AlignItems.Center:
+                        crossPosition += crossFree / 2.0;
+                        break;
+                    case AlignItems.End:
+                        crossPosition += crossFree;
+                        break;
+                    case AlignItems.Baseline:
+                        double baseline = child.Type == ElementType.Text && child.Typography != null
+                            ? child.Typography.FontSize * 0.85
+                            : childCross;
+                        crossPosition += maxBaseline - baseline;
+                        break;
+                }
+
+                if (horizontal)
+                    SetChildPosition(child, cursor, crossPosition);
+                else
+                    SetChildPosition(child, crossPosition, cursor);
+                cursor += childMain + effectiveGap;
+            }
+        }
+
+        private static void DistributeFill(List<LayerNode> children, bool horizontal, double innerMain, double gap)
+        {
+            var fillItems = children.Where(c => (horizontal ? c.LayoutSizingH : c.LayoutSizingV) == SizingMode.Fill).ToList();
+            if (fillItems.Count == 0) return;
+
+            double fixedTotal = 0.0;
+            foreach (var child in children)
+            {
+                if ((horizontal ? child.LayoutSizingH : child.LayoutSizingV) != SizingMode.Fill)
+                    fixedTotal += horizontal ? child.Width : child.Height;
+            }
+
+            double remaining = Math.Max(0.0, innerMain - fixedTotal - gap * Math.Max(0, children.Count - 1));
+            var active = new List<LayerNode>(fillItems);
+            while (active.Count > 0)
+            {
+                double share = remaining / active.Count;
+                bool frozeAny = false;
+                for (int i = active.Count - 1; i >= 0; i--)
+                {
+                    var child = active[i];
+                    double min = horizontal ? child.MinWidth : child.MinHeight;
+                    double max = horizontal ? child.MaxWidth : child.MaxHeight;
+                    max = Math.Max(min, max);
+                    if (share < min || share > max)
+                    {
+                        double value = Math.Max(min, Math.Min(max, share));
+                        if (horizontal) child.Width = value; else child.Height = value;
+                        remaining = Math.Max(0.0, remaining - value);
+                        active.RemoveAt(i);
+                        frozeAny = true;
+                    }
+                }
+                if (!frozeAny)
+                {
+                    foreach (var child in active)
+                    {
+                        if (horizontal) child.Width = share; else child.Height = share;
+                    }
+                    break;
+                }
+            }
+        }
+
+        private static double ClampSize(double value, double min, double max)
+        {
+            if (!IsFinite(value)) value = 0.0;
+            if (!IsFinite(min) || min < 0.0) min = 0.0;
+            if (!IsFinite(max) || max < min) max = min;
+            return Math.Max(min, Math.Min(max, value));
+        }
+
+        private static double SafePadding(double value)
+        {
+            return IsFinite(value) ? Math.Max(0.0, value) : 0.0;
+        }
+
+        private static double GetBaseWidth(LayerNode child)
+        {
+            return child.AutoLayoutBaseWidth > 0.0 ? child.AutoLayoutBaseWidth : child.Width;
+        }
+
+        private static double GetBaseHeight(LayerNode child)
+        {
+            return child.AutoLayoutBaseHeight > 0.0 ? child.AutoLayoutBaseHeight : child.Height;
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+
+        private static void SetChildPosition(LayerNode child, double x, double y)
+        {
+            if (child == null) return;
+            double dx = x - child.X;
+            double dy = y - child.Y;
+            child.X = x;
+            child.Y = y;
+            if (Math.Abs(dx) < 0.0001 && Math.Abs(dy) < 0.0001) return;
+            if (child.Type == ElementType.Path && child.Geometry != null)
+                BezierVectorEngine.OffsetGeometry(child.Geometry, dx, dy);
+            OffsetDescendants(child, dx, dy);
+        }
+
+        private static void OffsetDescendants(LayerNode parent, double dx, double dy)
+        {
+            if (parent == null || parent.Children == null) return;
+            foreach (var child in parent.Children)
+            {
+                if (child == null) continue;
+                child.X += dx;
+                child.Y += dy;
+                if (child.Type == ElementType.Path && child.Geometry != null)
+                    BezierVectorEngine.OffsetGeometry(child.Geometry, dx, dy);
+                OffsetDescendants(child, dx, dy);
+            }
+        }
+
+        private static double MeasureWrapGap(List<LayerNode> ordered)
+        {
+            if (ordered == null || ordered.Count < 2) return 0.0;
+            var gaps = new List<double>();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                LayerNode current = ordered[i];
+                if (current == null) continue;
+                for (int j = i + 1; j < ordered.Count; j++)
+                {
+                    LayerNode next = ordered[j];
+                    if (next == null) continue;
+                    double centerDeltaY = Math.Abs((current.Y + current.Height / 2.0) - (next.Y + next.Height / 2.0));
+                    double sameRowTolerance = Math.Max(2.0, Math.Min(current.Height, next.Height) * 0.45);
+                    if (centerDeltaY <= sameRowTolerance)
+                    {
+                        double gap = next.X - (current.X + current.Width);
+                        if (gap >= 0.0) gaps.Add(gap);
+                        break;
+                    }
+                    if (next.Y > current.Y + current.Height) break;
+                }
+            }
+            return gaps.Count == 0 ? 0.0 : Math.Max(0.0, gaps.OrderBy(value => value).ElementAt(gaps.Count / 2));
+        }
+
+        public static System.Windows.Rect PreviewInsertionBounds(LayerNode frame, List<LayerNode> movingLayers, int insertionIndex, double width, double height)
+        {
+            if (frame == null || frame.AutoLayout == null || frame.AutoLayout.Mode == AutoLayoutMode.None)
+                return new System.Windows.Rect(frame == null ? 0.0 : frame.X, frame == null ? 0.0 : frame.Y, Math.Max(1.0, width), Math.Max(1.0, height));
+
+            var movingIds = new HashSet<string>((movingLayers ?? new List<LayerNode>()).Where(n => n != null).Select(n => n.Id));
+            var previewFrame = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Type = frame.Type,
+                X = frame.X,
+                Y = frame.Y,
+                Width = frame.Width,
+                Height = frame.Height,
+                AutoLayout = frame.AutoLayout.Clone(),
+                Children = new List<LayerNode>(),
+                MinWidth = frame.MinWidth,
+                MaxWidth = frame.MaxWidth,
+                MinHeight = frame.MinHeight,
+                MaxHeight = frame.MaxHeight
+            };
+            foreach (var child in frame.Children ?? new List<LayerNode>())
+            {
+                if (child == null || movingIds.Contains(child.Id)) continue;
+                var clone = child.Clone();
+                clone.ParentId = previewFrame.Id;
+                previewFrame.Children.Add(clone);
+            }
+
+            var ghost = new LayerNode
+            {
+                Name = "Drop preview",
+                Type = ElementType.Rectangle,
+                Width = Math.Max(1.0, width),
+                Height = Math.Max(1.0, height),
+                Fills = new List<Paint>(),
+                Children = new List<LayerNode>()
+            };
+            int index = Math.Max(0, Math.Min(insertionIndex, previewFrame.Children.Count));
+            previewFrame.Children.Insert(index, ghost);
+            ghost.ParentId = previewFrame.Id;
+            Reflow(previewFrame);
+            return ghost.GetBounds();
         }
 
         private static void ReflowHorizontal(LayerNode frame, List<LayerNode> children, AutoLayoutData layout)
@@ -389,73 +809,155 @@ namespace Kerf.Tools
 
         private static void ReflowWrap(LayerNode frame, List<LayerNode> children, AutoLayoutData layout)
         {
-            double availWidth = Math.Max(100.0, frame.Width - layout.PaddingLeft - layout.PaddingRight);
-            double curX = frame.X + layout.PaddingLeft;
-            double curY = frame.Y + layout.PaddingTop;
-            double rowHeight = 0.0;
-            double maxRowW = 0.0;
-
+            double padL = SafePadding(layout.PaddingLeft);
+            double padR = SafePadding(layout.PaddingRight);
+            double padT = SafePadding(layout.PaddingTop);
+            double padB = SafePadding(layout.PaddingBottom);
+            double gap = IsFinite(layout.Gap) ? Math.Max(0.0, layout.Gap) : 0.0;
             foreach (var child in children)
             {
-                if (curX + child.Width > frame.X + layout.PaddingLeft + availWidth && curX > frame.X + layout.PaddingLeft)
+                if (layout.SizingH == SizingMode.Hug && child.LayoutSizingH == SizingMode.Fill)
+                    child.Width = ClampSize(GetBaseWidth(child), child.MinWidth, child.MaxWidth);
+                if (layout.SizingV == SizingMode.Hug && child.LayoutSizingV == SizingMode.Fill)
+                    child.Height = ClampSize(GetBaseHeight(child), child.MinHeight, child.MaxHeight);
+            }
+            double naturalWidth = children.Sum(c => ClampSize(c.LayoutSizingH == SizingMode.Fill ? GetBaseWidth(c) : c.Width, c.MinWidth, c.MaxWidth)) + Math.Max(0, children.Count - 1) * gap;
+            if (layout.SizingH == SizingMode.Hug)
+                frame.Width = ClampSize(naturalWidth + padL + padR, frame.MinWidth, frame.MaxWidth);
+            double availWidth = Math.Max(0.0, frame.Width - padL - padR);
+            var rows = new List<List<LayerNode>>();
+            var row = new List<LayerNode>();
+            double rowWidth = 0.0;
+            double rowHeight = 0.0;
+            foreach (var child in children)
+            {
+                double nextWidth = rowWidth + (row.Count > 0 ? gap : 0.0) + child.Width;
+                if (row.Count > 0 && nextWidth > availWidth)
                 {
-                    // Wrap to next line
-                    curX = frame.X + layout.PaddingLeft;
-                    curY += rowHeight + layout.Gap;
+                    rows.Add(row);
+                    row = new List<LayerNode>();
+                    rowWidth = 0.0;
                     rowHeight = 0.0;
                 }
-
-                child.X = curX;
-                child.Y = curY;
-
+                row.Add(child);
+                rowWidth += child.Width + (row.Count > 1 ? gap : 0.0);
                 rowHeight = Math.Max(rowHeight, child.Height);
-                curX += child.Width + layout.Gap;
-                maxRowW = Math.Max(maxRowW, curX - (frame.X + layout.PaddingLeft));
+            }
+            if (row.Count > 0) rows.Add(row);
+
+            double curY = frame.Y + padT;
+            double maxRowW = 0.0;
+            foreach (var items in rows)
+            {
+                double usedWidth = items.Sum(c => c.Width) + Math.Max(0, items.Count - 1) * gap;
+                double extra = Math.Max(0.0, availWidth - usedWidth);
+                double cursor = frame.X + padL;
+                double effectiveGap = gap;
+                switch (layout.JustifyContent)
+                {
+                    case JustifyContent.Center:
+                        cursor += extra / 2.0;
+                        break;
+                    case JustifyContent.End:
+                        cursor += extra;
+                        break;
+                    case JustifyContent.SpaceBetween:
+                        if (items.Count > 1) effectiveGap += extra / (items.Count - 1.0);
+                        break;
+                    case JustifyContent.SpaceAround:
+                        if (items.Count > 0)
+                        {
+                            double step = extra / items.Count;
+                            cursor += step / 2.0;
+                            effectiveGap += step;
+                        }
+                        break;
+                    case JustifyContent.SpaceEvenly:
+                        if (items.Count > 0)
+                        {
+                            double step = extra / (items.Count + 1.0);
+                            cursor += step;
+                            effectiveGap += step;
+                        }
+                        break;
+                }
+
+                double currentRowH = items.Count > 0 ? items.Max(c => c.Height) : 0.0;
+                foreach (var child in items)
+                {
+                    double crossOffset = layout.AlignItems == AlignItems.Center
+                        ? (currentRowH - child.Height) / 2.0
+                        : layout.AlignItems == AlignItems.End ? currentRowH - child.Height : 0.0;
+                    SetChildPosition(child, cursor, curY + crossOffset);
+                    cursor += child.Width + effectiveGap;
+                }
+
+                maxRowW = Math.Max(maxRowW, usedWidth);
+                curY += currentRowH + gap;
             }
 
-            double totalH = curY + rowHeight - frame.Y + layout.PaddingBottom;
+            double totalH = rows.Count == 0 ? padT + padB : curY - frame.Y - gap + padB;
 
             if (layout.SizingH == SizingMode.Hug)
             {
-                frame.Width = Math.Max(1.0, maxRowW + layout.PaddingLeft + layout.PaddingRight);
+                frame.Width = ClampSize(maxRowW + padL + padR, frame.MinWidth, frame.MaxWidth);
             }
             if (layout.SizingV == SizingMode.Hug)
             {
-                frame.Height = Math.Max(1.0, totalH);
+                frame.Height = ClampSize(totalH, frame.MinHeight, frame.MaxHeight);
             }
         }
 
         private static void ReflowGrid(LayerNode frame, List<LayerNode> children, AutoLayoutData layout)
         {
             int cols = Math.Max(1, layout.GridColumns);
-            double availWidth = Math.Max(100.0, frame.Width - layout.PaddingLeft - layout.PaddingRight);
-            double colWidth = (availWidth - (cols - 1) * layout.Gap) / cols;
+            double padL = SafePadding(layout.PaddingLeft);
+            double padR = SafePadding(layout.PaddingRight);
+            double padT = SafePadding(layout.PaddingTop);
+            double padB = SafePadding(layout.PaddingBottom);
+            double gap = IsFinite(layout.Gap) ? Math.Max(0.0, layout.Gap) : 0.0;
+            foreach (var child in children)
+            {
+                if (layout.SizingH == SizingMode.Hug && child.LayoutSizingH == SizingMode.Fill)
+                    child.Width = ClampSize(GetBaseWidth(child), child.MinWidth, child.MaxWidth);
+                if (layout.SizingV == SizingMode.Hug && child.LayoutSizingV == SizingMode.Fill)
+                    child.Height = ClampSize(GetBaseHeight(child), child.MinHeight, child.MaxHeight);
+            }
+            double naturalColumnWidth = children.Count == 0 ? 0.0 : children.Max(c => ClampSize(c.LayoutSizingH == SizingMode.Fill ? GetBaseWidth(c) : c.Width, c.MinWidth, c.MaxWidth));
+            if (layout.SizingH == SizingMode.Hug)
+                frame.Width = ClampSize(naturalColumnWidth * cols + Math.Max(0, cols - 1) * gap + padL + padR, frame.MinWidth, frame.MaxWidth);
+            double availWidth = Math.Max(0.0, frame.Width - padL - padR);
+            double colWidth = Math.Max(0.0, (availWidth - (cols - 1) * gap) / cols);
 
-            double startX = frame.X + layout.PaddingLeft;
-            double curY = frame.Y + layout.PaddingTop;
+            double startX = frame.X + padL;
+            double curY = frame.Y + padT;
             double rowMaxH = 0.0;
+            double totalHeight = 0.0;
 
             for (int i = 0; i < children.Count; i++)
             {
                 int col = i % cols;
                 if (col == 0 && i > 0)
                 {
-                    curY += rowMaxH + layout.Gap;
+                    curY += rowMaxH + gap;
+                    totalHeight += rowMaxH + gap;
                     rowMaxH = 0.0;
                 }
 
                 var child = children[i];
-                child.X = startX + col * (colWidth + layout.Gap);
-                child.Y = curY;
-                child.Width = colWidth;
+                SetChildPosition(child, startX + col * (colWidth + gap), curY);
+                if (child.LayoutSizingH == SizingMode.Fill)
+                    child.Width = ClampSize(colWidth, child.MinWidth, child.MaxWidth);
+                if (child.LayoutSizingV == SizingMode.Fill && layout.SizingV != SizingMode.Hug)
+                    child.Height = ClampSize(Math.Max(0.0, frame.Height - padT - padB), child.MinHeight, child.MaxHeight);
 
                 rowMaxH = Math.Max(rowMaxH, child.Height);
             }
 
-            double totalH = curY + rowMaxH - frame.Y + layout.PaddingBottom;
+            totalHeight += rowMaxH;
             if (layout.SizingV == SizingMode.Hug)
             {
-                frame.Height = Math.Max(1.0, totalH);
+                frame.Height = ClampSize(totalHeight + padT + padB, frame.MinHeight, frame.MaxHeight);
             }
         }
 
@@ -467,7 +969,7 @@ namespace Kerf.Tools
             var topLayers = selectedLayers.Where(l => !selectedLayers.Any(other => other != l && Page.IsDescendant(other, l))).ToList();
             if (topLayers.Count == 0) return null;
 
-            // If a single frame is selected, toggle its AutoLayout mode (None -> Horizontal -> Vertical -> Horizontal)
+            // If a single frame is selected, cycle its AutoLayout mode (None -> Horizontal -> Vertical -> Horizontal)
             if (topLayers.Count == 1 && topLayers[0].Type == ElementType.Frame)
             {
                 var singleFrame = topLayers[0];
@@ -476,17 +978,25 @@ namespace Kerf.Tools
                 if (singleFrame.AutoLayout.Mode == AutoLayoutMode.None)
                 {
                     singleFrame.AutoLayout.Mode = AutoLayoutMode.Horizontal;
+                    singleFrame.AutoLayout.SizingH = SizingMode.Hug;
+                    singleFrame.AutoLayout.SizingV = SizingMode.Hug;
+                    singleFrame.AutoLayout.JustifyContent = JustifyContent.Start;
+                    singleFrame.AutoLayout.AlignItems = AlignItems.Start;
                 }
                 else if (singleFrame.AutoLayout.Mode == AutoLayoutMode.Horizontal)
                 {
                     singleFrame.AutoLayout.Mode = AutoLayoutMode.Vertical;
+                }
+                else if (singleFrame.AutoLayout.Mode == AutoLayoutMode.Vertical)
+                {
+                    singleFrame.AutoLayout.Mode = AutoLayoutMode.Horizontal;
                 }
                 else
                 {
                     singleFrame.AutoLayout.Mode = AutoLayoutMode.Horizontal;
                 }
 
-                Reflow(singleFrame);
+                ReflowHierarchy(page, singleFrame);
                 return singleFrame;
             }
 
@@ -539,7 +1049,7 @@ namespace Kerf.Tools
                 if (insIdx <= c.Count) c.Insert(insIdx, singleWrapFrame);
                 else c.Add(singleWrapFrame);
 
-                Reflow(singleWrapFrame);
+                ReflowHierarchy(page, singleWrapFrame);
                 return singleWrapFrame;
             }
 
@@ -559,12 +1069,10 @@ namespace Kerf.Tools
             double totalH = Math.Max(1.0, maxY - minY);
             var mode = (totalW >= totalH) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
 
-            // Order layers spatially depending on mode
             var ordered = (mode == AutoLayoutMode.Horizontal)
                 ? topLayers.OrderBy(l => l.X).ToList()
                 : topLayers.OrderBy(l => l.Y).ToList();
 
-            // Measure natural gap between items along primary axis to preserve exact outer span
             double measuredGap = 0.0;
             if (ordered.Count > 1)
             {
@@ -580,7 +1088,6 @@ namespace Kerf.Tools
                 }
             }
 
-            // Calculate exact padding envelope from outer bounds
             double padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
             double padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
             double padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
@@ -637,7 +1144,7 @@ namespace Kerf.Tools
                 container.Add(frame);
             }
 
-            Reflow(frame);
+            ReflowHierarchy(page, frame);
             return frame;
         }
 
@@ -659,17 +1166,25 @@ namespace Kerf.Tools
                 if (oldLayout.Mode == AutoLayoutMode.None)
                 {
                     newLayout.Mode = AutoLayoutMode.Horizontal;
+                    newLayout.SizingH = SizingMode.Hug;
+                    newLayout.SizingV = SizingMode.Hug;
+                    newLayout.JustifyContent = JustifyContent.Start;
+                    newLayout.AlignItems = AlignItems.Start;
                 }
                 else if (oldLayout.Mode == AutoLayoutMode.Horizontal)
                 {
                     newLayout.Mode = AutoLayoutMode.Vertical;
+                }
+                else if (oldLayout.Mode == AutoLayoutMode.Vertical)
+                {
+                    newLayout.Mode = AutoLayoutMode.Horizontal;
                 }
                 else
                 {
                     newLayout.Mode = AutoLayoutMode.Horizontal;
                 }
 
-                return new ToggleAutoLayoutCommand(singleFrame, oldLayout, newLayout, onRender);
+                return new ToggleAutoLayoutCommand(page, singleFrame, oldLayout, newLayout, onRender);
             }
 
             // Build AutoLayoutSelectionCommand
@@ -744,7 +1259,6 @@ namespace Kerf.Tools
             double totalW = Math.Max(1.0, maxX - minX);
             double totalH = Math.Max(1.0, maxY - minY);
             var mode = (totalW >= totalH) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
-
             var ordered = (mode == AutoLayoutMode.Horizontal)
                 ? topLayers.OrderBy(l => l.X).ToList()
                 : topLayers.OrderBy(l => l.Y).ToList();

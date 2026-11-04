@@ -211,7 +211,7 @@ namespace Kerf.Engine
                     parent.Children.Add(child);
                 }
             }
-            catch (ArgumentException)
+            catch (Exception)
             {
                 // In the event of lingering visual parenting or multi-thread composition attachment,
                 // allocate a fresh, unparented DrawingVisual for this node. A new visual is guaranteed

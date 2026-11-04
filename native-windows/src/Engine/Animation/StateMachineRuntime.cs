@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Kerf.Engine.Animation
 {
@@ -42,6 +43,7 @@ namespace Kerf.Engine.Animation
     public class StateMachineRuntime
     {
         public StateMachineDefinition Definition { get; private set; }
+        public StateMachineViewModel ViewModel { get; private set; }
         public List<Clip> Clips { get; private set; }
         public List<LayerRuntimeState> LayerRuntimes { get; private set; }
         public List<string> ReportedEvents { get; private set; }
@@ -49,6 +51,12 @@ namespace Kerf.Engine.Animation
         public StateMachineRuntime(StateMachineDefinition def, List<Clip> clips)
         {
             Definition = def ?? new StateMachineDefinition("Empty");
+            if (Definition.Inputs == null) Definition.Inputs = new List<MachineInput>();
+            if (Definition.ViewModelProperties == null) Definition.ViewModelProperties = new List<ViewModelPropertyDefinition>();
+            if (Definition.Layers == null) Definition.Layers = new List<MachineLayer>();
+            if (Definition.Listeners == null) Definition.Listeners = new List<NodeListener>();
+            ViewModel = new StateMachineViewModel(Definition.ViewModelProperties);
+            Definition.Listeners.RemoveAll(listener => listener == null);
             Clips = clips ?? new List<Clip>();
             LayerRuntimes = new List<LayerRuntimeState>();
             ReportedEvents = new List<string>();
@@ -56,6 +64,28 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < Definition.Layers.Count; i++)
             {
                 MachineLayer layer = Definition.Layers[i];
+                if (layer == null)
+                {
+                    layer = new MachineLayer("Layer");
+                    Definition.Layers[i] = layer;
+                }
+                if (layer.States == null) layer.States = new List<MachineState>();
+                if (layer.Transitions == null) layer.Transitions = new List<StateTransition>();
+                for (int s = 0; s < layer.States.Count; s++)
+                {
+                    if (layer.States[s] == null) layer.States[s] = new MachineState(s, "State", StateKind.Animation);
+                    if (layer.States[s].Blend1DItems == null) layer.States[s].Blend1DItems = new List<Blend1DItem>();
+                    if (layer.States[s].BlendDirectItems == null) layer.States[s].BlendDirectItems = new List<BlendDirectItem>();
+                    layer.States[s].Blend1DItems = layer.States[s].Blend1DItems.OrderBy(item => item == null ? double.MaxValue : item.Threshold).ToList();
+                    layer.States[s].Blend1DItems.RemoveAll(item => item == null);
+                    layer.States[s].BlendDirectItems.RemoveAll(item => item == null);
+                }
+                for (int t = 0; t < layer.Transitions.Count; t++)
+                {
+                    if (layer.Transitions[t] == null) layer.Transitions[t] = new StateTransition(0, 0);
+                    if (layer.Transitions[t].Conditions == null) layer.Transitions[t].Conditions = new List<TransitionCondition>();
+                    layer.Transitions[t].Conditions.RemoveAll(condition => condition == null);
+                }
                 int entryIdx = 0;
                 for (int s = 0; s < layer.States.Count; s++)
                 {
@@ -67,11 +97,46 @@ namespace Kerf.Engine.Animation
                 }
                 LayerRuntimes.Add(new LayerRuntimeState(entryIdx));
             }
+            Reset();
+        }
+
+        public void Reset()
+        {
+            if (ViewModel != null) ViewModel.Reset();
+            for (int i = 0; i < Definition.Inputs.Count; i++)
+            {
+                MachineInput input = Definition.Inputs[i];
+                if (input == null) continue;
+                input.Value = input.InitialValue;
+                input.Fired = false;
+            }
+            for (int i = 0; i < Definition.Layers.Count && i < LayerRuntimes.Count; i++)
+            {
+                MachineLayer layer = Definition.Layers[i];
+                int entryIdx = 0;
+                for (int s = 0; s < layer.States.Count; s++)
+                {
+                    if (layer.States[s].Kind == StateKind.Entry)
+                    {
+                        entryIdx = s;
+                        break;
+                    }
+                }
+                LayerRuntimes[i].CurrentState = entryIdx;
+                LayerRuntimes[i].CurTime = new ClipInstance(entryIdx);
+                LayerRuntimes[i].ActiveTransition = null;
+                LayerRuntimes[i].IsFinished = false;
+            }
+        }
+
+        public void RebuildViewModel()
+        {
+            ViewModel = new StateMachineViewModel(Definition != null ? Definition.ViewModelProperties : null);
         }
 
         public void SetBool(int inputIdx, bool val)
         {
-            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Bool)
             {
                 Definition.Inputs[inputIdx].Value = val ? 1.0 : 0.0;
             }
@@ -79,7 +144,7 @@ namespace Kerf.Engine.Animation
 
         public void SetNumber(int inputIdx, double val)
         {
-            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Number && !double.IsNaN(val) && !double.IsInfinity(val))
             {
                 Definition.Inputs[inputIdx].Value = val;
             }
@@ -87,7 +152,7 @@ namespace Kerf.Engine.Animation
 
         public void FireTrigger(int inputIdx)
         {
-            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Trigger)
             {
                 Definition.Inputs[inputIdx].Fired = true;
             }
@@ -95,20 +160,48 @@ namespace Kerf.Engine.Animation
 
         public double GetInputValue(int inputIdx)
         {
-            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null)
             {
                 return Definition.Inputs[inputIdx].Value;
             }
             return 0.0;
         }
 
+        public bool SetViewModelBool(string name, bool value)
+        {
+            return ViewModel != null && ViewModel.SetBool(name, value);
+        }
+
+        public bool SetViewModelNumber(string name, double value)
+        {
+            return ViewModel != null && ViewModel.SetNumber(name, value);
+        }
+
+        public bool SetViewModelText(string name, string value)
+        {
+            return ViewModel != null && ViewModel.SetText(name, value);
+        }
+
+        public bool FireViewModelTrigger(string name)
+        {
+            return ViewModel != null && ViewModel.FireTrigger(name);
+        }
+
+        public double GetViewModelNumber(string name)
+        {
+            double value;
+            bool fired;
+            return ViewModel != null && ViewModel.TryGetNumber(name, out value, out fired) ? value : 0.0;
+        }
+
         public void OnPointerEvent(uint targetNodeId, PointerEventKind kind)
         {
+            if (Definition.Listeners == null) return;
             List<ListenerAction> actionsToRun = new List<ListenerAction>();
             for (int i = 0; i < Definition.Listeners.Count; i++)
             {
                 NodeListener listener = Definition.Listeners[i];
-                if (listener.TargetNodeId == targetNodeId && listener.Kind == kind)
+                if (listener != null && listener.TargetNodeId == targetNodeId && listener.Kind == kind && listener.Actions != null)
                 {
                     actionsToRun.AddRange(listener.Actions);
                 }
@@ -117,6 +210,7 @@ namespace Kerf.Engine.Animation
             for (int a = 0; a < actionsToRun.Count; a++)
             {
                 ListenerAction action = actionsToRun[a];
+                if (action == null) continue;
                 switch (action.Kind)
                 {
                     case ActionKind.SetBool:
@@ -127,6 +221,18 @@ namespace Kerf.Engine.Animation
                         break;
                     case ActionKind.Fire:
                         FireTrigger(action.InputIndex);
+                        break;
+                    case ActionKind.SetViewModelBool:
+                        SetViewModelBool(action.PropertyName, action.Parameter > 0.5);
+                        break;
+                    case ActionKind.SetViewModelNumber:
+                        SetViewModelNumber(action.PropertyName, action.Parameter);
+                        break;
+                    case ActionKind.FireViewModelTrigger:
+                        FireViewModelTrigger(action.PropertyName);
+                        break;
+                    case ActionKind.SetViewModelText:
+                        SetViewModelText(action.PropertyName, action.TextValue);
                         break;
                 }
             }
@@ -181,6 +287,7 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < candidates.Count; i++)
             {
                 StateTransition trans = candidates[i];
+                if (trans.ToState < 0 || trans.ToState >= layer.States.Count) continue;
 
                 // Avoid self-restart loop if from Any to current
                 if (anyStateIdx >= 0 && trans.FromState == anyStateIdx && trans.ToState == currentState)
@@ -202,9 +309,9 @@ namespace Kerf.Engine.Animation
 
                 // Check all conditions
                 bool allConditionsPassed = true;
-                for (int c = 0; c < trans.Conditions.Count; c++)
+                for (int c = 0; trans.Conditions != null && c < trans.Conditions.Count; c++)
                 {
-                    if (!trans.Conditions[c].IsTrue(Definition.Inputs))
+                    if (!trans.Conditions[c].IsTrue(Definition.Inputs, ViewModel))
                     {
                         allConditionsPassed = false;
                         break;
@@ -222,6 +329,7 @@ namespace Kerf.Engine.Animation
 
         public bool Update(double dt, Dictionary<uint, Dictionary<ushort, double>> outPose)
         {
+            if (double.IsNaN(dt) || double.IsInfinity(dt) || dt < 0.0) dt = 0.0;
             bool needsRedraw = false;
 
             for (int i = 0; i < Definition.Layers.Count; i++)
@@ -230,6 +338,14 @@ namespace Kerf.Engine.Animation
                 LayerRuntimeState layerRt = LayerRuntimes[i];
 
                 if (layerRt.IsFinished) continue;
+
+                double playbackSpeed = 1.0;
+                if (!string.IsNullOrEmpty(Definition.PlaybackSpeedPropertyName))
+                    playbackSpeed = Math.Max(0.0, Math.Min(8.0, GetViewModelNumber(Definition.PlaybackSpeedPropertyName)));
+                int speedInput = Definition.PlaybackSpeedInputIndex;
+                if (string.IsNullOrEmpty(Definition.PlaybackSpeedPropertyName) && speedInput >= 0 && speedInput < Definition.Inputs.Count && Definition.Inputs[speedInput] != null && Definition.Inputs[speedInput].Kind == InputKind.Number)
+                    playbackSpeed = Math.Max(0.0, Math.Min(8.0, Definition.Inputs[speedInput].Value));
+                if (layerRt.CurTime != null) layerRt.CurTime.Speed = playbackSpeed;
 
                 // 1. Advance current state clip
                 if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
@@ -246,6 +362,7 @@ namespace Kerf.Engine.Animation
                 // 2. Advance transition clip if active
                 if (layerRt.ActiveTransition != null)
                 {
+                    layerRt.ActiveTransition.ToTime.Speed = playbackSpeed;
                     layerRt.ActiveTransition.Elapsed += dt;
                     needsRedraw = true;
 
@@ -306,7 +423,8 @@ namespace Kerf.Engine.Animation
                             var toPose = new Dictionary<uint, Dictionary<ushort, double>>();
                             SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose);
                             SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose);
-                            double mix = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
+                            double progress = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
+                            double mix = layerRt.ActiveTransition.Definition.EvaluateInterpolation(progress);
                             snapshot = new Dictionary<uint, Dictionary<ushort, double>>();
                             BlendPoses(fromPose, toPose, mix, snapshot);
                         }
@@ -365,7 +483,7 @@ namespace Kerf.Engine.Animation
                     }
 
                     double u = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
-                    double mix = CubicBezierEase.Ease(u);
+                    double mix = layerRt.ActiveTransition.Definition.EvaluateInterpolation(u);
                     BlendPoses(fromPose, toPose, mix, layerPose);
                 }
                 else if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
@@ -400,6 +518,7 @@ namespace Kerf.Engine.Animation
                     Definition.Inputs[i].Fired = false;
                 }
             }
+            if (ViewModel != null) ViewModel.ClearTriggers();
 
             return needsRedraw;
         }

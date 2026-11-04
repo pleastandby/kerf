@@ -92,7 +92,7 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < all.Count; i++)
             {
                 LayerNode l = all[i];
-                uint numericId = (uint)Math.Abs(l.Id != null ? l.Id.GetHashCode() : i + 1);
+                uint numericId = PropertyBinder.GetNumericNodeId(l.Id);
 
                 var props = new Dictionary<ushort, double>();
                 props[(ushort)PropKey.X] = l.X;

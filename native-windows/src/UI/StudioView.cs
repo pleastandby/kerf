@@ -59,9 +59,24 @@ namespace Kerf.UI
         private Canvas _timelineCanvasHost;
         private FrameworkElement _timelineTracksContainer;
         private FrameworkElement _stateMachineContainer;
+        private FrameworkElement _stateMachineScrollContainer;
         private bool _isStateMachineMode = false;
         private double _timelinePixelsPerSecond = 260.0;
         private bool _isScrubbingTimeline = false;
+        private bool _timelinePointerDown;
+        private bool _timelineCandidateMarquee;
+        private bool _isTimelineMarqueeSelecting;
+        private bool _timelineMarqueeAdditive;
+        private Point _timelineMarqueeStartPoint;
+        private HashSet<Keyframe> _timelineMarqueeInitialSelection = new HashSet<Keyframe>();
+        private Rectangle _timelineMarqueeVisual;
+        private bool _isDraggingTimelineKeyframes;
+        private bool _timelineKeyframeDragMoved;
+        private Point _timelineKeyframeDragStart;
+        private Dictionary<Keyframe, double> _timelineKeyframeDragStartTimes = new Dictionary<Keyframe, double>();
+        private readonly HashSet<Keyframe> _selectedTimelineKeyframes = new HashSet<Keyframe>();
+        private readonly Dictionary<Keyframe, AnimTrack> _timelineKeyframeOwners = new Dictionary<Keyframe, AnimTrack>();
+        private DateTime _lastAnimationTickUtc = DateTime.MinValue;
 
         // Left Sidebar Tabs (Layers vs Assets)
         private bool _isAssetsTabActive = false;
@@ -69,16 +84,62 @@ namespace Kerf.UI
         private Border _assetsTabBtn;
         private FrameworkElement _layersViewContainer;
         private FrameworkElement _assetsViewContainer;
+        private FrameworkElement _defaultInterpolationPanel;
+        private Canvas _defaultInterpolationCanvas;
+        private TextBlock _defaultInterpolationValues;
+        private Button _applyDefaultInterpolationButton;
+        private readonly Border[] _defaultInterpolationPresetButtons = new Border[5];
+        private InterpMode _defaultInterpolationMode = InterpMode.Linear;
+        private double _defaultInterpolationX1 = 0.0;
+        private double _defaultInterpolationY1 = 0.0;
+        private double _defaultInterpolationX2 = 1.0;
+        private double _defaultInterpolationY2 = 1.0;
+        private int _defaultInterpolationPreset = 1;
+        private int _defaultInterpolationDragHandle = -1;
         private StackPanel _assetsListStack;
         private TextBox _assetsSearchBox;
         private TextBlock _assetsCountBlock;
 
         // Interactive Vector State Machine Canvas Binding
         private uint _lastHoverNodeId = 0;
+        private uint _stateMachinePointerDownNodeId = 0;
         private bool _interactiveCanvasEnabled = true;
         private TextBlock _stateMachineStatusBadge;
-        private StackPanel _stateMachineInputsStack;
-        private StackPanel _stateMachineStatesStack;
+        private Panel _stateMachineInputsStack;
+        private Panel _stateMachineListenersStack;
+        private Canvas _stateMachineGraphCanvas;
+        private ScrollViewer _stateMachineGraphScrollViewer;
+        private readonly ScaleTransform _stateMachineGraphScale = new ScaleTransform(1.0, 1.0);
+        private TextBlock _stateMachineGraphZoomText;
+        private double _stateMachineGraphZoom = 1.0;
+        private bool _isPanningStateGraph;
+        private Point _stateGraphPanStart;
+        private double _stateGraphPanStartHorizontalOffset;
+        private double _stateGraphPanStartVerticalOffset;
+        private TextBox _stateMachineInputSearch;
+        private TextBox _stateMachineListenerSearch;
+        private StateMachineRuntime _lastGraphStateMachine;
+        private int _lastGraphCurrentState = int.MinValue;
+        private int _lastGraphTransitionTarget = int.MinValue;
+        private StateTransition _selectedGraphTransition;
+        private MachineLayer _selectedGraphTransitionLayer;
+        private int _selectedGraphStateIndex = -1;
+        private readonly Dictionary<int, FrameworkElement> _stateGraphNodes = new Dictionary<int, FrameworkElement>();
+        private int _stateGraphPointerMode; // 0 idle, 1 move node, 2 connect nodes
+        private int _stateGraphPointerStateIndex = -1;
+        private Point _stateGraphPointerOrigin;
+        private Point _stateGraphNodeOrigin;
+        private bool _stateGraphMoved;
+        private Canvas _timelineInterpolationGraphCanvas;
+        private Canvas _stateMachineInterpolationGraphCanvas;
+        private TextBlock _timelineInterpolationGraphCaption;
+        private TextBlock _stateMachineInterpolationGraphCaption;
+        private ComboBox _timelineInterpolationModeCombo;
+        private ComboBox _stateMachineInterpolationModeCombo;
+        private Keyframe _editingInterpolationKeyframe;
+        private AnimTrack _editingInterpolationTrack;
+        private int _interpolationControlHandle = -1;
+        private bool _isRefreshingInterpolationPanels;
         private Border _canvasInteractBtn;
         private TextBlock _canvasInteractText;
 
@@ -112,6 +173,23 @@ namespace Kerf.UI
         private bool _isTransforming = false;
         private bool _isDrawingNew = false;
         private LayerNode _drawingNode = null;
+        private LayerNode _autoLayoutDropTarget;
+        private LayerNode _autoLayoutDropSource;
+        private int _autoLayoutDropIndex = -1;
+        private Rect _autoLayoutDropPreviewBounds;
+        private DateTime _autoLayoutHoverStartUtc = DateTime.MinValue;
+        private bool _autoLayoutDropPreviewVisible;
+        private bool _autoLayoutDetachPreview;
+        private Point _autoLayoutDropPoint;
+        private List<LayerNode> _autoLayoutDraggedLayers = new List<LayerNode>();
+        private DispatcherTimer _autoLayoutPreviewTimer;
+        private DispatcherTimer _autoLayoutReflowTimer;
+        private DateTime _autoLayoutReflowStartUtc;
+        private Dictionary<LayerNode, Point> _autoLayoutReflowStart = new Dictionary<LayerNode, Point>();
+        private Dictionary<LayerNode, Point> _autoLayoutReflowEnd = new Dictionary<LayerNode, Point>();
+        private LayerNode _autoLayoutLivePreviewFrame;
+        private List<LayerNode> _autoLayoutLivePreviewMovingLayers = new List<LayerNode>();
+        private GuideLine _activeGuideDrag;
 
         // Pen tool & Vector Node Editing state
         private VectorGeometry _activePenGeometry = null;
@@ -164,6 +242,8 @@ namespace Kerf.UI
         private TextBlock _titleBlock;
         private TextBox _titleTextBox;
         private TextBlock _telemetryBlock;
+        private TextBlock _saveStatusBlock;
+        private DispatcherTimer _saveStatusTimer;
         private TextBlock _zoomPercentBlock;
         private StackPanel _layerListStack;
         private StackPanel _propertyInspectorStack;
@@ -171,12 +251,28 @@ namespace Kerf.UI
         private StackPanel _booleanToolbar;
         private DispatcherTimer _autosaveTimer;
 
+        private sealed class AnimationRestPose
+        {
+            public double X, Y, Width, Height, Rotation, Opacity;
+            public double CornerRadius, CornerRadiusTopLeft, CornerRadiusTopRight;
+            public double CornerRadiusBottomRight, CornerRadiusBottomLeft;
+            public VectorGeometry Geometry;
+        }
+
+        private readonly Dictionary<LayerNode, AnimationRestPose> _animationRestPose = new Dictionary<LayerNode, AnimationRestPose>();
+        private readonly Dictionary<uint, LayerNode> _animationNodesById = new Dictionary<uint, LayerNode>();
+        private DateTime _savedStatusExpires = DateTime.MinValue;
+
         // Layer Panel State
         private TextBlock _layerCountBlock;
         private TextBox _layerSearchBox;
         private string _layerSearchText = "";
         private string _layerFilterType = "all";
         private string _renamingLayerId = null;
+        private string _renamingDraftName;
+        private TextBox _renameTextBox;
+        private bool _renameFocusReady;
+        private bool _isFinishingRename;
         private Point _dragCardStartPoint;
         private int _layerGroupCounter = 1;
 
@@ -218,6 +314,7 @@ namespace Kerf.UI
         {
             Document = new KerfDocument();
             History = new CommandHistory();
+            History.HistoryChanged += (s, e) => UpdateSaveStatus();
             _toolButtons = new Dictionary<ToolType, Button>();
             InitializeStudioUI();
             InitializeAutosave();
@@ -225,6 +322,16 @@ namespace Kerf.UI
 
         public void LoadDocument(KerfDocument doc, string filePath)
         {
+            RestoreAnimationRestPose();
+            if (_animationTimer != null) _animationTimer.Stop();
+            _timelineController = null;
+            _animationRestPose.Clear();
+            _animationNodesById.Clear();
+            _lastHoverNodeId = 0;
+            _stateMachinePointerDownNodeId = 0;
+            _isStateMachineMode = false;
+            if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Visible;
+            if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
             Document = doc ?? new KerfDocument();
             CurrentFilePath = filePath;
             History.Clear();
@@ -232,12 +339,21 @@ namespace Kerf.UI
 
             _titleBlock.Text = Document.Name;
             _titleTextBox.Text = Document.Name;
+            UpdateSaveStatus();
 
             var page = Document.GetActivePage();
             _sceneGraph.Synchronize(page);
             RefreshCanvas();
             RefreshLayersList();
             RefreshPropertyInspector();
+            if (_currentStudioMode == StudioMode.Animate)
+            {
+                EnsureTimelineControllerInitialized();
+                CaptureAnimationRestPose();
+                BuildStateMachineInputsControls();
+                BuildStateMachineStatesGraph();
+                RefreshTimelineUI();
+            }
         }
 
         private void InitializeAutosave()
@@ -483,6 +599,17 @@ namespace Kerf.UI
             rightStack.Children.Add(_zoomPercentBlock);
             rightStack.Children.Add(zoomPlus);
 
+            _saveStatusBlock = new TextBlock
+            {
+                Text = "All changes saved",
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(134, 148, 173)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 10, 0),
+                ToolTip = "Project save status"
+            };
+            rightStack.Children.Add(_saveStatusBlock);
+
             var sep3 = CreateSeparator();
             rightStack.Children.Add(sep3);
 
@@ -517,6 +644,41 @@ namespace Kerf.UI
                 _titleBlock.Text = Document.Name;
                 History.MarkDirty();
             }
+        }
+
+        private void UpdateSaveStatus()
+        {
+            if (_saveStatusBlock == null) return;
+            if (History != null && History.IsDirty)
+            {
+                _savedStatusExpires = DateTime.MinValue;
+                _saveStatusBlock.Text = "Unsaved changes";
+                _saveStatusBlock.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+            }
+            else if (DateTime.Now < _savedStatusExpires)
+            {
+                _saveStatusBlock.Text = "Saved just now";
+                _saveStatusBlock.Foreground = new SolidColorBrush(Color.FromRgb(52, 211, 153));
+            }
+            else
+            {
+                _saveStatusBlock.Text = "All changes saved";
+                _saveStatusBlock.Foreground = new SolidColorBrush(Color.FromRgb(134, 148, 173));
+                if (_saveStatusTimer != null) _saveStatusTimer.Stop();
+            }
+        }
+
+        private void ShowSavedStatus()
+        {
+            _savedStatusExpires = DateTime.Now.AddSeconds(3.0);
+            UpdateSaveStatus();
+            if (_saveStatusTimer == null)
+            {
+                _saveStatusTimer = new DispatcherTimer();
+                _saveStatusTimer.Interval = TimeSpan.FromSeconds(1);
+                _saveStatusTimer.Tick += (s, e) => UpdateSaveStatus();
+            }
+            if (!_saveStatusTimer.IsEnabled) _saveStatusTimer.Start();
         }
 
         #endregion
@@ -702,6 +864,7 @@ namespace Kerf.UI
             var layersGrid = new Grid();
             layersGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Search / Filter
             layersGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // List
+            layersGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Animate interpolation
 
             var filterStack = new StackPanel { Margin = new Thickness(10, 0, 10, 8) };
             var searchBorder = new Border
@@ -750,6 +913,11 @@ namespace Kerf.UI
             scrollLayers.Content = _layerListStack;
             Grid.SetRow(scrollLayers, 1);
             layersGrid.Children.Add(scrollLayers);
+
+            _defaultInterpolationPanel = CreateDefaultInterpolationSidebarPanel();
+            _defaultInterpolationPanel.Visibility = Visibility.Collapsed;
+            Grid.SetRow(_defaultInterpolationPanel, 2);
+            layersGrid.Children.Add(_defaultInterpolationPanel);
 
             _layersViewContainer = layersGrid;
             contentHost.Children.Add(_layersViewContainer);
@@ -825,6 +993,312 @@ namespace Kerf.UI
             return border;
         }
 
+        private FrameworkElement CreateDefaultInterpolationSidebarPanel()
+        {
+            var border = new Border
+            {
+                Height = 272,
+                Margin = new Thickness(8, 4, 8, 8),
+                Padding = new Thickness(8, 7, 8, 6),
+                Background = new SolidColorBrush(Color.FromRgb(26, 28, 31)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 48, 52)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5)
+            };
+            var content = new Grid();
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20) });
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(26) });
+
+            var title = new TextBlock
+            {
+                Text = "Default Interpolation",
+                FontSize = 10.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(190, 194, 200)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetRow(title, 0);
+            content.Children.Add(title);
+
+            var presets = new Grid { Margin = new Thickness(0, 2, 0, 5), Background = new SolidColorBrush(Color.FromRgb(21, 22, 24)) };
+            for (int i = 0; i < _defaultInterpolationPresetButtons.Length; i++)
+            {
+                presets.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                int presetIndex = i;
+                var button = new Border
+                {
+                    Margin = new Thickness(1),
+                    CornerRadius = new CornerRadius(3),
+                    Cursor = Cursors.Hand,
+                    Child = CreateInterpolationPresetIcon(i)
+                };
+                button.MouseLeftButtonUp += (s, e) =>
+                {
+                    ApplyDefaultInterpolationPreset(presetIndex);
+                    e.Handled = true;
+                };
+                _defaultInterpolationPresetButtons[i] = button;
+                Grid.SetColumn(button, i);
+                presets.Children.Add(button);
+            }
+            Grid.SetRow(presets, 1);
+            content.Children.Add(presets);
+
+            _defaultInterpolationCanvas = new Canvas
+            {
+                Height = 166,
+                MinHeight = 120,
+                Background = new SolidColorBrush(Color.FromRgb(29, 30, 32)),
+                ClipToBounds = true
+            };
+            _defaultInterpolationCanvas.MouseLeftButtonDown += HandleDefaultInterpolationMouseDown;
+            _defaultInterpolationCanvas.MouseMove += HandleDefaultInterpolationMouseMove;
+            _defaultInterpolationCanvas.MouseLeftButtonUp += HandleDefaultInterpolationMouseUp;
+            _defaultInterpolationCanvas.SizeChanged += (s, e) => DrawDefaultInterpolationGraph();
+            var graphBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(29, 30, 32)),
+                CornerRadius = new CornerRadius(4),
+                ClipToBounds = true,
+                Child = _defaultInterpolationCanvas
+            };
+            Grid.SetRow(graphBorder, 2);
+            content.Children.Add(graphBorder);
+
+            _defaultInterpolationValues = new TextBlock
+            {
+                Text = "0, 0, 1, 1",
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(41, 211, 191)),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(4, 4, 0, 0)
+            };
+            Grid.SetRow(_defaultInterpolationValues, 3);
+            content.Children.Add(_defaultInterpolationValues);
+
+            _applyDefaultInterpolationButton = new Button
+            {
+                Content = "Apply to selected transitions",
+                Height = 22,
+                Margin = new Thickness(0, 3, 0, 0),
+                Padding = new Thickness(6, 1, 6, 1),
+                Background = new SolidColorBrush(Color.FromRgb(47, 55, 72)),
+                Foreground = new SolidColorBrush(Color.FromRgb(220, 226, 236)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(68, 79, 100)),
+                FontSize = 9.5,
+                Cursor = Cursors.Hand
+            };
+            _applyDefaultInterpolationButton.Click += (s, e) => ApplyDefaultInterpolationToSelection();
+            Grid.SetRow(_applyDefaultInterpolationButton, 4);
+            content.Children.Add(_applyDefaultInterpolationButton);
+            border.Child = content;
+            RefreshDefaultInterpolationPresetButtons();
+            return border;
+        }
+
+        private FrameworkElement CreateInterpolationPresetIcon(int preset)
+        {
+            var icon = new Canvas { Width = 24, Height = 20, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+            var figure = new PathFigure { StartPoint = new Point(2, 17), IsClosed = false };
+            if (preset == 0)
+            {
+                figure.Segments.Add(new LineSegment(new Point(12, 17), true));
+                figure.Segments.Add(new LineSegment(new Point(12, 3), true));
+                figure.Segments.Add(new LineSegment(new Point(22, 3), true));
+            }
+            else if (preset == 1)
+            {
+                figure.Segments.Add(new LineSegment(new Point(22, 3), true));
+            }
+            else
+            {
+                Point c1 = preset == 2 ? new Point(10, 17) : preset == 3 ? new Point(5, 3) : new Point(3, 17);
+                Point c2 = preset == 2 ? new Point(14, 3) : preset == 3 ? new Point(13, 3) : new Point(21, 3);
+                figure.Segments.Add(new BezierSegment(c1, c2, new Point(22, 3), true));
+            }
+            var geometry = new PathGeometry();
+            geometry.Figures.Add(figure);
+            icon.Children.Add(new System.Windows.Shapes.Path { Data = geometry, Stroke = new SolidColorBrush(Color.FromRgb(190, 197, 208)), StrokeThickness = 1.2, Fill = Brushes.Transparent });
+            return icon;
+        }
+
+        private void ApplyDefaultInterpolationPreset(int preset)
+        {
+            _defaultInterpolationPreset = Math.Max(0, Math.Min(4, preset));
+            switch (_defaultInterpolationPreset)
+            {
+                case 0:
+                    _defaultInterpolationMode = InterpMode.Hold;
+                    _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 1.0; _defaultInterpolationY2 = 1.0;
+                    break;
+                case 1:
+                    _defaultInterpolationMode = InterpMode.Linear;
+                    _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 1.0; _defaultInterpolationY2 = 1.0;
+                    break;
+                case 2:
+                    _defaultInterpolationMode = InterpMode.Cubic;
+                    _defaultInterpolationX1 = 0.42; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 0.58; _defaultInterpolationY2 = 1.0;
+                    break;
+                case 3:
+                    _defaultInterpolationMode = InterpMode.Cubic;
+                    _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 0.58; _defaultInterpolationY2 = 1.0;
+                    break;
+                default:
+                    _defaultInterpolationMode = InterpMode.Cubic;
+                    _defaultInterpolationX1 = 0.25; _defaultInterpolationY1 = 0.1; _defaultInterpolationX2 = 0.25; _defaultInterpolationY2 = 1.0;
+                    break;
+            }
+            RefreshDefaultInterpolationPresetButtons();
+            DrawDefaultInterpolationGraph();
+        }
+
+        private void ApplyDefaultInterpolationToSelection()
+        {
+            bool applied = false;
+            var keyframes = new HashSet<Keyframe>(_selectedTimelineKeyframes);
+            if (_editingInterpolationKeyframe != null) keyframes.Add(_editingInterpolationKeyframe);
+            foreach (var keyframe in keyframes)
+            {
+                keyframe.Interp = _defaultInterpolationMode;
+                keyframe.X1 = _defaultInterpolationX1;
+                keyframe.Y1 = _defaultInterpolationY1;
+                keyframe.X2 = _defaultInterpolationX2;
+                keyframe.Y2 = _defaultInterpolationY2;
+                applied = true;
+            }
+            if (_selectedGraphTransition != null)
+            {
+                _selectedGraphTransition.Interpolation = _defaultInterpolationMode;
+                _selectedGraphTransition.X1 = _defaultInterpolationX1;
+                _selectedGraphTransition.Y1 = _defaultInterpolationY1;
+                _selectedGraphTransition.X2 = _defaultInterpolationX2;
+                _selectedGraphTransition.Y2 = _defaultInterpolationY2;
+                applied = true;
+            }
+            if (!applied) return;
+            if (History != null) History.MarkDirty();
+            RefreshInterpolationGraphPanels();
+            RefreshTimelineCanvas();
+            if (_selectedGraphTransition != null) BuildStateMachineStatesGraph();
+            TriggerStateMachineStep();
+        }
+
+        private void RefreshDefaultInterpolationPresetButtons()
+        {
+            if (_applyDefaultInterpolationButton != null)
+                _applyDefaultInterpolationButton.IsEnabled = _editingInterpolationKeyframe != null || _selectedTimelineKeyframes.Count > 0 || _selectedGraphTransition != null;
+            for (int i = 0; i < _defaultInterpolationPresetButtons.Length; i++)
+            {
+                var button = _defaultInterpolationPresetButtons[i];
+                if (button == null) continue;
+                bool selected = i == _defaultInterpolationPreset;
+                button.Background = selected ? new SolidColorBrush(Color.FromRgb(60, 62, 66)) : Brushes.Transparent;
+                button.BorderBrush = selected ? new SolidColorBrush(Color.FromRgb(72, 75, 80)) : Brushes.Transparent;
+                button.BorderThickness = new Thickness(selected ? 1 : 0);
+            }
+        }
+
+        private void DrawDefaultInterpolationGraph()
+        {
+            var canvas = _defaultInterpolationCanvas;
+            if (canvas == null) return;
+            canvas.Children.Clear();
+            double width = Math.Max(130.0, canvas.ActualWidth > 20.0 ? canvas.ActualWidth : 210.0);
+            double height = Math.Max(100.0, canvas.ActualHeight > 20.0 ? canvas.ActualHeight : 166.0);
+            double left = 8.0, right = width - 8.0, top = 8.0, bottom = height - 8.0;
+            var gridBrush = new SolidColorBrush(Color.FromRgb(42, 44, 47));
+            for (int i = 1; i < 4; i++)
+            {
+                double gx = left + (right - left) * i / 4.0;
+                double gy = top + (bottom - top) * i / 4.0;
+                canvas.Children.Add(new Line { X1 = gx, Y1 = top, X2 = gx, Y2 = bottom, Stroke = gridBrush, StrokeThickness = 0.7 });
+                canvas.Children.Add(new Line { X1 = left, Y1 = gy, X2 = right, Y2 = gy, Stroke = gridBrush, StrokeThickness = 0.7 });
+            }
+            canvas.Children.Add(new Line { X1 = left, Y1 = bottom, X2 = right, Y2 = bottom, Stroke = new SolidColorBrush(Color.FromRgb(53, 56, 60)), StrokeThickness = 1 });
+            canvas.Children.Add(new Line { X1 = left, Y1 = top, X2 = left, Y2 = bottom, Stroke = new SolidColorBrush(Color.FromRgb(53, 56, 60)), StrokeThickness = 1 });
+
+            Point start = new Point(left, bottom);
+            Point end = new Point(right, top);
+            var figure = new PathFigure { StartPoint = start, IsClosed = false };
+            if (_defaultInterpolationMode == InterpMode.Hold)
+            {
+                figure.Segments.Add(new LineSegment(new Point(right, bottom), true));
+                figure.Segments.Add(new LineSegment(end, true));
+            }
+            else if (_defaultInterpolationMode == InterpMode.Linear)
+            {
+                figure.Segments.Add(new LineSegment(end, true));
+            }
+            else
+            {
+                Point c1 = new Point(left + _defaultInterpolationX1 * (right - left), bottom - _defaultInterpolationY1 * (bottom - top));
+                Point c2 = new Point(left + _defaultInterpolationX2 * (right - left), bottom - _defaultInterpolationY2 * (bottom - top));
+                figure.Segments.Add(new BezierSegment(c1, c2, end, true));
+                canvas.Children.Add(new Line { X1 = start.X, Y1 = start.Y, X2 = c1.X, Y2 = c1.Y, Stroke = new SolidColorBrush(Color.FromRgb(72, 77, 84)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 2, 2 }, IsHitTestVisible = false });
+                canvas.Children.Add(new Line { X1 = end.X, Y1 = end.Y, X2 = c2.X, Y2 = c2.Y, Stroke = new SolidColorBrush(Color.FromRgb(72, 77, 84)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 2, 2 }, IsHitTestVisible = false });
+                AddDefaultInterpolationHandle(canvas, c1, 1);
+                AddDefaultInterpolationHandle(canvas, c2, 2);
+            }
+            var curve = new PathGeometry();
+            curve.Figures.Add(figure);
+            var gradient = new LinearGradientBrush(Color.FromRgb(39, 205, 185), Color.FromRgb(54, 163, 255), 0.0);
+            canvas.Children.Add(new System.Windows.Shapes.Path { Data = curve, Stroke = gradient, StrokeThickness = 1.5, Fill = Brushes.Transparent, IsHitTestVisible = false });
+            if (_defaultInterpolationValues != null)
+                _defaultInterpolationValues.Text = string.Format(CultureInfo.InvariantCulture, "{0:0.##}, {1:0.##}, {2:0.##}, {3:0.##}", _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2);
+        }
+
+        private static void AddDefaultInterpolationHandle(Canvas canvas, Point point, int id)
+        {
+            var handle = new Ellipse { Width = 7, Height = 7, Fill = new SolidColorBrush(Color.FromRgb(32, 205, 187)), Stroke = new SolidColorBrush(Color.FromRgb(160, 246, 230)), StrokeThickness = 1, Tag = id, IsHitTestVisible = false };
+            Canvas.SetLeft(handle, point.X - 3.5);
+            Canvas.SetTop(handle, point.Y - 3.5);
+            canvas.Children.Add(handle);
+        }
+
+        private void HandleDefaultInterpolationMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (_defaultInterpolationMode != InterpMode.Cubic || _defaultInterpolationCanvas == null) return;
+            Point point = e.GetPosition(_defaultInterpolationCanvas);
+            double width = Math.Max(130.0, _defaultInterpolationCanvas.ActualWidth);
+            double height = Math.Max(100.0, _defaultInterpolationCanvas.ActualHeight);
+            double left = 8.0, right = width - 8.0, top = 8.0, bottom = height - 8.0;
+            Point c1 = new Point(left + _defaultInterpolationX1 * (right - left), bottom - _defaultInterpolationY1 * (bottom - top));
+            Point c2 = new Point(left + _defaultInterpolationX2 * (right - left), bottom - _defaultInterpolationY2 * (bottom - top));
+            if ((point - c1).Length > 15.0 && (point - c2).Length > 15.0) return;
+            _defaultInterpolationDragHandle = (point - c1).Length < (point - c2).Length ? 1 : 2;
+            _defaultInterpolationCanvas.CaptureMouse();
+            e.Handled = true;
+        }
+
+        private void HandleDefaultInterpolationMouseMove(object sender, MouseEventArgs e)
+        {
+            if (_defaultInterpolationDragHandle < 0 || _defaultInterpolationCanvas == null || !_defaultInterpolationCanvas.IsMouseCaptured) return;
+            Point point = e.GetPosition(_defaultInterpolationCanvas);
+            double width = Math.Max(130.0, _defaultInterpolationCanvas.ActualWidth);
+            double height = Math.Max(100.0, _defaultInterpolationCanvas.ActualHeight);
+            double left = 8.0, right = width - 8.0, top = 8.0, bottom = height - 8.0;
+            double x = Math.Max(0.0, Math.Min(1.0, (point.X - left) / Math.Max(1.0, right - left)));
+            double y = Math.Max(0.0, Math.Min(1.0, (bottom - point.Y) / Math.Max(1.0, bottom - top)));
+            if (_defaultInterpolationDragHandle == 1) { _defaultInterpolationX1 = x; _defaultInterpolationY1 = y; }
+            else { _defaultInterpolationX2 = x; _defaultInterpolationY2 = y; }
+            _defaultInterpolationMode = InterpMode.Cubic;
+            _defaultInterpolationPreset = 4;
+            RefreshDefaultInterpolationPresetButtons();
+            DrawDefaultInterpolationGraph();
+            e.Handled = true;
+        }
+
+        private void HandleDefaultInterpolationMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (_defaultInterpolationDragHandle < 0) return;
+            _defaultInterpolationDragHandle = -1;
+            if (_defaultInterpolationCanvas != null && _defaultInterpolationCanvas.IsMouseCaptured) _defaultInterpolationCanvas.ReleaseMouseCapture();
+            e.Handled = true;
+        }
+
         private void SwitchLeftSidebarTab(bool showAssets)
         {
             _isAssetsTabActive = showAssets;
@@ -844,6 +1318,8 @@ namespace Kerf.UI
             {
                 _assetsViewContainer.Visibility = showAssets ? Visibility.Visible : Visibility.Collapsed;
             }
+            if (_defaultInterpolationPanel != null)
+                _defaultInterpolationPanel.Visibility = !showAssets && _currentStudioMode == StudioMode.Animate ? Visibility.Visible : Visibility.Collapsed;
             if (showAssets)
             {
                 RefreshAssetsList();
@@ -1152,6 +1628,13 @@ namespace Kerf.UI
 
         public void RefreshLayersList()
         {
+            // Keep the active editor instance alive while the layer list is refreshed
+            // by selection/property updates during a rename.
+            if (_renamingLayerId != null && _renameTextBox != null && !_isFinishingRename)
+            {
+                _renamingDraftName = _renameTextBox.Text;
+                return;
+            }
             if (_layerListStack == null) return;
             _layerListStack.Children.Clear();
             if (Document == null) return;
@@ -1289,7 +1772,7 @@ namespace Kerf.UI
             {
                 var editBox = new TextBox
                 {
-                    Text = layer.Name,
+                    Text = string.IsNullOrEmpty(_renamingDraftName) ? layer.Name : _renamingDraftName,
                     FontSize = 11,
                     Foreground = Brushes.White,
                     Background = new SolidColorBrush(Color.FromRgb(28, 34, 52)),
@@ -1299,10 +1782,21 @@ namespace Kerf.UI
                     VerticalAlignment = VerticalAlignment.Center,
                     Margin = new Thickness(4, 0, 4, 0)
                 };
+                _renameTextBox = editBox;
                 editBox.Loaded += (s, e) =>
                 {
-                    editBox.Focus();
-                    editBox.SelectAll();
+                    Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+                    {
+                        if (_renamingLayerId != layer.Id || !ReferenceEquals(_renameTextBox, editBox)) return;
+                        editBox.Focus();
+                        Keyboard.Focus(editBox);
+                        editBox.SelectAll();
+                        _renameFocusReady = true;
+                    }));
+                };
+                editBox.TextChanged += (s, e) =>
+                {
+                    if (ReferenceEquals(_renameTextBox, editBox)) _renamingDraftName = editBox.Text;
                 };
                 editBox.KeyDown += (s, e) =>
                 {
@@ -1314,13 +1808,21 @@ namespace Kerf.UI
                     else if (e.Key == Key.Escape)
                     {
                         _renamingLayerId = null;
+                        _renamingDraftName = null;
+                        _renameTextBox = null;
+                        _renameFocusReady = false;
                         RefreshLayersList();
                         e.Handled = true;
                     }
                 };
-                editBox.LostFocus += (s, e) =>
+                editBox.LostKeyboardFocus += (s, e) =>
                 {
-                    FinishRename(layer.Id, editBox.Text);
+                    if (!_renameFocusReady || _isFinishingRename || !ReferenceEquals(_renameTextBox, editBox)) return;
+                    Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                    {
+                        if (_renamingLayerId == layer.Id && ReferenceEquals(_renameTextBox, editBox) && !editBox.IsKeyboardFocusWithin)
+                            FinishRename(layer.Id, editBox.Text);
+                    }));
                 };
                 Grid.SetColumn(editBox, 2);
                 grid.Children.Add(editBox);
@@ -1434,8 +1936,8 @@ namespace Kerf.UI
             // Selection click
             card.MouseLeftButtonUp += (s, e) =>
             {
+                if (_renamingLayerId == layer.Id) { e.Handled = true; return; }
                 Focus();
-                if (_renamingLayerId == layer.Id) return;
                 bool isShift = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
                 bool isCtrl = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
 
@@ -1455,6 +1957,7 @@ namespace Kerf.UI
             // Double click to rename
             card.MouseLeftButtonDown += (s, e) =>
             {
+                if (_renamingLayerId == layer.Id) return;
                 if (e.ClickCount == 2)
                 {
                     e.Handled = true;
@@ -2007,6 +2510,20 @@ namespace Kerf.UI
             cm.Items.Add(CreateContextMenuItem("Select All", () => SelectAllLayers(), "Ctrl + A", VectorIcons.SelectGeometry));
             cm.Items.Add(CreateModernSeparator());
 
+            cm.Items.Add(CreateContextMenuItem("Add vertical guide here", () => AddLayoutGuide(true, canvasPt)));
+            cm.Items.Add(CreateContextMenuItem("Add horizontal guide here", () => AddLayoutGuide(false, canvasPt)));
+            var showGuides = new MenuItem { Header = "Show layout guides", IsCheckable = true, IsChecked = Document != null && Document.GetActivePage() != null && Document.GetActivePage().ShowGuides };
+            showGuides.Click += (s, e) =>
+            {
+                var page = Document != null ? Document.GetActivePage() : null;
+                if (page == null) return;
+                page.ShowGuides = showGuides.IsChecked;
+                History.MarkDirty();
+                RefreshCanvas();
+            };
+            cm.Items.Add(showGuides);
+            cm.Items.Add(CreateModernSeparator());
+
             cm.Items.Add(CreateContextMenuItem("Zoom to 100%", () => ZoomTo100(), "Shift + 0", VectorIcons.ZoomGeometry));
             cm.Items.Add(CreateContextMenuItem("Zoom to Fit", () => ZoomToFit(), "Shift + 1", VectorIcons.ZoomGeometry));
             cm.Items.Add(CreateContextMenuItem("Zoom to Selection", () => ZoomToSelection(), "Shift + 2", VectorIcons.ZoomGeometry));
@@ -2074,6 +2591,8 @@ namespace Kerf.UI
                     page.BackgroundColor = hex;
                     RefreshCanvas();
                 }));
+                _propertyInspectorStack.Children.Add(CreateInspectorSection("Layout guides"));
+                _propertyInspectorStack.Children.Add(BuildLayoutGuidesSection(page));
                 return;
             }
 
@@ -2262,8 +2781,8 @@ namespace Kerf.UI
             row1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
             row1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var xBox = ScrubControls.CreateScrubField("X", primary.X, val => { primary.X = val; InvalidateAndRefresh(primary); });
-            var yBox = ScrubControls.CreateScrubField("Y", primary.Y, val => { primary.Y = val; InvalidateAndRefresh(primary); });
+            var xBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("X", primary.X, val => { primary.X = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.X, primary.X); }), primary, PropKey.X);
+            var yBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Y", primary.Y, val => { primary.Y = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.Y, primary.Y); }), primary, PropKey.Y);
             Grid.SetColumn(xBox, 0); Grid.SetColumn(yBox, 2);
             row1.Children.Add(xBox); row1.Children.Add(yBox);
             _propertyInspectorStack.Children.Add(row1);
@@ -2276,23 +2795,29 @@ namespace Kerf.UI
             var wBox = ScrubControls.CreateScrubField("W", primary.Width, val =>
             {
                 primary.Width = Math.Max(1, val);
+                SetParentAutoLayoutSizingFixed(primary, true);
                 if (primary.AutoLayout != null && primary.AutoLayout.Mode != AutoLayoutMode.None)
                 {
                     primary.AutoLayout.SizingH = SizingMode.Fixed;
-                    AutoLayoutEngine.Reflow(primary);
+                    AutoLayoutEngine.ReflowRecursive(primary);
                 }
+                AutoKeyProperty(primary, PropKey.Width, primary.Width);
                 InvalidateAndRefresh(primary);
             }, min: 1);
             var hBox = ScrubControls.CreateScrubField("H", primary.Height, val =>
             {
                 primary.Height = Math.Max(1, val);
+                SetParentAutoLayoutSizingFixed(primary, false);
                 if (primary.AutoLayout != null && primary.AutoLayout.Mode != AutoLayoutMode.None)
                 {
                     primary.AutoLayout.SizingV = SizingMode.Fixed;
-                    AutoLayoutEngine.Reflow(primary);
+                    AutoLayoutEngine.ReflowRecursive(primary);
                 }
+                AutoKeyProperty(primary, PropKey.Height, primary.Height);
                 InvalidateAndRefresh(primary);
             }, min: 1);
+            wBox = CreateAnimatedPropertyField(wBox, primary, PropKey.Width);
+            hBox = CreateAnimatedPropertyField(hBox, primary, PropKey.Height);
             Grid.SetColumn(wBox, 0); Grid.SetColumn(hBox, 2);
             row2.Children.Add(wBox); row2.Children.Add(hBox);
             _propertyInspectorStack.Children.Add(row2);
@@ -2302,8 +2827,8 @@ namespace Kerf.UI
             row3.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
             row3.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var rotBox = ScrubControls.CreateScrubField("∠", primary.Rotation, val => { primary.Rotation = val; InvalidateAndRefresh(primary); }, suffix: "°");
-            var crBox = ScrubControls.CreateScrubField("Radius", primary.CornerRadius, val => { primary.CornerRadius = Math.Max(0, val); InvalidateAndRefresh(primary); }, min: 0, suffix: "px");
+            var rotBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("∠", primary.Rotation, val => { primary.Rotation = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.Rotation, primary.Rotation); }, suffix: "°"), primary, PropKey.Rotation);
+            var crBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Radius", primary.CornerRadius, val => { primary.CornerRadius = Math.Max(0, val); InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.CornerRadius, primary.CornerRadius); }, min: 0, suffix: "px"), primary, PropKey.CornerRadius);
             Grid.SetColumn(rotBox, 0); Grid.SetColumn(crBox, 2);
             row3.Children.Add(rotBox); row3.Children.Add(crBox);
             _propertyInspectorStack.Children.Add(row3);
@@ -2317,6 +2842,7 @@ namespace Kerf.UI
                 {
                     primary.CornerRadius = Math.Round(val);
                     InvalidateAndRefresh(primary);
+                    AutoKeyProperty(primary, PropKey.CornerRadius, primary.CornerRadius);
                 }, "px");
                 _propertyInspectorStack.Children.Add(crSlider);
 
@@ -2329,6 +2855,7 @@ namespace Kerf.UI
                     {
                         primary.CornerRadius = prVal;
                         InvalidateAndRefresh(primary);
+                        AutoKeyProperty(primary, PropKey.CornerRadius, primary.CornerRadius);
                         RefreshPropertyInspector();
                     });
                     pBtn.Width = 32;
@@ -2338,6 +2865,7 @@ namespace Kerf.UI
                 {
                     primary.CornerRadius = maxRadius;
                     InvalidateAndRefresh(primary);
+                    AutoKeyProperty(primary, PropKey.CornerRadius, primary.CornerRadius);
                     RefreshPropertyInspector();
                 });
                 pillBtn.Width = 36;
@@ -2346,11 +2874,13 @@ namespace Kerf.UI
             }
 
             // Layer Opacity Smooth Slider
-            _propertyInspectorStack.Children.Add(ScrubControls.CreateSmoothSlider("Layer Opacity", Math.Round(primary.Opacity * 100), 0, 100, val =>
+            var opacitySlider = ScrubControls.CreateSmoothSlider("Layer Opacity", Math.Round(primary.Opacity * 100), 0, 100, val =>
             {
                 primary.Opacity = val / 100.0;
                 InvalidateAndRefresh(primary);
-            }, "%"));
+                AutoKeyProperty(primary, PropKey.Opacity, primary.Opacity);
+            }, "%");
+            _propertyInspectorStack.Children.Add(CreateAnimatedPropertyField(opacitySlider, primary, PropKey.Opacity));
 
             // 2. Auto Layout (if Frame or Group)
             if (primary.Type == ElementType.Frame || primary.Type == ElementType.Group)
@@ -2386,6 +2916,10 @@ namespace Kerf.UI
             {
                 BuildTypographySection(primary);
             }
+
+            // Keep selection-level styles at the end of the inspector, after object properties.
+            if (_selectedLayers.Count > 1 || primary.Type == ElementType.Frame || primary.Type == ElementType.Group)
+                BuildSelectionColorsSection(_selectedLayers);
         }
 
         private void BuildVectorNodeInspector()
@@ -2586,120 +3120,346 @@ namespace Kerf.UI
             return btn;
         }
 
+        private FrameworkElement BuildLayoutGuidesSection(Kerf.Model.Page page)
+        {
+            if (page.Guides == null) page.Guides = new List<GuideLine>();
+            var stack = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+            var showGuides = new CheckBox
+            {
+                Content = "Show guides",
+                IsChecked = page.ShowGuides,
+                Foreground = new SolidColorBrush(Color.FromRgb(215, 222, 235)),
+                FontSize = 11,
+                Margin = new Thickness(0, 0, 0, 7),
+                Cursor = Cursors.Hand
+            };
+            showGuides.Click += (s, e) =>
+            {
+                page.ShowGuides = showGuides.IsChecked == true;
+                History.MarkDirty();
+                RefreshCanvas();
+            };
+            stack.Children.Add(showGuides);
+
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 7) };
+            var vertical = CreateSmallButton("＋ Vertical", "Add a draggable vertical layout guide", () => AddLayoutGuide(true, GetVisibleCanvasCenter()));
+            vertical.Width = 100;
+            vertical.Height = 25;
+            vertical.Margin = new Thickness(0, 0, 6, 0);
+            actions.Children.Add(vertical);
+            var horizontal = CreateSmallButton("＋ Horizontal", "Add a draggable horizontal layout guide", () => AddLayoutGuide(false, GetVisibleCanvasCenter()));
+            horizontal.Width = 108;
+            horizontal.Height = 25;
+            actions.Children.Add(horizontal);
+            stack.Children.Add(actions);
+
+            foreach (var guide in page.Guides.ToList())
+            {
+                var row = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(25) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+                var positionField = CreateNumberField(guide.IsVertical ? "Vertical X" : "Horizontal Y", guide.Position, val =>
+                {
+                    guide.Position = val;
+                    History.MarkDirty();
+                    RefreshCanvas();
+                });
+                Grid.SetColumn(positionField, 0);
+                row.Children.Add(positionField);
+                var jumpButton = CreateSmallButton("↗", "Focus this guide", () =>
+                {
+                    if (guide.IsVertical) _panOffset.X = _canvasHost.ActualWidth / 2.0 - guide.Position * _zoomScale;
+                    else _panOffset.Y = _canvasHost.ActualHeight / 2.0 - guide.Position * _zoomScale;
+                    RefreshCanvas();
+                });
+                jumpButton.Width = 22;
+                jumpButton.Height = 24;
+                Grid.SetColumn(jumpButton, 1);
+                row.Children.Add(jumpButton);
+                var removeButton = CreateSmallButton("×", "Remove guide", () =>
+                {
+                    page.Guides.Remove(guide);
+                    History.MarkDirty();
+                    RefreshCanvas();
+                    RefreshPropertyInspector();
+                });
+                removeButton.Width = 20;
+                removeButton.Height = 24;
+                Grid.SetColumn(removeButton, 2);
+                row.Children.Add(removeButton);
+                stack.Children.Add(row);
+            }
+
+            if (page.Guides.Count > 0)
+            {
+                var clear = CreateSmallButton("Clear all guides", "Remove all layout guides", () =>
+                {
+                    page.Guides.Clear();
+                    History.MarkDirty();
+                    RefreshCanvas();
+                    RefreshPropertyInspector();
+                });
+                clear.Height = 25;
+                stack.Children.Add(clear);
+            }
+            return stack;
+        }
+
+        private Point GetVisibleCanvasCenter()
+        {
+            if (_canvasHost == null) return new Point(0, 0);
+            return ScreenToCanvas(new Point(_canvasHost.ActualWidth / 2.0, _canvasHost.ActualHeight / 2.0));
+        }
+
+        private void AddLayoutGuide(bool vertical, Point canvasPoint)
+        {
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page == null) return;
+            if (page.Guides == null) page.Guides = new List<GuideLine>();
+            var guide = new GuideLine(vertical, vertical ? canvasPoint.X : canvasPoint.Y);
+            page.Guides.Add(guide);
+            page.ShowGuides = true;
+            History.MarkDirty();
+            RefreshCanvas();
+            RefreshPropertyInspector();
+        }
+
+        private GuideLine FindGuideNear(Point canvasPoint)
+        {
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page == null || !page.ShowGuides || page.Guides == null) return null;
+            double maxDistance = 8.0 / Math.Max(0.05, _zoomScale);
+            return page.Guides
+                .Select(g => new { Guide = g, Distance = Math.Abs((g.IsVertical ? canvasPoint.X : canvasPoint.Y) - g.Position) })
+                .Where(item => item.Distance <= maxDistance)
+                .OrderBy(item => item.Distance)
+                .Select(item => item.Guide)
+                .FirstOrDefault();
+        }
+
         private FrameworkElement CreateAutoLayoutCard(LayerNode frame)
         {
             var stack = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
             var layout = frame.AutoLayout ?? new AutoLayoutData();
             frame.AutoLayout = layout;
-
-            // Mode dropdown
-            var modeCombo = CreateModernComboBox(28);
-            modeCombo.Margin = new Thickness(0, 0, 0, 8);
-            modeCombo.Items.Add(CreateModernComboBoxItem("None"));
-            modeCombo.Items.Add(CreateModernComboBoxItem("Horizontal"));
-            modeCombo.Items.Add(CreateModernComboBoxItem("Vertical"));
-            modeCombo.Items.Add(CreateModernComboBoxItem("Wrap"));
-            modeCombo.Items.Add(CreateModernComboBoxItem("Grid"));
-            modeCombo.SelectedIndex = (int)layout.Mode;
-
-            modeCombo.SelectionChanged += (s, e) =>
+            if (layout.Mode == AutoLayoutMode.None)
             {
-                layout.Mode = (AutoLayoutMode)modeCombo.SelectedIndex;
-                AutoLayoutEngine.Reflow(frame);
-                InvalidateAndRefresh(frame);
-                RefreshPropertyInspector();
-            };
-            stack.Children.Add(modeCombo);
-
-            if (layout.Mode != AutoLayoutMode.None)
-            {
-                // Sizing Modes (Width & Height: Hug contents / Fixed size)
-                var sizingGrid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
-                sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
-                sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                var sizingHCombo = CreateModernComboBox(26);
-                sizingHCombo.Items.Add(CreateModernComboBoxItem("W: Fixed"));
-                sizingHCombo.Items.Add(CreateModernComboBoxItem("W: Hug"));
-                sizingHCombo.SelectedIndex = (layout.SizingH == SizingMode.Hug) ? 1 : 0;
-                sizingHCombo.SelectionChanged += (s, e) =>
+                var addButton = CreateSmallButton("＋ Add auto layout", "Wrap and evenly distribute this frame's children", () =>
                 {
-                    layout.SizingH = (sizingHCombo.SelectedIndex == 1) ? SizingMode.Hug : SizingMode.Fixed;
-                    AutoLayoutEngine.Reflow(frame);
-                    InvalidateAndRefresh(frame);
-                    RefreshPropertyInspector();
-                };
-                Grid.SetColumn(sizingHCombo, 0);
-                sizingGrid.Children.Add(sizingHCombo);
-
-                var sizingVCombo = CreateModernComboBox(26);
-                sizingVCombo.Items.Add(CreateModernComboBoxItem("H: Fixed"));
-                sizingVCombo.Items.Add(CreateModernComboBoxItem("H: Hug"));
-                sizingVCombo.SelectedIndex = (layout.SizingV == SizingMode.Hug) ? 1 : 0;
-                sizingVCombo.SelectionChanged += (s, e) =>
-                {
-                    layout.SizingV = (sizingVCombo.SelectedIndex == 1) ? SizingMode.Hug : SizingMode.Fixed;
-                    AutoLayoutEngine.Reflow(frame);
-                    InvalidateAndRefresh(frame);
-                    RefreshPropertyInspector();
-                };
-                Grid.SetColumn(sizingVCombo, 2);
-                sizingGrid.Children.Add(sizingVCombo);
-
-                stack.Children.Add(sizingGrid);
-
-                stack.Children.Add(CreateNumberField("Gap", layout.Gap, val =>
-                {
-                    layout.Gap = Math.Max(-500.0, val);
-                    AutoLayoutEngine.Reflow(frame);
-                    InvalidateAndRefresh(frame);
-                }));
-
-                stack.Children.Add(CreateNumberField("Padding", layout.PaddingLeft, val =>
-                {
-                    layout.PaddingLeft = Math.Max(0, val);
-                    layout.PaddingRight = layout.PaddingLeft;
-                    layout.PaddingTop = layout.PaddingLeft;
-                    layout.PaddingBottom = layout.PaddingLeft;
-                    AutoLayoutEngine.Reflow(frame);
-                    InvalidateAndRefresh(frame);
-                }));
-
-                var alignCombo = CreateModernComboBox(28);
-                alignCombo.Margin = new Thickness(0, 0, 0, 8);
-                alignCombo.Items.Add(CreateModernComboBoxItem("Align: Start"));
-                alignCombo.Items.Add(CreateModernComboBoxItem("Align: Center"));
-                alignCombo.Items.Add(CreateModernComboBoxItem("Align: End"));
-                alignCombo.Items.Add(CreateModernComboBoxItem("Align: Baseline"));
-                alignCombo.SelectedIndex = (int)layout.AlignItems;
-                alignCombo.SelectionChanged += (s, e) =>
-                {
-                    layout.AlignItems = (AlignItems)alignCombo.SelectedIndex;
-                    AutoLayoutEngine.Reflow(frame);
-                    InvalidateAndRefresh(frame);
-                };
-                stack.Children.Add(alignCombo);
-
-                var justifyCombo = CreateModernComboBox(28);
-                justifyCombo.Margin = new Thickness(0, 0, 0, 8);
-                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Start"));
-                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Center"));
-                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: End"));
-                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Space Between"));
-                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Space Around"));
-                justifyCombo.Items.Add(CreateModernComboBoxItem("Distribution: Space Evenly"));
-                justifyCombo.SelectedIndex = (int)layout.JustifyContent;
-                justifyCombo.SelectionChanged += (s, e) =>
-                {
-                    layout.JustifyContent = (JustifyContent)justifyCombo.SelectedIndex;
-                    AutoLayoutEngine.Reflow(frame);
-                    InvalidateAndRefresh(frame);
-                };
-                stack.Children.Add(justifyCombo);
+                    layout.Mode = AutoLayoutMode.Wrap;
+                    layout.SizingH = SizingMode.Fixed;
+                    layout.JustifyContent = JustifyContent.SpaceEvenly;
+                    ApplyAutoLayoutChange(frame, true);
+                });
+                addButton.Height = 30;
+                stack.Children.Add(addButton);
+                return stack;
             }
 
+            Action<bool> applyLayoutChange = refreshInspector =>
+            {
+                ApplyAutoLayoutChange(frame, refreshInspector);
+            };
+
+            // Compact flow selector, with Wrap as the normal starting point.
+            stack.Children.Add(new TextBlock { Text = "Flow", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(145, 160, 184)), Margin = new Thickness(0, 0, 0, 3) });
+            var flowRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            var flowModes = new[]
+            {
+                new { Mode = AutoLayoutMode.Wrap, Label = "↪", Tip = "Wrap" },
+                new { Mode = AutoLayoutMode.Vertical, Label = "↕", Tip = "Vertical flow" },
+                new { Mode = AutoLayoutMode.Horizontal, Label = "↔", Tip = "Horizontal flow" },
+                new { Mode = AutoLayoutMode.Grid, Label = "▦", Tip = "Grid" }
+            };
+            foreach (var flow in flowModes)
+            {
+                bool active = layout.Mode == flow.Mode;
+                var flowButton = new Button
+                {
+                    Content = flow.Label,
+                    Width = 38,
+                    Height = 28,
+                    Margin = new Thickness(0, 0, 4, 0),
+                    FontSize = 15,
+                    FontWeight = FontWeights.SemiBold,
+                    Background = active ? new SolidColorBrush(Color.FromRgb(56, 67, 92)) : new SolidColorBrush(Color.FromRgb(35, 40, 55)),
+                    Foreground = active ? new SolidColorBrush(Color.FromRgb(220, 230, 245)) : new SolidColorBrush(Color.FromRgb(155, 170, 193)),
+                    BorderBrush = active ? new SolidColorBrush(Color.FromRgb(95, 112, 144)) : new SolidColorBrush(Color.FromRgb(48, 56, 75)),
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand,
+                    ToolTip = flow.Tip,
+                    Template = CreateRoundedButtonTemplate(5)
+                };
+                flowButton.Click += (s, e) =>
+                {
+                    layout.Mode = flow.Mode;
+                    applyLayoutChange(true);
+                };
+                flowRow.Children.Add(flowButton);
+            }
+            var removeButton = CreateSmallButton("×", "Remove auto layout", () =>
+            {
+                layout.Mode = AutoLayoutMode.None;
+                RefreshPropertyInspector();
+                RefreshCanvas();
+            });
+            removeButton.Width = 28;
+            removeButton.Height = 28;
+            flowRow.Children.Add(removeButton);
+            stack.Children.Add(flowRow);
+
+            stack.Children.Add(new TextBlock { Text = "Resizing", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(145, 160, 184)), Margin = new Thickness(0, 0, 0, 3) });
+            var sizingGrid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+            sizingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var sizingHCombo = CreateModernComboBox(26);
+            sizingHCombo.Items.Add(CreateModernComboBoxItem("W: Fixed"));
+            sizingHCombo.Items.Add(CreateModernComboBoxItem("W: Hug"));
+            sizingHCombo.SelectedIndex = layout.SizingH == SizingMode.Hug ? 1 : 0;
+            sizingHCombo.SelectionChanged += (s, e) => { layout.SizingH = sizingHCombo.SelectedIndex == 1 ? SizingMode.Hug : SizingMode.Fixed; applyLayoutChange(false); };
+            Grid.SetColumn(sizingHCombo, 0);
+            sizingGrid.Children.Add(sizingHCombo);
+            var sizingVCombo = CreateModernComboBox(26);
+            sizingVCombo.Items.Add(CreateModernComboBoxItem("H: Fixed"));
+            sizingVCombo.Items.Add(CreateModernComboBoxItem("H: Hug"));
+            sizingVCombo.SelectedIndex = layout.SizingV == SizingMode.Hug ? 1 : 0;
+            sizingVCombo.SelectionChanged += (s, e) => { layout.SizingV = sizingVCombo.SelectedIndex == 1 ? SizingMode.Hug : SizingMode.Fixed; applyLayoutChange(false); };
+            Grid.SetColumn(sizingVCombo, 2);
+            sizingGrid.Children.Add(sizingVCombo);
+            stack.Children.Add(sizingGrid);
+
+            stack.Children.Add(new TextBlock { Text = "Alignment", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(145, 160, 184)), Margin = new Thickness(0, 0, 0, 3) });
+            var alignmentAndGap = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            alignmentAndGap.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+            alignmentAndGap.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+            alignmentAndGap.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var alignPanel = CreateAutoLayoutAlignmentGrid(frame, layout, applyLayoutChange);
+            Grid.SetColumn(alignPanel, 0);
+            alignmentAndGap.Children.Add(alignPanel);
+
+            var gapPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 0) };
+            gapPanel.Children.Add(new TextBlock { Text = "Gap", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(145, 160, 184)), Margin = new Thickness(0, 0, 0, 3) });
+            var gapGrid = new Grid();
+            gapGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            gapGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+            var gapField = CreateNumberField("↔", layout.Gap, val => { layout.Gap = Math.Max(0.0, val); applyLayoutChange(false); });
+            Grid.SetColumn(gapField, 0);
+            gapGrid.Children.Add(gapField);
+            var justifyCombo = CreateModernComboBox(26);
+            justifyCombo.Items.Add(CreateModernComboBoxItem("Packed"));
+            justifyCombo.Items.Add(CreateModernComboBoxItem("Center"));
+            justifyCombo.Items.Add(CreateModernComboBoxItem("End"));
+            justifyCombo.Items.Add(CreateModernComboBoxItem("Between"));
+            justifyCombo.Items.Add(CreateModernComboBoxItem("Around"));
+            justifyCombo.Items.Add(CreateModernComboBoxItem("Evenly"));
+            justifyCombo.SelectedIndex = (int)layout.JustifyContent;
+            justifyCombo.ToolTip = "Space distribution along the flow";
+            justifyCombo.SelectionChanged += (s, e) => { layout.JustifyContent = (JustifyContent)justifyCombo.SelectedIndex; applyLayoutChange(false); };
+            Grid.SetColumn(justifyCombo, 1);
+            gapGrid.Children.Add(justifyCombo);
+            gapPanel.Children.Add(gapGrid);
+            Grid.SetColumn(gapPanel, 2);
+            alignmentAndGap.Children.Add(gapPanel);
+            stack.Children.Add(alignmentAndGap);
+
+            if (layout.Mode == AutoLayoutMode.Grid)
+            {
+                stack.Children.Add(CreateNumberField("Columns", layout.GridColumns, val =>
+                {
+                    layout.GridColumns = Math.Max(1, Math.Min(12, (int)Math.Round(val)));
+                    applyLayoutChange(false);
+                }));
+            }
+
+            stack.Children.Add(new TextBlock { Text = "Padding", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(145, 160, 184)), Margin = new Thickness(0, 0, 0, 3) });
+            var paddingGrid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            paddingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            paddingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+            paddingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            paddingGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            paddingGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Action<FrameworkElement, int, int> addPaddingField = (field, col, row) =>
+            {
+                Grid.SetColumn(field, col);
+                Grid.SetRow(field, row);
+                paddingGrid.Children.Add(field);
+            };
+            addPaddingField(CreateNumberField("Left", layout.PaddingLeft, val => { layout.PaddingLeft = Math.Max(0, val); applyLayoutChange(false); }), 0, 0);
+            addPaddingField(CreateNumberField("Right", layout.PaddingRight, val => { layout.PaddingRight = Math.Max(0, val); applyLayoutChange(false); }), 2, 0);
+            addPaddingField(CreateNumberField("Top", layout.PaddingTop, val => { layout.PaddingTop = Math.Max(0, val); applyLayoutChange(false); }), 0, 1);
+            addPaddingField(CreateNumberField("Bottom", layout.PaddingBottom, val => { layout.PaddingBottom = Math.Max(0, val); applyLayoutChange(false); }), 2, 1);
+            stack.Children.Add(paddingGrid);
+
             return stack;
+        }
+
+        private void ApplyAutoLayoutChange(LayerNode frame, bool refreshInspector)
+        {
+            if (frame == null || frame.AutoLayout == null) return;
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page == null) return;
+            var before = page.GetAllLayersFlat().Where(node => node != null)
+                .ToDictionary(node => node, node => new Point(node.X, node.Y));
+            AutoLayoutEngine.ReflowHierarchy(page, frame);
+            _sceneGraph.Synchronize(page);
+            InvalidateLayoutFrameVisuals(frame);
+            History.MarkDirty();
+            RefreshCanvas();
+            var after = page.GetAllLayersFlat().Where(node => node != null && before.ContainsKey(node))
+                .ToDictionary(node => node, node => new Point(node.X, node.Y));
+            AnimateAutoLayoutPositions(before, after, 170.0);
+            if (refreshInspector) RefreshPropertyInspector();
+        }
+
+        private FrameworkElement CreateAutoLayoutAlignmentGrid(LayerNode frame, AutoLayoutData layout, Action<bool> applyChange)
+        {
+            var grid = new Grid { Width = 82, Height = 70 };
+            for (int i = 0; i < 3; i++)
+            {
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            }
+            var horizontal = layout.Mode == AutoLayoutMode.Horizontal || layout.Mode == AutoLayoutMode.Wrap;
+            int activeMain = layout.JustifyContent == JustifyContent.Center || layout.JustifyContent == JustifyContent.SpaceAround || layout.JustifyContent == JustifyContent.SpaceEvenly ? 1
+                : layout.JustifyContent == JustifyContent.End ? 2 : 0;
+            int activeCross = layout.AlignItems == AlignItems.Center ? 1 : layout.AlignItems == AlignItems.End ? 2 : 0;
+
+            for (int row = 0; row < 3; row++)
+            {
+                for (int col = 0; col < 3; col++)
+                {
+                    int localRow = row;
+                    int localCol = col;
+                    bool active = horizontal ? col == activeMain && row == activeCross : row == activeMain && col == activeCross;
+                    var button = new Button
+                    {
+                        Padding = new Thickness(0),
+                        Margin = new Thickness(1),
+                        Background = active ? new SolidColorBrush(Color.FromRgb(54, 66, 92)) : new SolidColorBrush(Color.FromRgb(35, 40, 55)),
+                        BorderBrush = active ? new SolidColorBrush(Color.FromRgb(119, 137, 172)) : new SolidColorBrush(Color.FromRgb(50, 58, 75)),
+                        BorderThickness = new Thickness(1),
+                        Cursor = Cursors.Hand,
+                        ToolTip = string.Format("{0} / {1}", new[] { "Start", "Center", "End" }[horizontal ? col : row], new[] { "Top", "Center", "Bottom" }[horizontal ? row : col]),
+                        Template = CreateRoundedButtonTemplate(3)
+                    };
+                    var dot = new Ellipse { Width = 4, Height = 4, Fill = active ? new SolidColorBrush(Color.FromRgb(236, 72, 153)) : new SolidColorBrush(Color.FromRgb(143, 157, 178)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                    button.Content = dot;
+                    button.Click += (s, e) =>
+                    {
+                        int main = horizontal ? localCol : localRow;
+                        int cross = horizontal ? localRow : localCol;
+                        layout.JustifyContent = main == 0 ? JustifyContent.Start : main == 1 ? JustifyContent.Center : JustifyContent.End;
+                        layout.AlignItems = cross == 0 ? AlignItems.Start : cross == 1 ? AlignItems.Center : AlignItems.End;
+                        applyChange(true);
+                    };
+                    Grid.SetRow(button, row);
+                    Grid.SetColumn(button, col);
+                    grid.Children.Add(button);
+                }
+            }
+            return grid;
         }
 
         private FrameworkElement CreateAutoLayoutChildCard(LayerNode child, LayerNode parent)
@@ -2708,17 +3468,18 @@ namespace Kerf.UI
 
             var ignoreBox = new CheckBox
             {
-                Content = "Ignore Auto Layout (Independent)",
+                Content = "Free position",
                 IsChecked = child.IgnoreAutoLayout,
                 Foreground = Brushes.White,
                 FontSize = 11,
                 Margin = new Thickness(0, 0, 0, 8),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                ToolTip = "Keep this layer positioned independently of the parent layout flow."
             };
             ignoreBox.Click += (s, e) =>
             {
                 child.IgnoreAutoLayout = (ignoreBox.IsChecked == true);
-                AutoLayoutEngine.Reflow(parent);
+                AutoLayoutEngine.ReflowRecursive(parent);
                 InvalidateAndRefresh(parent);
                 RefreshCanvas();
             };
@@ -2734,8 +3495,8 @@ namespace Kerf.UI
             sizingHCombo.SelectedIndex = (int)child.LayoutSizingH;
             sizingHCombo.SelectionChanged += (s, e) =>
             {
-                child.LayoutSizingH = (SizingMode)sizingHCombo.SelectedIndex;
-                AutoLayoutEngine.Reflow(parent);
+                SetChildLayoutSizingMode(child, true, (SizingMode)sizingHCombo.SelectedIndex);
+                AutoLayoutEngine.ReflowRecursive(parent);
                 InvalidateAndRefresh(parent);
                 RefreshCanvas();
             };
@@ -2748,8 +3509,8 @@ namespace Kerf.UI
             sizingVCombo.SelectedIndex = (int)child.LayoutSizingV;
             sizingVCombo.SelectionChanged += (s, e) =>
             {
-                child.LayoutSizingV = (SizingMode)sizingVCombo.SelectedIndex;
-                AutoLayoutEngine.Reflow(parent);
+                SetChildLayoutSizingMode(child, false, (SizingMode)sizingVCombo.SelectedIndex);
+                AutoLayoutEngine.ReflowRecursive(parent);
                 InvalidateAndRefresh(parent);
                 RefreshCanvas();
             };
@@ -3106,6 +3867,150 @@ namespace Kerf.UI
                 dock.Children.Add(addBtn);
             }
             return dock;
+        }
+
+        private void BuildSelectionColorsSection(IEnumerable<LayerNode> roots)
+        {
+            var colorTargets = new Dictionary<string, List<Action<string>>>(StringComparer.OrdinalIgnoreCase);
+            var visited = new HashSet<LayerNode>();
+            Action<LayerNode> collect = null;
+            collect = layer =>
+            {
+                if (layer == null || !visited.Add(layer)) return;
+                if (layer.Fills != null)
+                {
+                    foreach (var paint in layer.Fills)
+                    {
+                        if (paint == null) continue;
+                        if (paint.Type == PaintType.Solid && !string.IsNullOrWhiteSpace(paint.ColorHex))
+                        {
+                            string key = NormalizeStyleColor(paint.ColorHex);
+                            if (!colorTargets.ContainsKey(key)) colorTargets[key] = new List<Action<string>>();
+                            var targetPaint = paint;
+                            colorTargets[key].Add(hex => targetPaint.ColorHex = hex);
+                        }
+                        if (paint.GradientStops != null)
+                        {
+                            foreach (var stop in paint.GradientStops)
+                            {
+                                if (stop == null || string.IsNullOrWhiteSpace(stop.ColorHex)) continue;
+                                string key = NormalizeStyleColor(stop.ColorHex);
+                                if (!colorTargets.ContainsKey(key)) colorTargets[key] = new List<Action<string>>();
+                                var targetStop = stop;
+                                colorTargets[key].Add(hex => targetStop.ColorHex = hex);
+                            }
+                        }
+                    }
+                }
+                if (layer.Strokes != null)
+                {
+                    foreach (var stroke in layer.Strokes)
+                    {
+                        var paint = stroke != null ? stroke.Paint : null;
+                        if (paint == null || string.IsNullOrWhiteSpace(paint.ColorHex)) continue;
+                        string key = NormalizeStyleColor(paint.ColorHex);
+                        if (!colorTargets.ContainsKey(key)) colorTargets[key] = new List<Action<string>>();
+                        var targetPaint = paint;
+                        colorTargets[key].Add(hex => targetPaint.ColorHex = hex);
+                    }
+                }
+                if (layer.Children != null)
+                {
+                    foreach (var child in layer.Children) collect(child);
+                }
+            };
+            foreach (var root in roots ?? Enumerable.Empty<LayerNode>()) collect(root);
+            if (colorTargets.Count == 0) return;
+
+            _propertyInspectorStack.Children.Add(CreateInspectorSection("Selection colors"));
+            foreach (var entry in colorTargets.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                string originalHex = entry.Key;
+                var targets = entry.Value;
+                var row = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(35, 40, 55)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(53, 61, 80)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6, 5, 8, 5),
+                    Margin = new Thickness(0, 0, 0, 5),
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Change every matching color in this selection"
+                };
+                var rowGrid = new Grid();
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var swatch = new Border
+                {
+                    Width = 20,
+                    Height = 20,
+                    CornerRadius = new CornerRadius(3),
+                    Background = new SolidColorBrush(GpuRenderer.ParseHexColor(originalHex, 1.0)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(85, 95, 115)),
+                    BorderThickness = new Thickness(1),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(swatch, 0);
+                rowGrid.Children.Add(swatch);
+                var colorName = new TextBlock
+                {
+                    Text = GetStyleColorName(originalHex),
+                    Foreground = new SolidColorBrush(Color.FromRgb(235, 238, 244)),
+                    FontSize = 10.5,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(3, 0, 6, 0)
+                };
+                Grid.SetColumn(colorName, 1);
+                rowGrid.Children.Add(colorName);
+                var hexLabel = new TextBlock
+                {
+                    Text = originalHex.ToUpperInvariant(),
+                    Foreground = new SolidColorBrush(Color.FromRgb(145, 159, 181)),
+                    FontSize = 9.5,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(hexLabel, 2);
+                rowGrid.Children.Add(hexLabel);
+                row.Child = rowGrid;
+
+                Action openPicker = () => ColorPickerPopup.ShowAt(row, originalHex, newHex =>
+                {
+                    foreach (var update in targets) update(newHex);
+                    _sceneGraph.Synchronize(Document.GetActivePage());
+                    History.MarkDirty();
+                    RefreshCanvas();
+                    RefreshPropertyInspector();
+                });
+                row.MouseLeftButtonUp += (s, e) => { e.Handled = true; openPicker(); };
+                _propertyInspectorStack.Children.Add(row);
+            }
+        }
+
+        private static string NormalizeStyleColor(string hex)
+        {
+            if (string.IsNullOrWhiteSpace(hex)) return "#D9D9D9";
+            var value = hex.Trim();
+            if (!value.StartsWith("#", StringComparison.Ordinal)) value = "#" + value;
+            return value.ToUpperInvariant();
+        }
+
+        private static string GetStyleColorName(string hex)
+        {
+            switch (NormalizeStyleColor(hex))
+            {
+                case "#D9D9D9": case "#808080": case "#888888": return "Gray";
+                case "#FF7A00": case "#FF8A00": case "#F97316": case "#EA580C": return "Orange";
+                case "#FF0000": case "#EF4444": case "#DC2626": return "Red";
+                case "#00FF00": case "#22C55E": case "#16A34A": return "Green";
+                case "#0000FF": case "#3B82F6": case "#2563EB": return "Blue";
+                case "#FFFF00": case "#EAB308": case "#FACC15": return "Yellow";
+                case "#800080": case "#A855F7": case "#8B5CF6": return "Purple";
+                case "#FFFFFF": case "#FBFAFA": return "White";
+                case "#000000": return "Black";
+                default: return "Color";
+            }
         }
 
         private void BuildFillsSection(LayerNode primary)
@@ -4816,123 +5721,689 @@ namespace Kerf.UI
             }
         }
 
+        private void ApplyParentTransformToDescendants(LayerNode parent, Rect transformedParentBounds, double transformedParentRotation)
+        {
+            if (parent == null || parent.Children == null || _dragInitialBounds == null) return;
+            double scaleX = transformedParentBounds.Width / Math.Max(0.001, _transformStartBounds.Width);
+            double scaleY = transformedParentBounds.Height / Math.Max(0.001, _transformStartBounds.Height);
+            double initialParentRotation;
+            if (!_dragInitialRotations.TryGetValue(parent, out initialParentRotation)) initialParentRotation = _transformStartRot;
+            double rotationDelta = transformedParentRotation - initialParentRotation;
+            double radians = rotationDelta * Math.PI / 180.0;
+            double cos = Math.Cos(radians);
+            double sin = Math.Sin(radians);
+            var selected = new HashSet<LayerNode>(_selectedLayers);
+            foreach (var child in parent.Children)
+                ApplyParentTransformToDescendant(child, transformedParentBounds, scaleX, scaleY, cos, sin, rotationDelta, selected);
+        }
+
+        private void ApplyParentTransformToDescendant(LayerNode child, Rect transformedParentBounds, double scaleX, double scaleY, double cos, double sin, double rotationDelta, HashSet<LayerNode> selected)
+        {
+            if (child == null || (selected != null && selected.Contains(child))) return;
+            Rect initialBounds;
+            if (_dragInitialBounds.TryGetValue(child, out initialBounds))
+            {
+                double initialCenterX = initialBounds.X + initialBounds.Width / 2.0;
+                double initialCenterY = initialBounds.Y + initialBounds.Height / 2.0;
+                double centerX = transformedParentBounds.X + (initialCenterX - _transformStartBounds.X) * scaleX;
+                double centerY = transformedParentBounds.Y + (initialCenterY - _transformStartBounds.Y) * scaleY;
+                double pivotX = transformedParentBounds.X + transformedParentBounds.Width / 2.0;
+                double pivotY = transformedParentBounds.Y + transformedParentBounds.Height / 2.0;
+                double relX = centerX - pivotX;
+                double relY = centerY - pivotY;
+                centerX = pivotX + relX * cos - relY * sin;
+                centerY = pivotY + relX * sin + relY * cos;
+                double width = Math.Max(1.0, initialBounds.Width * Math.Abs(scaleX));
+                double height = Math.Max(1.0, initialBounds.Height * Math.Abs(scaleY));
+                var transformedBounds = new Rect(centerX - width / 2.0, centerY - height / 2.0, width, height);
+                child.X = transformedBounds.X;
+                child.Y = transformedBounds.Y;
+                child.Width = transformedBounds.Width;
+                child.Height = transformedBounds.Height;
+                double initialRotation;
+                if (_dragInitialRotations.TryGetValue(child, out initialRotation)) child.Rotation = initialRotation + rotationDelta;
+                VectorGeometry initialGeometry;
+                if (child.Type == ElementType.Path && _dragInitialGeometries.TryGetValue(child, out initialGeometry) && initialGeometry != null)
+                {
+                    child.Geometry = initialGeometry.Clone();
+                    BezierVectorEngine.ScaleGeometry(child.Geometry, initialBounds, transformedBounds);
+                }
+                _sceneGraph.InvalidateNode(child.Id);
+            }
+            if (child.Children != null)
+                foreach (var grandchild in child.Children)
+                    ApplyParentTransformToDescendant(grandchild, transformedParentBounds, scaleX, scaleY, cos, sin, rotationDelta, selected);
+        }
+
         private void CheckAutoReparentLayersOnDrop(List<LayerNode> movedLayers)
         {
             if (movedLayers == null || movedLayers.Count == 0 || Document == null) return;
             var page = Document.GetActivePage();
             if (page == null) return;
+            var positionsBefore = page.GetAllLayersFlat().ToDictionary(l => l, l => new Point(l.X, l.Y));
 
-            bool anyReparented = false;
-            var allFrames = page.GetAllLayersFlat().Where(l => l.Type == ElementType.Frame && !movedLayers.Contains(l)).ToList();
-
-            foreach (var layer in movedLayers)
+            var moving = GetTopLevelLayers(movedLayers);
+            LayerNode target = _autoLayoutDropTarget;
+            LayerNode source = _autoLayoutDropSource;
+            bool detach = _autoLayoutDetachPreview;
+            // Ordinary canvas moves and root-level Alt-drag duplicates keep their existing
+            // layer order. Reparent only when a frame was targeted or an auto-layout item
+            // explicitly crossed its sticky boundary.
+            if (target == null && source == null && !detach) return;
+            bool changed = false;
+            foreach (var layer in moving)
             {
-                Point center = new Point(layer.X + layer.Width / 2.0, layer.Y + layer.Height / 2.0);
-
-                LayerNode currentParent = !string.IsNullOrEmpty(layer.ParentId) ? page.FindLayerById(layer.ParentId) : null;
-                bool isInsideAutoLayout = currentParent != null && currentParent.AutoLayout != null && currentParent.AutoLayout.Mode != AutoLayoutMode.None;
-
-                if (isInsideAutoLayout)
-                {
-                    var pBounds = currentParent.GetBounds();
-                    // Figma sticky parenting: requires dragging > 80px long out of the autolayout frame to detach
-                    double longDragThreshold = 80.0;
-                    Rect stickyBounds = new Rect(
-                        pBounds.X - longDragThreshold,
-                        pBounds.Y - longDragThreshold,
-                        pBounds.Width + longDragThreshold * 2.0,
-                        pBounds.Height + longDragThreshold * 2.0
-                    );
-
-                    if (stickyBounds.Contains(center))
-                    {
-                        // Stays inside current auto layout frame!
-                        // Live reorder siblings based on drag position
-                        if (currentParent.Children != null && currentParent.Children.Count > 1)
-                        {
-                            if (currentParent.AutoLayout.Mode == AutoLayoutMode.Horizontal)
-                            {
-                                currentParent.Children = currentParent.Children.OrderBy(c => c.X + c.Width / 2.0).ToList();
-                            }
-                            else if (currentParent.AutoLayout.Mode == AutoLayoutMode.Vertical)
-                            {
-                                currentParent.Children = currentParent.Children.OrderBy(c => c.Y + c.Height / 2.0).ToList();
-                            }
-                        }
-                        AutoLayoutEngine.Reflow(currentParent);
-                        anyReparented = true;
-                        continue;
-                    }
-                }
-
-                LayerNode targetFrame = null;
-                for (int i = allFrames.Count - 1; i >= 0; i--)
-                {
-                    var frame = allFrames[i];
-                    if (Kerf.Model.Page.IsDescendant(layer, frame)) continue;
-                    var bounds = frame.GetBounds();
-                    if (bounds.Contains(center))
-                    {
-                        targetFrame = frame;
-                        break;
-                    }
-                }
-
-                if (targetFrame != null)
-                {
-                    if (layer.ParentId != targetFrame.Id)
-                    {
-                        var oldParent = !string.IsNullOrEmpty(layer.ParentId) ? page.FindLayerById(layer.ParentId) : null;
-                        page.RemoveLayerEverywhere(layer);
-                        layer.ParentId = targetFrame.Id;
-                        if (targetFrame.Children == null) targetFrame.Children = new List<LayerNode>();
-                        targetFrame.Children.Add(layer);
-
-                        if (targetFrame.AutoLayout != null && targetFrame.AutoLayout.Mode != AutoLayoutMode.None)
-                        {
-                            if (targetFrame.AutoLayout.Mode == AutoLayoutMode.Horizontal)
-                            {
-                                targetFrame.Children = targetFrame.Children.OrderBy(c => c.X + c.Width / 2.0).ToList();
-                            }
-                            else if (targetFrame.AutoLayout.Mode == AutoLayoutMode.Vertical)
-                            {
-                                targetFrame.Children = targetFrame.Children.OrderBy(c => c.Y + c.Height / 2.0).ToList();
-                            }
-                            AutoLayoutEngine.Reflow(targetFrame);
-                        }
-
-                        if (oldParent != null && oldParent.AutoLayout != null && oldParent.AutoLayout.Mode != AutoLayoutMode.None)
-                        {
-                            AutoLayoutEngine.Reflow(oldParent);
-                        }
-
-                        anyReparented = true;
-                    }
-                }
+                if (layer == null || (target != null && (target == layer || Kerf.Model.Page.IsDescendant(layer, target)))) continue;
+                LayerNode oldParent;
+                var oldContainer = page.FindContainer(layer, out oldParent);
+                int oldIndex = oldContainer != null ? oldContainer.IndexOf(layer) : -1;
+                string oldParentId = oldParent != null ? oldParent.Id : null;
+                string newParentId = detach || target == null ? null : target.Id;
+                bool newIgnoreAutoLayout = target != null && target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None
+                    ? false
+                    : layer.IgnoreAutoLayout;
+                List<LayerNode> newContainer = null;
+                if (string.IsNullOrEmpty(newParentId)) newContainer = page.Layers;
                 else
                 {
-                    if (!string.IsNullOrEmpty(layer.ParentId))
-                    {
-                        var oldParent = page.FindLayerById(layer.ParentId);
-                        page.RemoveLayerEverywhere(layer);
-                        layer.ParentId = null;
-                        page.Layers.Add(layer);
-
-                        if (oldParent != null && oldParent.AutoLayout != null && oldParent.AutoLayout.Mode != AutoLayoutMode.None)
-                        {
-                            AutoLayoutEngine.Reflow(oldParent);
-                        }
-
-                        anyReparented = true;
-                    }
+                    if (target.Children == null) target.Children = new List<LayerNode>();
+                    newContainer = target.Children;
                 }
+
+                int newIndex;
+                if (target != null && target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None)
+                    newIndex = Math.Max(0, Math.Min(_autoLayoutDropIndex, newContainer.Count));
+                else if (target != null)
+                    newIndex = newContainer.Count;
+                else
+                    newIndex = page.Layers.Count;
+
+                if (target != null && (target.AutoLayout == null || target.AutoLayout.Mode == AutoLayoutMode.None) && oldParentId == newParentId)
+                    continue;
+                if (oldParentId == newParentId && oldIndex == newIndex && layer.IgnoreAutoLayout == newIgnoreAutoLayout) continue;
+                Action refresh = () =>
+                {
+                    if (oldParent != null && oldParent.AutoLayout != null && oldParent.AutoLayout.Mode != AutoLayoutMode.None)
+                        AutoLayoutEngine.ReflowRecursive(oldParent);
+                    if (target != null && target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None)
+                        AutoLayoutEngine.ReflowRecursive(target);
+                    _sceneGraph.Synchronize(page);
+                    if (oldParent != null) InvalidateLayoutFrameVisuals(oldParent);
+                    if (target != null) InvalidateLayoutFrameVisuals(target);
+                    InvalidateLayoutFrameVisuals(layer);
+                    RefreshLayersList();
+                    RefreshCanvas();
+                };
+                History.Execute(new ReorderLayerCommand(page, layer, oldParentId, oldIndex, newParentId, newIndex, refresh, newIgnoreAutoLayout));
+                changed = true;
             }
 
-            if (anyReparented)
+            // Every auto-layout drop resolves to a slot, so child bounds always return to layout control.
+            if (!detach && target != null && target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None)
+            {
+                AutoLayoutEngine.ReflowRecursive(target);
+                InvalidateLayoutFrameVisuals(target);
+            }
+            if (changed)
             {
                 _sceneGraph.Synchronize(page);
+                foreach (var layer in moving) InvalidateLayoutFrameVisuals(layer);
                 RefreshLayersList();
             }
+            else if (target != null && target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None)
+            {
+                RefreshCanvas();
+            }
+            AnimateAutoLayoutReflow(positionsBefore, page.GetAllLayersFlat());
+        }
+
+        private List<LayerNode> CommitDuplicateDrop(Kerf.Model.Page page, List<LayerNode> duplicates)
+        {
+            var affectedLayouts = new HashSet<LayerNode>();
+            if (page == null || duplicates == null || duplicates.Count == 0) return affectedLayouts.ToList();
+
+            var moving = GetTopLevelLayers(duplicates);
+            var sourceParents = new List<LayerNode>();
+            foreach (var layer in moving)
+            {
+                LayerNode oldParent;
+                page.FindContainer(layer, out oldParent);
+                if (oldParent != null && oldParent.AutoLayout != null && oldParent.AutoLayout.Mode != AutoLayoutMode.None)
+                    sourceParents.Add(oldParent);
+            }
+
+            LayerNode target = _autoLayoutDropTarget;
+            bool shouldCommitDrop = target != null || _autoLayoutDetachPreview || _autoLayoutDropSource != null;
+            if (!shouldCommitDrop) return affectedLayouts.ToList();
+            if (target != null && moving.Any(layer => layer == target || Kerf.Model.Page.IsDescendant(layer, target)))
+                target = null;
+
+            // Remove the preview clones as a group before inserting them. The drop
+            // index was computed with all dragged clones excluded, so this keeps
+            // that index stable for multi-selection and nested-frame drops.
+            foreach (var layer in moving)
+                page.RemoveLayerEverywhere(layer);
+
+            List<LayerNode> targetList;
+            string parentId = null;
+            if (!_autoLayoutDetachPreview && target != null)
+            {
+                if (target.Children == null) target.Children = new List<LayerNode>();
+                targetList = target.Children;
+                parentId = target.Id;
+            }
+            else targetList = page.Layers;
+
+            int insertionIndex;
+            if (target != null && target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None)
+                insertionIndex = Math.Max(0, Math.Min(_autoLayoutDropIndex, targetList.Count));
+            else if (target != null)
+                insertionIndex = targetList.Count;
+            else
+                insertionIndex = targetList.Count;
+
+            foreach (var layer in moving)
+            {
+                layer.ParentId = parentId;
+                if (target != null && target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None)
+                    layer.IgnoreAutoLayout = false;
+                targetList.Insert(Math.Max(0, Math.Min(insertionIndex++, targetList.Count)), layer);
+            }
+
+            foreach (var parent in sourceParents)
+                if (parent != target) affectedLayouts.Add(parent);
+            if (target != null && target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None)
+                affectedLayouts.Add(target);
+
+            foreach (var frame in affectedLayouts)
+            {
+                AutoLayoutEngine.ReflowRecursive(frame);
+                InvalidateLayoutFrameVisuals(frame);
+            }
+            _sceneGraph.Synchronize(page);
+            foreach (var layer in moving) InvalidateLayoutFrameVisuals(layer);
+            RefreshLayersList();
+            RefreshCanvas();
+            return affectedLayouts.ToList();
+        }
+
+        private void AnimateAutoLayoutReflow(Dictionary<LayerNode, Point> positionsBefore, IEnumerable<LayerNode> currentLayers)
+        {
+            if (positionsBefore == null || currentLayers == null) return;
+            var positionsAfter = currentLayers
+                .Where(l => l != null && positionsBefore.ContainsKey(l))
+                .ToDictionary(l => l, l => new Point(l.X, l.Y));
+            AnimateAutoLayoutPositions(positionsBefore, positionsAfter, 190.0);
+        }
+
+        private void AnimateAutoLayoutPositions(Dictionary<LayerNode, Point> startPositions, Dictionary<LayerNode, Point> endPositions, double durationMs)
+        {
+            if (startPositions == null || endPositions == null) return;
+            var changedLayers = endPositions
+                .Where(kv => startPositions.ContainsKey(kv.Key) &&
+                    (Math.Abs(kv.Value.X - startPositions[kv.Key].X) > 0.25 || Math.Abs(kv.Value.Y - startPositions[kv.Key].Y) > 0.25))
+                .ToList();
+            if (changedLayers.Count == 0) return;
+
+            if (_autoLayoutReflowTimer != null) _autoLayoutReflowTimer.Stop();
+            _autoLayoutReflowStart = new Dictionary<LayerNode, Point>();
+            _autoLayoutReflowEnd = new Dictionary<LayerNode, Point>();
+            var pathStartGeometries = new Dictionary<LayerNode, VectorGeometry>();
+            foreach (var item in changedLayers)
+            {
+                _autoLayoutReflowStart[item.Key] = startPositions[item.Key];
+                _autoLayoutReflowEnd[item.Key] = item.Value;
+                if (item.Key.Type == ElementType.Path && item.Key.Geometry != null)
+                {
+                    var geometry = item.Key.Geometry.Clone();
+                    BezierVectorEngine.OffsetGeometry(
+                        geometry,
+                        startPositions[item.Key].X - item.Key.X,
+                        startPositions[item.Key].Y - item.Key.Y);
+                    pathStartGeometries[item.Key] = geometry;
+                }
+                item.Key.X = startPositions[item.Key].X;
+                item.Key.Y = startPositions[item.Key].Y;
+                _sceneGraph.InvalidateNode(item.Key.Id);
+            }
+
+            _autoLayoutReflowStartUtc = DateTime.UtcNow;
+            _autoLayoutReflowTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+            _autoLayoutReflowTimer.Tick += (s, e) =>
+            {
+                double progress = Math.Min(1.0, (DateTime.UtcNow - _autoLayoutReflowStartUtc).TotalMilliseconds / Math.Max(60.0, durationMs));
+                double eased = 1.0 - Math.Pow(1.0 - progress, 3.0);
+                foreach (var pair in _autoLayoutReflowEnd)
+                {
+                    var start = _autoLayoutReflowStart[pair.Key];
+                    pair.Key.X = start.X + (pair.Value.X - start.X) * eased;
+                    pair.Key.Y = start.Y + (pair.Value.Y - start.Y) * eased;
+                    VectorGeometry startGeometry;
+                    if (pathStartGeometries.TryGetValue(pair.Key, out startGeometry))
+                    {
+                        pair.Key.Geometry = startGeometry.Clone();
+                        BezierVectorEngine.OffsetGeometry(
+                            pair.Key.Geometry,
+                            (pair.Value.X - start.X) * eased,
+                            (pair.Value.Y - start.Y) * eased);
+                    }
+                    _sceneGraph.InvalidateNode(pair.Key.Id);
+                }
+                RefreshCanvas();
+                if (progress >= 1.0)
+                {
+                    _autoLayoutReflowTimer.Stop();
+                    _autoLayoutReflowStart.Clear();
+                    _autoLayoutReflowEnd.Clear();
+                }
+            };
+            _autoLayoutReflowTimer.Start();
+        }
+
+        private Dictionary<LayerNode, Point> ComputeAutoLayoutPreviewPositions(LayerNode frame, IEnumerable<LayerNode> movingLayers, int insertionIndex)
+        {
+            var result = new Dictionary<LayerNode, Point>();
+            if (frame == null || frame.AutoLayout == null || frame.AutoLayout.Mode == AutoLayoutMode.None) return result;
+
+            var originalList = frame.Children ?? new List<LayerNode>();
+            var moving = GetTopLevelLayers(movingLayers);
+            var movingSet = new HashSet<LayerNode>(moving);
+            var working = originalList.Where(n => n != null && !movingSet.Contains(n)).ToList();
+            if (insertionIndex >= 0 && moving.Count > 0)
+            {
+                int listIndex = Math.Max(0, Math.Min(insertionIndex, working.Count));
+                working.InsertRange(listIndex, moving);
+            }
+
+            var previewFrame = new LayerNode
+            {
+                Type = frame.Type,
+                X = frame.X,
+                Y = frame.Y,
+                Width = frame.Width,
+                Height = frame.Height,
+                MinWidth = frame.MinWidth,
+                MaxWidth = frame.MaxWidth,
+                MinHeight = frame.MinHeight,
+                MaxHeight = frame.MaxHeight,
+                AutoLayout = frame.AutoLayout.Clone(),
+                Children = new List<LayerNode>()
+            };
+            var previewByOriginal = new Dictionary<LayerNode, LayerNode>();
+            foreach (var node in working)
+            {
+                var previewNode = node.Clone();
+                previewNode.ParentId = previewFrame.Id;
+                if (movingSet.Contains(node)) previewNode.IgnoreAutoLayout = false;
+                MapAutoLayoutPreviewTree(node, previewNode, previewByOriginal);
+                previewFrame.Children.Add(previewNode);
+            }
+
+            AutoLayoutEngine.ReflowRecursive(previewFrame);
+            foreach (var node in working)
+            {
+                if (node != null && !movingSet.Contains(node) && node.IsVisible && !node.IgnoreAutoLayout)
+                    CaptureAutoLayoutPreviewPositions(node, previewByOriginal, result);
+            }
+            return result;
+        }
+
+        private static void MapAutoLayoutPreviewTree(LayerNode original, LayerNode preview, Dictionary<LayerNode, LayerNode> map)
+        {
+            if (original == null || preview == null) return;
+            map[original] = preview;
+            int count = Math.Min(original.Children != null ? original.Children.Count : 0, preview.Children != null ? preview.Children.Count : 0);
+            for (int i = 0; i < count; i++)
+                MapAutoLayoutPreviewTree(original.Children[i], preview.Children[i], map);
+        }
+
+        private static void CaptureAutoLayoutPreviewPositions(LayerNode original, Dictionary<LayerNode, LayerNode> previewMap, Dictionary<LayerNode, Point> positions)
+        {
+            if (original == null) return;
+            LayerNode preview;
+            if (previewMap.TryGetValue(original, out preview) && preview != null)
+                positions[original] = new Point(preview.X, preview.Y);
+            if (original.Children == null) return;
+            foreach (var child in original.Children)
+                CaptureAutoLayoutPreviewPositions(child, previewMap, positions);
+        }
+
+        private static void CapturePreviewSubtreeState(
+            LayerNode node,
+            Dictionary<LayerNode, Rect> bounds,
+            Dictionary<LayerNode, bool> ignoreStates,
+            Dictionary<LayerNode, VectorGeometry> geometries)
+        {
+            if (node == null || bounds.ContainsKey(node)) return;
+            bounds[node] = new Rect(node.X, node.Y, node.Width, node.Height);
+            ignoreStates[node] = node.IgnoreAutoLayout;
+            if (node.Type == ElementType.Path && node.Geometry != null)
+                geometries[node] = node.Geometry.Clone();
+            if (node.Children == null) return;
+            foreach (var child in node.Children)
+                CapturePreviewSubtreeState(child, bounds, ignoreStates, geometries);
+        }
+
+        private static void CapturePreviewSubtreePositions(LayerNode node, Dictionary<LayerNode, Point> positions)
+        {
+            if (node == null) return;
+            positions[node] = new Point(node.X, node.Y);
+            if (node.Children == null) return;
+            foreach (var child in node.Children)
+                CapturePreviewSubtreePositions(child, positions);
+        }
+
+        private void AnimateAutoLayoutOrderPreview(LayerNode sourceFrame, LayerNode targetFrame, List<LayerNode> moving, int insertionIndex)
+        {
+            LayerNode oldFrame = _autoLayoutLivePreviewFrame ?? sourceFrame;
+            List<LayerNode> oldMoving = _autoLayoutLivePreviewFrame != null
+                ? _autoLayoutLivePreviewMovingLayers
+                : moving;
+            bool targetIsAutoLayout = targetFrame != null && targetFrame.AutoLayout != null && targetFrame.AutoLayout.Mode != AutoLayoutMode.None;
+
+            var endPositions = new Dictionary<LayerNode, Point>();
+            if (oldFrame != null && oldFrame != targetFrame)
+            {
+                foreach (var item in ComputeAutoLayoutPreviewPositions(oldFrame, oldMoving, -1))
+                    endPositions[item.Key] = item.Value;
+            }
+            if (targetIsAutoLayout)
+            {
+                foreach (var item in ComputeAutoLayoutPreviewPositions(targetFrame, moving, insertionIndex))
+                    endPositions[item.Key] = item.Value;
+            }
+
+            var startPositions = endPositions.Keys.ToDictionary(node => node, node => new Point(node.X, node.Y));
+            AnimateAutoLayoutPositions(startPositions, endPositions, 155.0);
+            _autoLayoutLivePreviewFrame = targetIsAutoLayout ? targetFrame : null;
+            _autoLayoutLivePreviewMovingLayers = targetIsAutoLayout ? moving.ToList() : new List<LayerNode>();
+        }
+
+        private void RestoreAutoLayoutOrderPreview()
+        {
+            var frame = _autoLayoutLivePreviewFrame;
+            if (frame != null && frame.AutoLayout != null && frame.AutoLayout.Mode != AutoLayoutMode.None)
+            {
+                var children = frame.Children ?? new List<LayerNode>();
+                var starts = new Dictionary<LayerNode, Point>();
+                var layerBounds = new Dictionary<LayerNode, Rect>();
+                var ignoreStates = new Dictionary<LayerNode, bool>();
+                var geometries = new Dictionary<LayerNode, VectorGeometry>();
+                foreach (var child in children.Where(node => node != null))
+                {
+                    CapturePreviewSubtreeState(child, layerBounds, ignoreStates, geometries);
+                    if (child.IsVisible && !child.IgnoreAutoLayout)
+                        CapturePreviewSubtreePositions(child, starts);
+                }
+                var frameBounds = new Rect(frame.X, frame.Y, frame.Width, frame.Height);
+                AutoLayoutEngine.ReflowRecursive(frame);
+                var ends = new Dictionary<LayerNode, Point>();
+                foreach (var child in frame.Children ?? new List<LayerNode>())
+                {
+                    if (child != null && child.IsVisible && !child.IgnoreAutoLayout)
+                        CapturePreviewSubtreePositions(child, ends);
+                }
+                frame.X = frameBounds.X;
+                frame.Y = frameBounds.Y;
+                frame.Width = frameBounds.Width;
+                frame.Height = frameBounds.Height;
+                foreach (var item in layerBounds)
+                {
+                    item.Key.X = item.Value.X;
+                    item.Key.Y = item.Value.Y;
+                    item.Key.Width = item.Value.Width;
+                    item.Key.Height = item.Value.Height;
+                    item.Key.IgnoreAutoLayout = ignoreStates[item.Key];
+                    VectorGeometry geometry;
+                    if (geometries.TryGetValue(item.Key, out geometry))
+                        item.Key.Geometry = geometry != null ? geometry.Clone() : null;
+                }
+                AnimateAutoLayoutPositions(starts, ends, 155.0);
+            }
+            _autoLayoutLivePreviewFrame = null;
+            _autoLayoutLivePreviewMovingLayers.Clear();
+        }
+
+        private static List<LayerNode> GetTopLevelLayers(IEnumerable<LayerNode> layers)
+        {
+            var result = (layers ?? Enumerable.Empty<LayerNode>()).Where(l => l != null).Distinct().ToList();
+            return result.Where(l => !result.Any(other => other != l && Kerf.Model.Page.IsDescendant(other, l))).ToList();
+        }
+
+        private void UpdateAutoLayoutDropPreview(Point canvasPoint, IEnumerable<LayerNode> movingLayers)
+        {
+            if (Document == null) return;
+            var page = Document.GetActivePage();
+            var moving = GetTopLevelLayers(movingLayers);
+            if (page == null || moving.Count == 0) return;
+            _autoLayoutDraggedLayers = moving;
+
+            var bounds = TransformEngine.UnionBounds(moving);
+            LayerNode source = null;
+            if (moving.Count == 1 && !string.IsNullOrEmpty(moving[0].ParentId))
+            {
+                var parent = page.FindLayerById(moving[0].ParentId);
+                if (parent != null && parent.AutoLayout != null && parent.AutoLayout.Mode != AutoLayoutMode.None)
+                    source = parent;
+            }
+
+            LayerNode target = null;
+            bool detach = false;
+            var frames = page.GetAllLayersFlat().Where(f => f.Type == ElementType.Frame &&
+                !moving.Any(m => m == f || Kerf.Model.Page.IsDescendant(m, f))).ToList();
+            for (int i = frames.Count - 1; i >= 0; i--)
+            {
+                if (frames[i].GetBounds().Contains(canvasPoint))
+                {
+                    target = frames[i];
+                    break;
+                }
+            }
+            if (target == null && source != null)
+            {
+                Rect sourceBounds = source.GetBounds();
+                double threshold = 24.0 / Math.Max(0.25, _zoomScale);
+                Rect sticky = new Rect(sourceBounds.X - threshold, sourceBounds.Y - threshold,
+                    sourceBounds.Width + threshold * 2.0, sourceBounds.Height + threshold * 2.0);
+                if (sticky.Contains(canvasPoint)) target = source;
+            }
+            detach = source != null && target == null;
+
+            int index = target != null
+                ? (target.AutoLayout != null && target.AutoLayout.Mode != AutoLayoutMode.None
+                    ? FindAutoLayoutInsertionIndex(target, moving, canvasPoint)
+                    : (target.Children != null ? target.Children.Count : 0))
+                : -1;
+            bool changedTarget = target != _autoLayoutDropTarget || index != _autoLayoutDropIndex || detach != _autoLayoutDetachPreview;
+            _autoLayoutDropSource = source;
+            _autoLayoutDropTarget = target;
+            _autoLayoutDropIndex = index;
+            _autoLayoutDetachPreview = detach;
+            _autoLayoutDropPoint = canvasPoint;
+            _autoLayoutDropPreviewBounds = target != null
+                ? AutoLayoutEngine.PreviewInsertionBounds(target, moving, index, Math.Max(1.0, bounds.Width), Math.Max(1.0, bounds.Height))
+                : Rect.Empty;
+
+            if (changedTarget)
+            {
+                AnimateAutoLayoutOrderPreview(source, target, moving, index);
+                _autoLayoutDropPreviewVisible = false;
+                _autoLayoutHoverStartUtc = DateTime.UtcNow;
+                if (_autoLayoutPreviewTimer == null)
+                {
+                    _autoLayoutPreviewTimer = new DispatcherTimer();
+                    _autoLayoutPreviewTimer.Interval = TimeSpan.FromMilliseconds(720);
+                    _autoLayoutPreviewTimer.Tick += (s, e) =>
+                    {
+                        _autoLayoutPreviewTimer.Stop();
+                        if (_autoLayoutDropTarget != null && (_isTransforming || _isDrawingNew))
+                        {
+                            _autoLayoutDropPreviewVisible = true;
+                            RefreshCanvas();
+                        }
+                    };
+                }
+                _autoLayoutPreviewTimer.Stop();
+                if (target != null) _autoLayoutPreviewTimer.Start();
+            }
+        }
+
+        private int FindAutoLayoutInsertionIndex(LayerNode frame, List<LayerNode> moving, Point center)
+        {
+            if (frame == null || frame.Children == null) return 0;
+            var movingIds = new HashSet<string>(moving.Where(l => l != null).Select(l => l.Id));
+            var allSiblings = frame.Children
+                .Where(child => child != null && !movingIds.Contains(child.Id))
+                .ToList();
+            if (frame.AutoLayout == null || frame.AutoLayout.Mode == AutoLayoutMode.None) return allSiblings.Count;
+            var flowSiblings = allSiblings.Where(child => child.IsVisible && !child.IgnoreAutoLayout).ToList();
+            if (flowSiblings.Count == 0) return allSiblings.Count;
+
+            int flowInsertionIndex;
+            if (frame.AutoLayout.Mode == AutoLayoutMode.Horizontal)
+            {
+                flowInsertionIndex = flowSiblings.Count(child => center.X >= child.X + child.Width / 2.0);
+            }
+            else if (frame.AutoLayout.Mode == AutoLayoutMode.Vertical)
+            {
+                flowInsertionIndex = flowSiblings.Count(child => center.Y >= child.Y + child.Height / 2.0);
+            }
+            else
+            {
+                int nearestIndex = 0;
+                double nearestDistance = double.MaxValue;
+                for (int i = 0; i < flowSiblings.Count; i++)
+                {
+                    var child = flowSiblings[i];
+                    double dx = center.X - (child.X + child.Width / 2.0);
+                    double dy = center.Y - (child.Y + child.Height / 2.0);
+                    double distance = dx * dx + dy * dy;
+                    if (distance < nearestDistance)
+                    {
+                        nearestDistance = distance;
+                        nearestIndex = i;
+                    }
+                }
+                var nearest = flowSiblings[nearestIndex];
+                bool sameRow = Math.Abs(center.Y - (nearest.Y + nearest.Height / 2.0)) < Math.Max(3.0, nearest.Height * 0.6);
+                bool after = sameRow
+                ? center.X >= nearest.X + nearest.Width / 2.0
+                : center.Y >= nearest.Y + nearest.Height / 2.0;
+                flowInsertionIndex = nearestIndex + (after ? 1 : 0);
+            }
+
+            flowInsertionIndex = Math.Max(0, Math.Min(flowSiblings.Count, flowInsertionIndex));
+            if (flowInsertionIndex < flowSiblings.Count)
+                return allSiblings.IndexOf(flowSiblings[flowInsertionIndex]);
+            return allSiblings.IndexOf(flowSiblings[flowSiblings.Count - 1]) + 1;
+        }
+
+        private void ClearAutoLayoutDropPreview(bool restoreLivePreview = true)
+        {
+            if (_autoLayoutPreviewTimer != null) _autoLayoutPreviewTimer.Stop();
+            if (restoreLivePreview) RestoreAutoLayoutOrderPreview();
+            else
+            {
+                _autoLayoutLivePreviewFrame = null;
+                _autoLayoutLivePreviewMovingLayers.Clear();
+            }
+            _autoLayoutDropTarget = null;
+            _autoLayoutDropSource = null;
+            _autoLayoutDropIndex = -1;
+            _autoLayoutDropPreviewBounds = Rect.Empty;
+            _autoLayoutDropPreviewVisible = false;
+            _autoLayoutDetachPreview = false;
+            _autoLayoutDraggedLayers.Clear();
+        }
+
+        private LayerNode ResolveAutoLayoutSelectionTarget(LayerNode hit)
+        {
+            if (hit == null) return null;
+            bool control = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+            if (control) return hit;
+            if (hit.Type == ElementType.Frame && hit.AutoLayout != null && hit.AutoLayout.Mode != AutoLayoutMode.None)
+                return hit;
+            var page = Document != null ? Document.GetActivePage() : null;
+            string parentId = hit.ParentId;
+            while (page != null && !string.IsNullOrEmpty(parentId))
+            {
+                var parent = page.FindLayerById(parentId);
+                if (parent == null) break;
+                if (parent.Type == ElementType.Frame && parent.AutoLayout != null && parent.AutoLayout.Mode != AutoLayoutMode.None)
+                    return parent;
+                parentId = parent.ParentId;
+            }
+            return hit;
+        }
+
+        private LayerNode ResolveDeepSelectionTarget(LayerNode hit, int clickCount)
+        {
+            if (hit == null || clickCount < 2) return hit;
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page == null) return hit;
+
+            var path = new List<LayerNode>();
+            LayerNode current = hit;
+            while (current != null)
+            {
+                path.Add(current);
+                if (string.IsNullOrEmpty(current.ParentId)) break;
+                current = page.FindLayerById(current.ParentId);
+            }
+            path.Reverse();
+
+            int rootContainerIndex = -1;
+            for (int i = 0; i < path.Count; i++)
+            {
+                if (path[i].Type == ElementType.Frame || path[i].Type == ElementType.Group)
+                {
+                    rootContainerIndex = i;
+                }
+            }
+            // The first click inside an auto layout selects its nearest layout frame. Continue
+            // into that frame on the next click, then walk one level deeper with each click.
+            int nearestAutoLayoutIndex = -1;
+            for (int i = path.Count - 1; i >= 0; i--)
+            {
+                var candidate = path[i];
+                if (candidate.Type == ElementType.Frame && candidate.AutoLayout != null && candidate.AutoLayout.Mode != AutoLayoutMode.None)
+                {
+                    nearestAutoLayoutIndex = i;
+                    break;
+                }
+            }
+            if (nearestAutoLayoutIndex >= 0) rootContainerIndex = nearestAutoLayoutIndex;
+            if (rootContainerIndex < 0) return hit;
+
+            int targetIndex = Math.Min(path.Count - 1, rootContainerIndex + Math.Max(1, clickCount - 1));
+            return path[targetIndex] ?? hit;
+        }
+
+        private bool HasAutoLayoutAncestor(LayerNode node)
+        {
+            if (node == null || Document == null) return false;
+            var page = Document.GetActivePage();
+            string parentId = node.ParentId;
+            while (page != null && !string.IsNullOrEmpty(parentId))
+            {
+                var parent = page.FindLayerById(parentId);
+                if (parent == null) break;
+                if (parent.Type == ElementType.Frame && parent.AutoLayout != null && parent.AutoLayout.Mode != AutoLayoutMode.None)
+                    return true;
+                parentId = parent.ParentId;
+            }
+            return false;
+        }
+
+        private static void SortAutoLayoutChildrenByCanvasOrder(LayerNode frame)
+        {
+            if (frame == null || frame.Children == null || frame.Children.Count < 2 || frame.AutoLayout == null) return;
+            if (frame.AutoLayout.Mode == AutoLayoutMode.Horizontal)
+                frame.Children = frame.Children.OrderBy(c => c.X + c.Width / 2.0).ToList();
+            else if (frame.AutoLayout.Mode == AutoLayoutMode.Vertical)
+                frame.Children = frame.Children.OrderBy(c => c.Y + c.Height / 2.0).ToList();
+            else
+                frame.Children = frame.Children.OrderBy(c => c.Y + c.Height / 2.0).ThenBy(c => c.X + c.Width / 2.0).ToList();
         }
 
         public Point ScreenToCanvas(Point pt)
@@ -4986,17 +6457,32 @@ namespace Kerf.UI
 
             if (button == MouseButton.Left)
             {
+                if (_currentStudioMode == StudioMode.Design && _activeTool == ToolType.Select)
+                {
+                    var guide = FindGuideNear(canvasPt);
+                    if (guide != null)
+                    {
+                        _activeGuideDrag = guide;
+                        if (_canvasHost != null) _canvasHost.CaptureMouse();
+                        RefreshCanvas();
+                        return;
+                    }
+                }
+
                 // In Animate mode, route click directly into State Machine
                 if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
                 {
                     var hit = _sceneGraph.HitTest(canvasPt);
+                    _stateMachinePointerDownNodeId = 0;
                     if (hit != null)
                     {
-                        uint hitId = (uint)Math.Abs(hit.Id.GetHashCode());
+                        uint hitId = PropertyBinder.GetNumericNodeId(hit.Id);
+                        _stateMachinePointerDownNodeId = hitId;
                         _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Down);
+                        SetStateMachineBool("isHovered", true);
                     }
-                    _timelineController.ActiveStateMachine.SetBool(1, true); // isPressed
-                    TriggerStateMachineStep();
+                    SetStateMachineBool("isPressed", hit != null);
+                    TriggerStateMachineStep(continuePlayback: true);
                 }
 
                 // 1. Vector Edit Mode interaction (if currently vector editing a path)
@@ -5216,11 +6702,12 @@ namespace Kerf.UI
                 // 7. Select tool hit test
                 if (_activeTool == ToolType.Select)
                 {
-                    // Double-click on Path layer enters Vector Edit Mode, on Text enters in-place text edit!
-                    if (clickCount >= 2)
+                    // Double-click on a path/text keeps the familiar direct-edit gesture. Further clicks
+                    // continue down the layer hierarchy so nested objects can be selected individually.
+                    if (clickCount == 2)
                     {
                         var doubleHit = _sceneGraph.HitTest(canvasPt);
-                        if (doubleHit != null)
+                        if (doubleHit != null && !HasAutoLayoutAncestor(doubleHit))
                         {
                             if (doubleHit.Type == ElementType.Path)
                             {
@@ -5238,19 +6725,27 @@ namespace Kerf.UI
                     var hit = _sceneGraph.HitTest(canvasPt);
                     if (hit != null)
                     {
-                        bool isMulti = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift)
-                                    || Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
-                        if (isMulti)
+                        bool control = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+                        bool shift = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
+                        var selectionHit = control ? hit : (clickCount >= 2
+                            ? ResolveDeepSelectionTarget(hit, clickCount)
+                            : ResolveAutoLayoutSelectionTarget(hit));
+                        if (control)
                         {
-                            if (_selectedLayers.Contains(hit)) _selectedLayers.Remove(hit);
-                            else _selectedLayers.Add(hit);
+                            _selectedLayers.Clear();
+                            _selectedLayers.Add(selectionHit);
+                        }
+                        else if (shift)
+                        {
+                            if (_selectedLayers.Contains(selectionHit)) _selectedLayers.Remove(selectionHit);
+                            else _selectedLayers.Add(selectionHit);
                         }
                         else
                         {
-                            if (!_selectedLayers.Contains(hit))
+                            if (!_selectedLayers.Contains(selectionHit))
                             {
                                 _selectedLayers.Clear();
-                                _selectedLayers.Add(hit);
+                                _selectedLayers.Add(selectionHit);
                             }
                         }
 
@@ -5267,6 +6762,7 @@ namespace Kerf.UI
                         {
                             CollectDragInitialPositions(l, _dragInitialPositions);
                         }
+                        ClearAutoLayoutDropPreview();
                         _hasAltDuplicated = false;
                         _altClonedLayers.Clear();
                         OnSelectionChanged();
@@ -5298,10 +6794,18 @@ namespace Kerf.UI
         {
             Point canvasPt = ScreenToCanvas(screenPt);
 
+            if (_activeGuideDrag != null)
+            {
+                _activeGuideDrag.Position = _activeGuideDrag.IsVertical ? canvasPt.X : canvasPt.Y;
+                RefreshCanvas();
+                _lastMousePos = screenPt;
+                return;
+            }
+
             if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
             {
                 var hit = _sceneGraph.HitTest(canvasPt);
-                uint hitId = (hit != null) ? (uint)Math.Abs(hit.Id.GetHashCode()) : 0;
+                uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0;
                 if (hitId != _lastHoverNodeId)
                 {
                     if (_lastHoverNodeId != 0)
@@ -5313,8 +6817,9 @@ namespace Kerf.UI
                         _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Enter);
                     }
                     _lastHoverNodeId = hitId;
-                    _timelineController.ActiveStateMachine.SetBool(0, hitId != 0); // isHovered
-                    TriggerStateMachineStep();
+                    SetStateMachineBool("isHovered", hitId != 0);
+                    SetStateMachineBool("Hovering", hitId != 0);
+                    TriggerStateMachineStep(continuePlayback: true);
                 }
             }
 
@@ -5490,6 +6995,8 @@ namespace Kerf.UI
                     _drawingNode.Height = canvasPt.Y - _dragStartPoint.Y;
                 }
 
+                UpdateAutoLayoutDropPreview(canvasPt, new List<LayerNode> { _drawingNode });
+
                 _sceneGraph.InvalidateNode(_drawingNode.Id);
                 RefreshCanvas();
                 return;
@@ -5539,6 +7046,7 @@ namespace Kerf.UI
                     {
                         var n = _selectedLayers[0];
                         Rect oldBounds = new Rect(n.X, n.Y, n.Width, n.Height);
+                        bool reflowOwnAutoLayout = false;
                         n.X = res.Bounds.X;
                         n.Y = res.Bounds.Y;
                         n.Width = res.Bounds.Width;
@@ -5558,20 +7066,45 @@ namespace Kerf.UI
                             if (widthResized)
                             {
                                 n.AutoLayout.SizingH = SizingMode.Fixed;
+                                reflowOwnAutoLayout = true;
                             }
                             if (heightResized)
                             {
                                 n.AutoLayout.SizingV = SizingMode.Fixed;
+                                reflowOwnAutoLayout = true;
                             }
+                        }
 
-                            AutoLayoutEngine.Reflow(n);
+                        var activePage = Document != null ? Document.GetActivePage() : null;
+                        var layoutParent = activePage != null && !string.IsNullOrEmpty(n.ParentId) ? activePage.FindLayerById(n.ParentId) : null;
+                        if (layoutParent != null && layoutParent.AutoLayout != null && layoutParent.AutoLayout.Mode != AutoLayoutMode.None)
+                        {
+                            bool widthResized = (_activeHandle == HandleType.MiddleLeft || _activeHandle == HandleType.MiddleRight ||
+                                                 _activeHandle == HandleType.TopLeft || _activeHandle == HandleType.TopRight ||
+                                                 _activeHandle == HandleType.BottomLeft || _activeHandle == HandleType.BottomRight);
+                            bool heightResized = (_activeHandle == HandleType.TopCenter || _activeHandle == HandleType.BottomCenter ||
+                                                  _activeHandle == HandleType.TopLeft || _activeHandle == HandleType.TopRight ||
+                                                  _activeHandle == HandleType.BottomLeft || _activeHandle == HandleType.BottomRight);
+                            if (widthResized)
+                            {
+                                n.LayoutSizingH = SizingMode.Fixed;
+                                n.AutoLayoutBaseWidth = n.Width;
+                            }
+                            if (heightResized)
+                            {
+                                n.LayoutSizingV = SizingMode.Fixed;
+                                n.AutoLayoutBaseHeight = n.Height;
+                            }
                         }
 
                         if (n.Type == ElementType.Path && n.Geometry != null)
                         {
                             BezierVectorEngine.ScaleGeometry(n.Geometry, oldBounds, res.Bounds);
                         }
-                        _sceneGraph.InvalidateNode(n.Id);
+                        ApplyParentTransformToDescendants(n, res.Bounds, res.Rotation);
+                        if (reflowOwnAutoLayout) AutoLayoutEngine.ReflowRecursive(n);
+                        ReflowAutoLayoutAncestors(n);
+                        InvalidateLayoutFrameVisuals(n);
                     }
                     else
                     {
@@ -5579,17 +7112,28 @@ namespace Kerf.UI
                         double scaleY = res.Bounds.Height / Math.Max(1, _transformStartBounds.Height);
                         foreach (var n in _selectedLayers)
                         {
-                            Rect oldBounds = new Rect(n.X, n.Y, n.Width, n.Height);
-                            n.X = res.Bounds.X + (n.X - _transformStartBounds.X) * scaleX;
-                            n.Y = res.Bounds.Y + (n.Y - _transformStartBounds.Y) * scaleY;
-                            n.Width *= scaleX;
-                            n.Height *= scaleY;
+                            Rect oldBounds = _dragInitialBounds.ContainsKey(n) ? _dragInitialBounds[n] : new Rect(n.X, n.Y, n.Width, n.Height);
+                            Rect newBounds = new Rect(
+                                res.Bounds.X + (oldBounds.X - _transformStartBounds.X) * scaleX,
+                                res.Bounds.Y + (oldBounds.Y - _transformStartBounds.Y) * scaleY,
+                                oldBounds.Width * scaleX,
+                                oldBounds.Height * scaleY);
+                            n.X = newBounds.X;
+                            n.Y = newBounds.Y;
+                            n.Width = newBounds.Width;
+                            n.Height = newBounds.Height;
                             if (n.Type == ElementType.Path && n.Geometry != null)
                             {
-                                Rect newBounds = new Rect(n.X, n.Y, n.Width, n.Height);
+                                VectorGeometry initialGeometry;
+                                if (_dragInitialGeometries.TryGetValue(n, out initialGeometry)) n.Geometry = initialGeometry.Clone();
                                 BezierVectorEngine.ScaleGeometry(n.Geometry, oldBounds, newBounds);
                             }
-                            _sceneGraph.InvalidateNode(n.Id);
+                            double initialRotation;
+                            if (_dragInitialRotations.TryGetValue(n, out initialRotation)) n.Rotation = initialRotation;
+                            ApplyParentTransformToDescendants(n, res.Bounds, n.Rotation);
+                            if (n.AutoLayout != null && n.AutoLayout.Mode != AutoLayoutMode.None) AutoLayoutEngine.ReflowRecursive(n);
+                            ReflowAutoLayoutAncestors(n);
+                            InvalidateLayoutFrameVisuals(n);
                         }
                     }
                 }
@@ -5705,6 +7249,41 @@ namespace Kerf.UI
                                 }
                             }
 
+                            if (page.ShowGuides && page.Guides != null)
+                            {
+                                foreach (var guide in page.Guides)
+                                {
+                                    if (guide.IsVertical)
+                                    {
+                                        foreach (double edge in new[] { proposedLeft, proposedCenterX, proposedRight })
+                                        {
+                                            double diff = guide.Position - edge;
+                                            if (Math.Abs(diff) <= snapThreshold && Math.Abs(diff) < Math.Abs(bestSnapDeltaX))
+                                            {
+                                                bestSnapDeltaX = diff;
+                                                bestSnapX = guide.Position;
+                                                snapSpanMinY = proposedTop;
+                                                snapSpanMaxY = proposedBottom;
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        foreach (double edge in new[] { proposedTop, proposedCenterY, proposedBottom })
+                                        {
+                                            double diff = guide.Position - edge;
+                                            if (Math.Abs(diff) <= snapThreshold && Math.Abs(diff) < Math.Abs(bestSnapDeltaY))
+                                            {
+                                                bestSnapDeltaY = diff;
+                                                bestSnapY = guide.Position;
+                                                snapSpanMinX = proposedLeft;
+                                                snapSpanMaxX = proposedRight;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             if (Math.Abs(bestSnapDeltaX) <= snapThreshold)
                             {
                                 dx += bestSnapDeltaX;
@@ -5744,16 +7323,10 @@ namespace Kerf.UI
                         {
                             var clone = orig.Clone();
                             clone.Name = orig.Name;
-                            clone.X = _dragInitialPositions[orig].X + dx;
-                            clone.Y = _dragInitialPositions[orig].Y + dy;
-                            if (clone.Type == ElementType.Path && clone.Geometry != null)
-                            {
-                                clone.Geometry = orig.Geometry.Clone();
-                                BezierVectorEngine.OffsetGeometry(clone.Geometry, dx, dy);
-                            }
-
                             LayerNode parent;
                             var container = page.FindContainer(orig, out parent);
+                            PreserveDuplicateSizeInAutoLayout(clone, parent);
+                            OffsetLayerSubtree(clone, dx, dy);
                             if (container != null)
                             {
                                 int idx = container.IndexOf(orig);
@@ -5781,6 +7354,7 @@ namespace Kerf.UI
                     }
 
                     // Apply translation offset to active selection AND all nested frame children synchronously
+                    var movingSelection = new HashSet<LayerNode>(_dragInitialPositions.Keys);
                     foreach (var kvp in _dragInitialPositions)
                     {
                         var n = kvp.Key;
@@ -5794,8 +7368,11 @@ namespace Kerf.UI
                         {
                             BezierVectorEngine.OffsetGeometry(n.Geometry, shiftX, shiftY);
                         }
+                        OffsetLayerDescendantsExceptSelected(n, shiftX, shiftY, movingSelection);
                         _sceneGraph.InvalidateNode(n.Id);
                     }
+
+                    UpdateAutoLayoutDropPreview(canvasPt, _selectedLayers);
                 }
 
                 RefreshCanvas();
@@ -5869,18 +7446,35 @@ namespace Kerf.UI
                 return;
             }
 
+            if (button == MouseButton.Left && _activeGuideDrag != null)
+            {
+                var page = Document != null ? Document.GetActivePage() : null;
+                if (_canvasHost != null && (screenPt.X < 0 || screenPt.Y < 0 || screenPt.X > _canvasHost.ActualWidth || screenPt.Y > _canvasHost.ActualHeight))
+                {
+                    if (page != null && page.Guides != null) page.Guides.Remove(_activeGuideDrag);
+                }
+                _activeGuideDrag = null;
+                if (_canvasHost != null && _canvasHost.IsMouseCaptured) _canvasHost.ReleaseMouseCapture();
+                History.MarkDirty();
+                RefreshCanvas();
+                RefreshPropertyInspector();
+                return;
+            }
+
             if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
             {
                 Point canvasPt = ScreenToCanvas(screenPt);
                 var hit = _sceneGraph.HitTest(canvasPt);
                 if (hit != null)
                 {
-                    uint hitId = (uint)Math.Abs(hit.Id.GetHashCode());
+                    uint hitId = PropertyBinder.GetNumericNodeId(hit.Id);
                     _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Up);
+                    if (hitId == _stateMachinePointerDownNodeId)
+                        SetStateMachineTrigger("clickTrigger");
                 }
-                _timelineController.ActiveStateMachine.SetBool(1, false); // isPressed = false
-                _timelineController.ActiveStateMachine.FireTrigger(3); // clickTrigger
-                TriggerStateMachineStep();
+                SetStateMachineBool("isPressed", false);
+                _stateMachinePointerDownNodeId = 0;
+                TriggerStateMachineStep(continuePlayback: true);
             }
 
             if (_isDraggingGradientHandle)
@@ -5991,10 +7585,14 @@ namespace Kerf.UI
             if (_isDrawingNew)
             {
                 _isDrawingNew = false;
+                bool didAutoLayoutDrop = false;
                 if (_drawingNode != null)
                 {
                     var page = Document.GetActivePage();
                     History.Execute(new AddLayerCommand(page, _drawingNode));
+                    didAutoLayoutDrop = _autoLayoutDropTarget != null || _autoLayoutDetachPreview;
+                    if (_autoLayoutDropTarget != null || _autoLayoutDetachPreview)
+                        CheckAutoReparentLayersOnDrop(new List<LayerNode> { _drawingNode });
                     _selectedLayers.Clear();
                     _selectedLayers.Add(_drawingNode);
                     var created = _drawingNode;
@@ -6006,6 +7604,7 @@ namespace Kerf.UI
                         StartInPlaceTextEditing(created);
                     }
                 }
+                ClearAutoLayoutDropPreview(restoreLivePreview: !didAutoLayoutDrop);
             }
 
             if (_isTransforming)
@@ -6031,6 +7630,7 @@ namespace Kerf.UI
                             RefreshCanvas();
                             RefreshPropertyInspector();
                         }));
+                        AutoKeyProperty(primary, PropKey.CornerRadius, afterR);
                     }
                     else
                     {
@@ -6041,6 +7641,7 @@ namespace Kerf.UI
                     return;
                 }
 
+                bool didAutoLayoutDrop = false;
                 // Record the last transformation delta for Adobe Illustrator "Transform Again" (Ctrl+D)
                 if (_dragInitialPositions.Count > 0 && _selectedLayers.Count > 0)
                 {
@@ -6052,7 +7653,11 @@ namespace Kerf.UI
                         if (Math.Abs(finalDx) > 1 || Math.Abs(finalDy) > 1)
                         {
                             _lastTransformDelta = new Point(finalDx, finalDy);
-                            CheckAutoReparentLayersOnDrop(_selectedLayers);
+                            if (!_hasAltDuplicated)
+                            {
+                                CheckAutoReparentLayersOnDrop(_selectedLayers);
+                                didAutoLayoutDrop = true;
+                            }
                         }
                     }
                 }
@@ -6060,12 +7665,29 @@ namespace Kerf.UI
                 if (_hasAltDuplicated)
                 {
                     var page = Document.GetActivePage();
-                    History.Execute(new AddLayersCommand(page, _altClonedLayers));
-                    _sceneGraph.Synchronize(page);
+                    var positionsBeforeDuplicateDrop = page.GetAllLayersFlat().ToDictionary(layer => layer, layer => new Point(layer.X, layer.Y));
+                    var affectedLayouts = CommitDuplicateDrop(page, _altClonedLayers);
+                    didAutoLayoutDrop = _autoLayoutDropTarget != null || _autoLayoutDetachPreview || _autoLayoutDropSource != null;
+                    History.Execute(new AddLayersCommand(page, _altClonedLayers, () =>
+                    {
+                        foreach (var parent in affectedLayouts)
+                        {
+                            if (parent.AutoLayout != null && parent.AutoLayout.Mode != AutoLayoutMode.None)
+                                AutoLayoutEngine.ReflowRecursive(parent);
+                            InvalidateLayoutFrameVisuals(parent);
+                        }
+                        _sceneGraph.Synchronize(page);
+                        foreach (var layer in _altClonedLayers) InvalidateLayoutFrameVisuals(layer);
+                        RefreshCanvas();
+                        RefreshLayersList();
+                    }));
+                    AnimateAutoLayoutReflow(positionsBeforeDuplicateDrop, page.GetAllLayersFlat());
                     OnSelectionChanged();
                     RefreshLayersList();
                     RefreshCanvas();
                     History.MarkDirty();
+                    if (_currentStudioMode == StudioMode.Animate)
+                        foreach (var layer in _altClonedLayers) CaptureAnimationRestPoseForLayer(layer);
                 }
                 else
                 {
@@ -6113,6 +7735,21 @@ namespace Kerf.UI
                                     RefreshPropertyInspector();
                                 });
                             History.Execute(cmd);
+                            if (_currentStudioMode == StudioMode.Animate)
+                            {
+                                foreach (var layer in afterBounds.Keys)
+                                {
+                                    CaptureAnimationRestPoseForLayer(layer);
+                                    Rect before = _dragInitialBounds[layer];
+                                    Rect after = afterBounds[layer];
+                                    if (Math.Abs(before.X - after.X) > 0.001) AutoKeyProperty(layer, PropKey.X, layer.X);
+                                    if (Math.Abs(before.Y - after.Y) > 0.001) AutoKeyProperty(layer, PropKey.Y, layer.Y);
+                                    if (Math.Abs(before.Width - after.Width) > 0.001) AutoKeyProperty(layer, PropKey.Width, layer.Width);
+                                    if (Math.Abs(before.Height - after.Height) > 0.001) AutoKeyProperty(layer, PropKey.Height, layer.Height);
+                                    if (_dragInitialRotations.ContainsKey(layer) && Math.Abs(_dragInitialRotations[layer] - layer.Rotation) > 0.001)
+                                        AutoKeyProperty(layer, PropKey.Rotation, layer.Rotation);
+                                }
+                            }
                         }
                     }
                     else
@@ -6151,6 +7788,17 @@ namespace Kerf.UI
                                     RefreshPropertyInspector();
                                 });
                             History.Execute(cmd);
+                            if (_currentStudioMode == StudioMode.Animate)
+                            {
+                                foreach (var layer in afterPositions.Keys)
+                                {
+                                    CaptureAnimationRestPoseForLayer(layer);
+                                    Point before = _dragInitialPositions[layer];
+                                    Point after = afterPositions[layer];
+                                    if (Math.Abs(before.X - after.X) > 0.001) AutoKeyProperty(layer, PropKey.X, layer.X);
+                                    if (Math.Abs(before.Y - after.Y) > 0.001) AutoKeyProperty(layer, PropKey.Y, layer.Y);
+                                }
+                            }
                         }
                     }
                 }
@@ -6160,6 +7808,7 @@ namespace Kerf.UI
                 _dragInitialRotations.Clear();
                 _dragInitialGeometries.Clear();
                 _hasAltDuplicated = false;
+                ClearAutoLayoutDropPreview(restoreLivePreview: !didAutoLayoutDrop);
             }
         }
 
@@ -6229,18 +7878,18 @@ namespace Kerf.UI
             _dragStartPoint = canvasPt;
 
             ElementType elemType = ElementType.Rectangle;
-            string defaultColor = "#0D99FF";
+            string defaultColor = "#D9D9D9";
 
             switch (tool)
             {
-                case ToolType.Frame: elemType = ElementType.Frame; defaultColor = "#1E2230"; break;
+                case ToolType.Frame: elemType = ElementType.Frame; defaultColor = "#D9D9D9"; break;
                 case ToolType.Rect: elemType = ElementType.Rectangle; defaultColor = "#D9D9D9"; break;
                 case ToolType.Ellipse: elemType = ElementType.Ellipse; defaultColor = "#D9D9D9"; break;
                 case ToolType.Star: elemType = ElementType.Star; defaultColor = "#D9D9D9"; break;
                 case ToolType.Polygon: elemType = ElementType.Polygon; defaultColor = "#D9D9D9"; break;
-                case ToolType.Text: elemType = ElementType.Text; defaultColor = "#FFFFFF"; break;
-                case ToolType.Line: elemType = ElementType.Line; defaultColor = "#94A3B8"; break;
-                case ToolType.Arrow: elemType = ElementType.Arrow; defaultColor = "#A855F7"; break;
+                case ToolType.Text: elemType = ElementType.Text; defaultColor = "#D9D9D9"; break;
+                case ToolType.Line: elemType = ElementType.Line; defaultColor = "#D9D9D9"; break;
+                case ToolType.Arrow: elemType = ElementType.Arrow; defaultColor = "#D9D9D9"; break;
             }
 
             _drawingNode = new LayerNode
@@ -6288,8 +7937,8 @@ namespace Kerf.UI
                     Width = 10,
                     Height = 10,
                     Geometry = _activePenGeometry,
-                    Fills = new List<Paint> { Paint.Solid("#6366F1", 0.25) },
-                    Strokes = new List<StrokeData> { new StrokeData { Paint = Paint.Solid("#6366F1"), Width = 2.0 } }
+                    Fills = new List<Paint> { Paint.Solid("#D9D9D9", 0.25) },
+                    Strokes = new List<StrokeData> { new StrokeData { Paint = Paint.Solid("#D9D9D9"), Width = 2.0 } }
                 };
                 page.Layers.Add(_activePenNode);
                 _sceneGraph.Synchronize(page);
@@ -6435,6 +8084,23 @@ namespace Kerf.UI
 
         public void RenderOverlays(DrawingContext dc)
         {
+            var guidePage = Document != null ? Document.GetActivePage() : null;
+            if (guidePage != null && guidePage.ShowGuides && guidePage.Guides != null && _canvasHost != null)
+            {
+                Point topLeft = ScreenToCanvas(new Point(0, 0));
+                Point bottomRight = ScreenToCanvas(new Point(_canvasHost.ActualWidth, _canvasHost.ActualHeight));
+                foreach (var guide in guidePage.Guides)
+                {
+                    bool active = guide == _activeGuideDrag;
+                    var guidePen = new Pen(new SolidColorBrush(active ? Color.FromRgb(244, 114, 182) : Color.FromRgb(56, 189, 248)), (active ? 1.8 : 1.0) / Math.Max(0.05, _zoomScale));
+                    guidePen.Freeze();
+                    if (guide.IsVertical)
+                        dc.DrawLine(guidePen, new Point(guide.Position, topLeft.Y), new Point(guide.Position, bottomRight.Y));
+                    else
+                        dc.DrawLine(guidePen, new Point(topLeft.X, guide.Position), new Point(bottomRight.X, guide.Position));
+                }
+            }
+
             // If actively drawing with Pen Tool, render full pen drawing overlay (all nodes, handles, rubber-band)
             if (_activeTool == ToolType.Pen && _activePenGeometry != null && _activePenGeometry.Nodes.Count > 0)
             {
@@ -6487,6 +8153,66 @@ namespace Kerf.UI
                 }
             }
 
+            // Auto Layout drag feedback: pink frame boundary, insertion slot, and delayed onion skin.
+            if (_autoLayoutDropTarget != null && _autoLayoutDropTarget.AutoLayout != null && _autoLayoutDropTarget.AutoLayout.Mode != AutoLayoutMode.None)
+            {
+                Color pink = Color.FromRgb(236, 72, 153);
+                var frameBrush = new SolidColorBrush(Color.FromArgb(14, pink.R, pink.G, pink.B));
+                var framePen = new Pen(new SolidColorBrush(Color.FromArgb(230, pink.R, pink.G, pink.B)), 1.5 / _zoomScale);
+                framePen.DashStyle = new DashStyle(new double[] { 5, 3 }, 0);
+                frameBrush.Freeze();
+                framePen.Freeze();
+                dc.DrawRectangle(frameBrush, framePen, _autoLayoutDropTarget.GetBounds());
+
+                if (!_autoLayoutDropPreviewBounds.IsEmpty)
+                {
+                    var ghost = _autoLayoutDropPreviewBounds;
+                    if (_autoLayoutDropPreviewVisible && _autoLayoutDraggedLayers.Count > 0)
+                    {
+                        var moving = _autoLayoutDraggedLayers[0];
+                        Color silhouette = pink;
+                        if (moving.Fills != null && moving.Fills.Count > 0 && !string.IsNullOrEmpty(moving.Fills[0].ColorHex))
+                            silhouette = GpuRenderer.ParseHexColor(moving.Fills[0].ColorHex, 0.32);
+                        var ghostFill = new SolidColorBrush(Color.FromArgb(72, silhouette.R, silhouette.G, silhouette.B));
+                        ghostFill.Freeze();
+                        dc.DrawRoundedRectangle(ghostFill, null, new Rect(ghost.X + 3 / _zoomScale, ghost.Y + 4 / _zoomScale, ghost.Width, ghost.Height),
+                            Math.Max(2, moving.CornerRadius) / _zoomScale, Math.Max(2, moving.CornerRadius) / _zoomScale);
+                        var movingBounds = TransformEngine.UnionBounds(_autoLayoutDraggedLayers);
+                        DrawAutoLayoutOnionSkin(dc, _autoLayoutDraggedLayers, ghost.X - movingBounds.X, ghost.Y - movingBounds.Y);
+                        var onionPen = new Pen(new SolidColorBrush(Color.FromArgb(220, pink.R, pink.G, pink.B)), 1.4 / _zoomScale);
+                        onionPen.DashStyle = DashStyles.Dash;
+                        onionPen.Freeze();
+                        dc.DrawRoundedRectangle(ghostFill, onionPen, ghost, Math.Max(2, moving.CornerRadius) / _zoomScale, Math.Max(2, moving.CornerRadius) / _zoomScale);
+                    }
+
+                    var markerPen = new Pen(new SolidColorBrush(pink), 3.0 / _zoomScale);
+                    markerPen.StartLineCap = PenLineCap.Round;
+                    markerPen.EndLineCap = PenLineCap.Round;
+                    markerPen.Freeze();
+                    if (_autoLayoutDropTarget.AutoLayout.Mode == AutoLayoutMode.Vertical)
+                    {
+                        double y = ghost.Y;
+                        dc.DrawLine(markerPen, new Point(ghost.X - 5 / _zoomScale, y), new Point(ghost.Right + 5 / _zoomScale, y));
+                    }
+                    else
+                    {
+                        double x = ghost.X;
+                        dc.DrawLine(markerPen, new Point(x, ghost.Y - 5 / _zoomScale), new Point(x, ghost.Bottom + 5 / _zoomScale));
+                    }
+                }
+            }
+            else if (_autoLayoutDetachPreview && _autoLayoutDropSource != null)
+            {
+                var text = new FormattedText("Remove from auto layout", CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                    new Typeface("Segoe UI Semibold"), 11 / _zoomScale, Brushes.White);
+                var chip = new Rect(_autoLayoutDropPoint.X + 14 / _zoomScale, _autoLayoutDropPoint.Y + 12 / _zoomScale,
+                    text.Width + 18 / _zoomScale, text.Height + 10 / _zoomScale);
+                var chipBrush = new SolidColorBrush(Color.FromRgb(219, 39, 119));
+                chipBrush.Freeze();
+                dc.DrawRoundedRectangle(chipBrush, null, chip, 5 / _zoomScale, 5 / _zoomScale);
+                dc.DrawText(text, new Point(chip.X + 9 / _zoomScale, chip.Y + 5 / _zoomScale));
+            }
+
             if (_selectedLayers.Count == 0) return;
 
             // Draw bounding box & 8 transform handles
@@ -6504,10 +8230,25 @@ namespace Kerf.UI
 
             dc.PushTransform(new MatrixTransform(mat));
 
-            // Blue selection border
-            var borderPen = new Pen(new SolidColorBrush(Color.FromRgb(99, 102, 241)), 1.5 / _zoomScale);
+            // Auto Layout uses a pink dashed boundary so it reads as a layout container, separate from frames.
+            bool isAutoLayoutSelection = _selectedLayers.Count == 1 && _selectedLayers[0].Type == ElementType.Frame &&
+                _selectedLayers[0].AutoLayout != null && _selectedLayers[0].AutoLayout.Mode != AutoLayoutMode.None;
+            Color selectionColor = isAutoLayoutSelection ? Color.FromRgb(236, 72, 153) : Color.FromRgb(99, 102, 241);
+            var borderPen = new Pen(new SolidColorBrush(selectionColor), 1.5 / _zoomScale);
+            if (isAutoLayoutSelection) borderPen.DashStyle = DashStyles.Dash;
             borderPen.Freeze();
             dc.DrawRectangle(null, borderPen, union);
+            if (isAutoLayoutSelection)
+            {
+                string mode = _selectedLayers[0].AutoLayout.Mode.ToString().ToUpperInvariant();
+                var tag = new FormattedText("AUTO LAYOUT  ·  " + mode, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                    new Typeface("Segoe UI Semibold"), 10 / _zoomScale, new SolidColorBrush(selectionColor));
+                var tagRect = new Rect(union.X, union.Y - tag.Height - 7 / _zoomScale, tag.Width + 12 / _zoomScale, tag.Height + 5 / _zoomScale);
+                var tagBrush = new SolidColorBrush(Color.FromArgb(225, 35, 13, 30));
+                tagBrush.Freeze();
+                dc.DrawRoundedRectangle(tagBrush, borderPen, tagRect, 3 / _zoomScale, 3 / _zoomScale);
+                dc.DrawText(tag, new Point(tagRect.X + 6 / _zoomScale, tagRect.Y + 2 / _zoomScale));
+            }
 
             // 4 Corner radius circular handles inside corners for rectangles & frames
             if (_selectedLayers.Count == 1)
@@ -6582,6 +8323,31 @@ namespace Kerf.UI
             {
                 GradientRollerEngine.RenderOverlay(dc, _editingGradientLayer, _editingGradientPaint, _zoomScale, _activeGradientStopIndex);
             }
+        }
+
+        private void DrawAutoLayoutOnionSkin(DrawingContext dc, IEnumerable<LayerNode> layers, double offsetX, double offsetY)
+        {
+            if (dc == null || _renderer == null) return;
+            dc.PushOpacity(0.30);
+            foreach (var layer in layers ?? Enumerable.Empty<LayerNode>())
+                DrawAutoLayoutOnionNode(dc, layer, offsetX, offsetY);
+            dc.Pop();
+        }
+
+        private void DrawAutoLayoutOnionNode(DrawingContext dc, LayerNode layer, double offsetX, double offsetY)
+        {
+            if (layer == null || !layer.IsVisible || layer.Opacity <= 0.0) return;
+            var visual = new DrawingVisual();
+            _renderer.RenderNodeToVisual(layer, visual, _zoomScale);
+            if (visual.Drawing != null)
+            {
+                dc.PushTransform(new TranslateTransform(offsetX, offsetY));
+                dc.DrawDrawing(visual.Drawing);
+                dc.Pop();
+            }
+            if (layer.Children != null)
+                foreach (var child in layer.Children)
+                    DrawAutoLayoutOnionNode(dc, child, offsetX, offsetY);
         }
 
         private void RenderVectorEditModeOverlay(DrawingContext dc, VectorGeometry geo)
@@ -6844,8 +8610,74 @@ namespace Kerf.UI
 
         private void InvalidateAndRefresh(LayerNode node)
         {
+            if (History != null) History.MarkDirty();
+            if (_currentStudioMode == StudioMode.Animate) CaptureAnimationRestPoseForLayer(node);
+            ReflowAutoLayoutAncestors(node);
             _sceneGraph.InvalidateNode(node.Id);
             RefreshCanvas();
+        }
+
+        private void ReflowAutoLayoutAncestors(LayerNode node)
+        {
+            if (node == null || Document == null) return;
+            var page = Document.GetActivePage();
+            if (page == null) return;
+            var visited = new HashSet<LayerNode>();
+            LayerNode parent = !string.IsNullOrEmpty(node.ParentId) ? page.FindLayerById(node.ParentId) : null;
+            while (parent != null && visited.Add(parent))
+            {
+                if (parent.AutoLayout != null && parent.AutoLayout.Mode != AutoLayoutMode.None)
+                {
+                    // Reflow this container's direct children only. Nested auto-layout
+                    // frames own their contents and must keep their internal layout.
+                    AutoLayoutEngine.ReflowRecursive(parent);
+                    InvalidateLayoutFrameVisuals(parent);
+                }
+                parent = !string.IsNullOrEmpty(parent.ParentId) ? page.FindLayerById(parent.ParentId) : null;
+            }
+        }
+
+        private void InvalidateLayoutFrameVisuals(LayerNode frame)
+        {
+            if (frame == null) return;
+            _sceneGraph.InvalidateNode(frame.Id);
+            if (frame.Children == null) return;
+            foreach (var child in frame.Children) InvalidateLayoutFrameVisuals(child);
+        }
+
+        private void SetParentAutoLayoutSizingFixed(LayerNode node, bool horizontal)
+        {
+            if (node == null || Document == null || string.IsNullOrEmpty(node.ParentId)) return;
+            var page = Document.GetActivePage();
+            var parent = page != null ? page.FindLayerById(node.ParentId) : null;
+            if (parent == null || parent.AutoLayout == null || parent.AutoLayout.Mode == AutoLayoutMode.None) return;
+            if (horizontal)
+            {
+                node.LayoutSizingH = SizingMode.Fixed;
+                node.AutoLayoutBaseWidth = node.Width;
+            }
+            else
+            {
+                node.LayoutSizingV = SizingMode.Fixed;
+                node.AutoLayoutBaseHeight = node.Height;
+            }
+        }
+
+        private static void SetChildLayoutSizingMode(LayerNode node, bool horizontal, SizingMode mode)
+        {
+            if (node == null) return;
+            if (horizontal)
+            {
+                if (mode == SizingMode.Fill || mode == SizingMode.Fixed)
+                    node.AutoLayoutBaseWidth = node.Width;
+                node.LayoutSizingH = mode;
+            }
+            else
+            {
+                if (mode == SizingMode.Fill || mode == SizingMode.Fixed)
+                    node.AutoLayoutBaseHeight = node.Height;
+                node.LayoutSizingV = mode;
+            }
         }
 
         private void OnSelectionChanged()
@@ -6897,20 +8729,36 @@ namespace Kerf.UI
                 return SaveAsCurrentDocument();
             }
 
+            return SaveDocumentToPath(CurrentFilePath);
+        }
+
+        private bool SaveDocumentToPath(string targetPath)
+        {
+            if (Document == null || string.IsNullOrEmpty(targetPath)) return false;
+            double previewTime = _timelineController != null ? _timelineController.CurrentTime : 0.0;
+            bool restorePreviewAfterSave = _animationRestPose.Count > 0;
+            if (restorePreviewAfterSave) RestoreAnimationRestPose();
+
             try
             {
-                StorageManager.SaveAtomic(Document, CurrentFilePath);
-                StorageManager.AddRecentProject(CurrentFilePath);
+                StorageManager.SaveAtomic(Document, targetPath);
+                StorageManager.AddRecentProject(targetPath);
+                CurrentFilePath = targetPath;
                 History.MarkClean();
-                StorageManager.ClearAutosave(CurrentFilePath);
-                if (DocumentSaved != null) DocumentSaved(CurrentFilePath);
-                MessageBox.Show("Project saved successfully!", "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                StorageManager.ClearAutosave(targetPath);
+                if (DocumentSaved != null) DocumentSaved(targetPath);
+                ShowSavedStatus();
                 return true;
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Failed to save project: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
+            }
+            finally
+            {
+                if (restorePreviewAfterSave && _timelineController != null)
+                    _timelineController.Seek(previewTime);
             }
         }
 
@@ -6921,7 +8769,11 @@ namespace Kerf.UI
             {
                 Filter = "Kerf Design Files (*.kerf)|*.kerf|All Files (*.*)|*.*",
                 FileName = (string.IsNullOrEmpty(Document.Name) ? "Untitled Project" : Document.Name) + ".kerf",
-                Title = "Save Kerf Design As..."
+                Title = "Save Kerf Design As...",
+                DefaultExt = ".kerf",
+                AddExtension = true,
+                OverwritePrompt = true,
+                ValidateNames = true
             };
 
             if (!string.IsNullOrEmpty(CurrentFilePath))
@@ -6936,24 +8788,19 @@ namespace Kerf.UI
 
             if (dlg.ShowDialog() == true)
             {
-                CurrentFilePath = dlg.FileName;
+                string previousName = Document.Name;
                 Document.Name = System.IO.Path.GetFileNameWithoutExtension(dlg.FileName);
                 _titleBlock.Text = Document.Name;
                 _titleTextBox.Text = Document.Name;
-                try
+                if (SaveDocumentToPath(dlg.FileName))
                 {
-                    StorageManager.SaveAs(Document, CurrentFilePath);
-                    History.MarkClean();
-                    StorageManager.ClearAutosave(CurrentFilePath);
-                    if (DocumentSaved != null) DocumentSaved(CurrentFilePath);
-                    MessageBox.Show("Project saved successfully to:\n" + CurrentFilePath, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
                     return true;
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("Failed to save project: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return false;
-                }
+                Document.Name = previousName;
+                _titleBlock.Text = Document.Name;
+                _titleTextBox.Text = Document.Name;
+                UpdateSaveStatus();
+                return false;
             }
             return false;
         }
@@ -7054,11 +8901,55 @@ namespace Kerf.UI
             }
         }
 
+        private static void OffsetLayerSubtree(LayerNode layer, double dx, double dy)
+        {
+            if (layer == null || (Math.Abs(dx) < 0.0001 && Math.Abs(dy) < 0.0001)) return;
+            layer.X += dx;
+            layer.Y += dy;
+            if (layer.Type == ElementType.Path && layer.Geometry != null)
+                BezierVectorEngine.OffsetGeometry(layer.Geometry, dx, dy);
+            if (layer.Children == null) return;
+            foreach (var child in layer.Children)
+                OffsetLayerSubtree(child, dx, dy);
+        }
+
+        private static void PreserveDuplicateSizeInAutoLayout(LayerNode duplicate, LayerNode parent)
+        {
+            if (duplicate == null || parent == null || parent.AutoLayout == null || parent.AutoLayout.Mode == AutoLayoutMode.None) return;
+            if (duplicate.LayoutSizingH == SizingMode.Fill)
+            {
+                duplicate.LayoutSizingH = SizingMode.Fixed;
+                duplicate.AutoLayoutBaseWidth = duplicate.Width;
+            }
+            if (duplicate.LayoutSizingV == SizingMode.Fill)
+            {
+                duplicate.LayoutSizingV = SizingMode.Fixed;
+                duplicate.AutoLayoutBaseHeight = duplicate.Height;
+            }
+        }
+
+        private void OffsetLayerDescendantsExceptSelected(LayerNode parent, double dx, double dy, HashSet<LayerNode> selected)
+        {
+            if (parent == null || parent.Children == null || (Math.Abs(dx) < 0.0001 && Math.Abs(dy) < 0.0001)) return;
+            foreach (var child in parent.Children)
+            {
+                if (child == null || (selected != null && selected.Contains(child))) continue;
+                child.X += dx;
+                child.Y += dy;
+                if (child.Type == ElementType.Path && child.Geometry != null)
+                    BezierVectorEngine.OffsetGeometry(child.Geometry, dx, dy);
+                _sceneGraph.InvalidateNode(child.Id);
+                OffsetLayerDescendantsExceptSelected(child, dx, dy, selected);
+            }
+        }
+
         public void DuplicateSelectedLayers()
         {
             if (_selectedLayers.Count == 0) return;
             var page = Document.GetActivePage();
             if (page == null) return;
+            var positionsBefore = page.GetAllLayersFlat().ToDictionary(layer => layer, layer => new Point(layer.X, layer.Y));
+            var autoLayoutParents = new HashSet<LayerNode>();
 
             // Adobe Illustrator "Transform Again" logic:
             // Use the last drag/duplicate delta (dx, dy) if available, or default (24, 24)
@@ -7070,20 +8961,18 @@ namespace Kerf.UI
             {
                 var clone = orig.Clone();
                 clone.Name = orig.Name;
-                clone.X = orig.X + offX;
-                clone.Y = orig.Y + offY;
-                if (clone.Type == ElementType.Path && clone.Geometry != null)
-                {
-                    clone.Geometry = orig.Geometry.Clone();
-                    BezierVectorEngine.OffsetGeometry(clone.Geometry, offX, offY);
-                }
 
                 LayerNode parent;
                 var container = page.FindContainer(orig, out parent);
+                PreserveDuplicateSizeInAutoLayout(clone, parent);
+                OffsetLayerSubtree(clone, offX, offY);
+                CapturePreviewSubtreePositions(clone, positionsBefore);
                 if (container != null)
                 {
                     int idx = container.IndexOf(orig);
                     clone.ParentId = parent != null ? parent.Id : null;
+                    if (parent != null && parent.AutoLayout != null && parent.AutoLayout.Mode != AutoLayoutMode.None)
+                        autoLayoutParents.Add(parent);
                     if (idx >= 0 && idx < container.Count)
                     {
                         container.Insert(idx + 1, clone);
@@ -7103,8 +8992,18 @@ namespace Kerf.UI
 
             _selectedLayers.Clear();
             _selectedLayers.AddRange(duplicates);
-            History.Execute(new AddLayersCommand(page, duplicates));
-            _sceneGraph.Synchronize(page);
+            History.Execute(new AddLayersCommand(page, duplicates, () =>
+            {
+                foreach (var parent in autoLayoutParents)
+                    AutoLayoutEngine.ReflowRecursive(parent);
+                _sceneGraph.Synchronize(page);
+                foreach (var parent in autoLayoutParents)
+                    InvalidateLayoutFrameVisuals(parent);
+                RefreshCanvas();
+                RefreshLayersList();
+            }));
+            if (autoLayoutParents.Count > 0)
+                AnimateAutoLayoutReflow(positionsBefore, page.GetAllLayersFlat());
             OnSelectionChanged();
             RefreshCanvas();
             RefreshLayersList();
@@ -7498,6 +9397,13 @@ namespace Kerf.UI
             if (cmd != null)
             {
                 History.Execute(cmd);
+                var alCmd = cmd as AutoLayoutSelectionCommand;
+                if (alCmd != null && alCmd.CreatedFrame != null)
+                {
+                    _selectedLayers.Clear();
+                    _selectedLayers.Add(alCmd.CreatedFrame);
+                    OnSelectionChanged();
+                }
                 _sceneGraph.Synchronize(page);
                 RefreshCanvas();
                 RefreshLayersList();
@@ -7724,14 +9630,24 @@ namespace Kerf.UI
 
         public void StartRename(string layerId)
         {
+            var page = Document != null ? Document.GetActivePage() : null;
+            var layer = page != null ? page.FindLayerById(layerId) : null;
+            if (layer == null) return;
             _renamingLayerId = layerId;
+            _renamingDraftName = layer.Name;
+            _renameTextBox = null;
+            _renameFocusReady = false;
+            _isFinishingRename = false;
             RefreshLayersList();
         }
 
         public void FinishRename(string layerId, string newName)
         {
             if (_renamingLayerId != layerId) return;
+            _isFinishingRename = true;
             _renamingLayerId = null;
+            _renameTextBox = null;
+            _renameFocusReady = false;
 
             if (!string.IsNullOrWhiteSpace(newName))
             {
@@ -7743,7 +9659,9 @@ namespace Kerf.UI
                     History.MarkDirty();
                 }
             }
+            _renamingDraftName = null;
             RefreshLayersList();
+            _isFinishingRename = false;
         }
 
         public void NudgeSelectedLayers(double dx, double dy)
@@ -7885,6 +9803,35 @@ namespace Kerf.UI
             bool isCtrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
             bool isShift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
             bool isAlt = (Keyboard.Modifiers & ModifierKeys.Alt) == ModifierKeys.Alt || Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt);
+            Key shortcutKey = e.Key == Key.System ? e.SystemKey : e.Key;
+
+            if (_currentStudioMode == StudioMode.Animate)
+            {
+                if (isCtrl && shortcutKey == Key.A && _timelineCanvasHost != null && _timelineCanvasHost.IsKeyboardFocusWithin)
+                {
+                    SelectAllTimelineKeyframes();
+                    e.Handled = true;
+                    return;
+                }
+                if (isAlt && isShift && shortcutKey == Key.S && _selectedTimelineKeyframes.Count > 1)
+                {
+                    StaggerSelectedTimelineKeyframes(false);
+                    e.Handled = true;
+                    return;
+                }
+                if (isAlt && _selectedTimelineKeyframes.Count > 0 && (shortcutKey == Key.Left || shortcutKey == Key.Right))
+                {
+                    OffsetSelectedTimelineKeyframes((shortcutKey == Key.Left ? -1 : 1) * (isShift ? 10 : 1));
+                    e.Handled = true;
+                    return;
+                }
+                if (!isCtrl && !isAlt && !isShift && _selectedTimelineKeyframes.Count > 0 && (shortcutKey == Key.Delete || shortcutKey == Key.Back))
+                {
+                    DeleteSelectedTimelineKeyframes();
+                    e.Handled = true;
+                    return;
+                }
+            }
 
             if (e.Key == Key.Space && !(e.OriginalSource is TextBox) && _currentStudioMode == StudioMode.Animate)
             {
@@ -8184,9 +10131,13 @@ namespace Kerf.UI
 
         public void SwitchStudioMode(StudioMode mode)
         {
+            if (_currentStudioMode == mode) return;
             _currentStudioMode = mode;
             if (mode == StudioMode.Animate)
             {
+                if (_defaultInterpolationPanel != null)
+                    _defaultInterpolationPanel.Visibility = _isAssetsTabActive ? Visibility.Collapsed : Visibility.Visible;
+                DrawDefaultInterpolationGraph();
                 if (_designTabButton != null)
                 {
                     _designTabButton.Background = Brushes.Transparent;
@@ -8206,11 +10157,20 @@ namespace Kerf.UI
                 }
 
                 EnsureTimelineControllerInitialized();
+                CaptureAnimationRestPose();
+                _timelineController.Seek(_timelineController.CurrentTime);
+                BuildStateMachineInputsControls();
+                BuildStateMachineStatesGraph();
                 RefreshTimelineUI();
             }
             else
             {
+                if (_defaultInterpolationPanel != null) _defaultInterpolationPanel.Visibility = Visibility.Collapsed;
                 PauseAnimation();
+                RestoreAnimationRestPose();
+                _animationRestPose.Clear();
+                _animationNodesById.Clear();
+                if (_timelineController != null) _timelineController.UseStateMachine = false;
                 if (_designTabButton != null)
                 {
                     _designTabButton.Background = new SolidColorBrush(Color.FromRgb(99, 102, 241));
@@ -8235,7 +10195,7 @@ namespace Kerf.UI
         {
             var panelBorder = new Border
             {
-                Height = 220,
+                Height = 300,
                 Background = new SolidColorBrush(Color.FromRgb(22, 25, 34)), // #161922
                 BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
                 BorderThickness = new Thickness(0, 1, 0, 0),
@@ -8243,7 +10203,7 @@ namespace Kerf.UI
             };
 
             var grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(38) }); // Transport Bar
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) }); // Two-row transport bar
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Tracks & Timeline
 
             // 1. Transport Bar
@@ -8263,10 +10223,18 @@ namespace Kerf.UI
                 BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
                 BorderThickness = new Thickness(0, 0, 1, 0)
             };
+            var leftTrackGrid = new Grid();
+            leftTrackGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            leftTrackGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(92) });
             var trackScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             _timelineTracksStack = new StackPanel { Margin = new Thickness(8, 4, 8, 4) };
             trackScroll.Content = _timelineTracksStack;
-            leftTrackBorder.Child = trackScroll;
+            Grid.SetRow(trackScroll, 0);
+            leftTrackGrid.Children.Add(trackScroll);
+            var interpolationPanel = CreateInterpolationGraphPanel(false);
+            Grid.SetRow(interpolationPanel, 1);
+            leftTrackGrid.Children.Add(interpolationPanel);
+            leftTrackBorder.Child = leftTrackGrid;
             Grid.SetColumn(leftTrackBorder, 0);
             bodyGrid.Children.Add(leftTrackBorder);
 
@@ -8278,31 +10246,15 @@ namespace Kerf.UI
             };
             _timelineCanvasHost = new Canvas
             {
-                Height = 182,
-                Cursor = Cursors.Hand
+                Height = 230,
+                Background = Brushes.Transparent,
+                Cursor = Cursors.Arrow,
+                Focusable = true
             };
 
-            _timelineCanvasHost.MouseLeftButtonDown += (s, e) =>
-            {
-                _isScrubbingTimeline = true;
-                _timelineCanvasHost.CaptureMouse();
-                ScrubTimelineAtPoint(e.GetPosition(_timelineCanvasHost));
-            };
-            _timelineCanvasHost.MouseMove += (s, e) =>
-            {
-                if (_isScrubbingTimeline)
-                {
-                    ScrubTimelineAtPoint(e.GetPosition(_timelineCanvasHost));
-                }
-            };
-            _timelineCanvasHost.MouseLeftButtonUp += (s, e) =>
-            {
-                if (_isScrubbingTimeline)
-                {
-                    _isScrubbingTimeline = false;
-                    _timelineCanvasHost.ReleaseMouseCapture();
-                }
-            };
+            _timelineCanvasHost.PreviewMouseLeftButtonDown += HandleTimelineCanvasPreviewMouseDown;
+            _timelineCanvasHost.PreviewMouseMove += HandleTimelineCanvasMouseMove;
+            _timelineCanvasHost.PreviewMouseLeftButtonUp += HandleTimelineCanvasMouseUp;
 
             rightCanvasBorder.Child = _timelineCanvasHost;
             Grid.SetColumn(rightCanvasBorder, 1);
@@ -8314,9 +10266,16 @@ namespace Kerf.UI
 
             // State Machine Live Testing View Container (Toggleable)
             _stateMachineContainer = CreateStateMachineControlsPanel();
-            _stateMachineContainer.Visibility = Visibility.Collapsed;
-            Grid.SetRow(_stateMachineContainer, 1);
-            grid.Children.Add(_stateMachineContainer);
+            _stateMachineContainer.Visibility = Visibility.Visible;
+            _stateMachineScrollContainer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = _stateMachineContainer,
+                Visibility = Visibility.Collapsed
+            };
+            Grid.SetRow(_stateMachineScrollContainer, 1);
+            grid.Children.Add(_stateMachineScrollContainer);
 
             panelBorder.Child = grid;
             return panelBorder;
@@ -8332,7 +10291,9 @@ namespace Kerf.UI
                 Padding = new Thickness(12, 0, 12, 0)
             };
 
-            var dock = new DockPanel { LastChildFill = false };
+            var transportGrid = new Grid();
+            transportGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
+            transportGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
 
             // Left: Transport Buttons
             var leftStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -8414,8 +10375,8 @@ namespace Kerf.UI
             };
             leftStack.Children.Add(_timelineScrubber);
 
-            DockPanel.SetDock(leftStack, Dock.Left);
-            dock.Children.Add(leftStack);
+            Grid.SetRow(leftStack, 0);
+            transportGrid.Children.Add(leftStack);
 
             // Right: Clip selector, Keyframe button, Mode switch (Tracks vs State Machine)
             var rightStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -8435,7 +10396,12 @@ namespace Kerf.UI
                 Foreground = new SolidColorBrush(Color.FromRgb(180, 195, 220))
             };
             clipBadge.Child = _timelineClipText;
+            clipBadge.Cursor = Cursors.Hand;
+            clipBadge.ToolTip = "Choose an animation clip";
+            clipBadge.MouseLeftButtonUp += (s, e) => ShowAnimationClipMenu(clipBadge);
             rightStack.Children.Add(clipBadge);
+
+            rightStack.Children.Add(CreateSmallTimelineButton("+ Clip", () => AddAnimationClip()));
 
             // Add Keyframe Button
             var addKeyBtn = new Border
@@ -8493,12 +10459,12 @@ namespace Kerf.UI
             };
             modeToggleBtn.Child = modeToggleText;
             modeToggleBtn.MouseLeftButtonUp += (s, e) => ToggleTimelineMode();
-            rightStack.Children.Add(modeToggleBtn);
+            rightStack.Children.Insert(0, modeToggleBtn);
 
-            DockPanel.SetDock(rightStack, Dock.Right);
-            dock.Children.Add(rightStack);
+            Grid.SetRow(rightStack, 1);
+            transportGrid.Children.Add(rightStack);
 
-            border.Child = dock;
+            border.Child = transportGrid;
             return border;
         }
 
@@ -8523,6 +10489,272 @@ namespace Kerf.UI
             return btn;
         }
 
+        private FrameworkElement CreateInterpolationGraphPanel(bool stateMachine)
+        {
+            var border = new Border { Background = new SolidColorBrush(Color.FromRgb(26, 30, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(48, 55, 68)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(5, 3, 5, 4), Margin = new Thickness(0, 4, 0, 0) };
+            var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            var header = new DockPanel();
+            var caption = new TextBlock { Text = stateMachine ? "Transition interpolation" : "Interpolation · nearest key", FontSize = 9, Foreground = new SolidColorBrush(Color.FromRgb(154, 167, 188)), VerticalAlignment = VerticalAlignment.Center };
+            if (stateMachine) _stateMachineInterpolationGraphCaption = caption; else _timelineInterpolationGraphCaption = caption;
+            DockPanel.SetDock(caption, Dock.Left);
+            header.Children.Add(caption);
+            var mode = new ComboBox { Width = 82, Height = 20, FontSize = 9, Padding = new Thickness(2, 0, 2, 0), Background = new SolidColorBrush(Color.FromRgb(36, 41, 52)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(61, 70, 85)), HorizontalAlignment = HorizontalAlignment.Right };
+            mode.Items.Add(new ComboBoxItem { Content = "Hold", Tag = InterpMode.Hold });
+            mode.Items.Add(new ComboBoxItem { Content = "Linear", Tag = InterpMode.Linear });
+            mode.Items.Add(new ComboBoxItem { Content = "Cubic", Tag = InterpMode.Cubic });
+            if (stateMachine) _stateMachineInterpolationModeCombo = mode; else _timelineInterpolationModeCombo = mode;
+            mode.SelectionChanged += (s, e) => ApplyInterpolationMode(stateMachine, mode);
+            DockPanel.SetDock(mode, Dock.Right);
+            header.Children.Add(mode);
+            Grid.SetRow(header, 0);
+            grid.Children.Add(header);
+
+            var canvas = new Canvas { Height = 48, MinWidth = 130, Background = new SolidColorBrush(Color.FromRgb(19, 22, 29)), ClipToBounds = true, Tag = stateMachine };
+            if (stateMachine) _stateMachineInterpolationGraphCanvas = canvas; else _timelineInterpolationGraphCanvas = canvas;
+            canvas.MouseLeftButtonDown += HandleInterpolationGraphMouseDown;
+            canvas.MouseMove += HandleInterpolationGraphMouseMove;
+            canvas.MouseLeftButtonUp += HandleInterpolationGraphMouseUp;
+            canvas.SizeChanged += (s, e) => RefreshInterpolationGraphPanels();
+            Grid.SetRow(canvas, 1);
+            grid.Children.Add(canvas);
+            border.Child = grid;
+            return border;
+        }
+
+        private void ApplyInterpolationMode(bool stateMachine, ComboBox combo)
+        {
+            if (_isRefreshingInterpolationPanels || combo == null) return;
+            var item = combo.SelectedItem as ComboBoxItem;
+            if (item == null || !(item.Tag is InterpMode)) return;
+            var mode = (InterpMode)item.Tag;
+            if (stateMachine)
+            {
+                if (_selectedGraphTransition == null) return;
+                _selectedGraphTransition.Interpolation = mode;
+            }
+            else
+            {
+                if (_editingInterpolationKeyframe == null) return;
+                _editingInterpolationKeyframe.Interp = mode;
+            }
+            if (History != null) History.MarkDirty();
+            RefreshInterpolationGraphPanels();
+            RefreshTimelineCanvas();
+            if (stateMachine) TriggerStateMachineStep();
+        }
+
+        private void RefreshInterpolationGraphPanels()
+        {
+            FindTimelineInterpolationKey();
+            RefreshInterpolationGraphPanel(false);
+            RefreshInterpolationGraphPanel(true);
+            RefreshDefaultInterpolationPresetButtons();
+        }
+
+        private void FindTimelineInterpolationKey()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null || _selectedLayers.Count == 0)
+            {
+                _editingInterpolationKeyframe = null;
+                _editingInterpolationTrack = null;
+                return;
+            }
+            uint selectedId = PropertyBinder.GetNumericNodeId(_selectedLayers[0].Id);
+            if (_editingInterpolationKeyframe != null && _editingInterpolationTrack != null &&
+                _editingInterpolationTrack.NodeId == selectedId && _timelineController.ActiveClip.Tracks.Contains(_editingInterpolationTrack) &&
+                _editingInterpolationTrack.Keys != null && _editingInterpolationTrack.Keys.Contains(_editingInterpolationKeyframe)) return;
+            _editingInterpolationKeyframe = null;
+            _editingInterpolationTrack = null;
+            var candidates = new List<Tuple<AnimTrack, Keyframe, double>>();
+            foreach (var track in _timelineController.ActiveClip.Tracks ?? new List<AnimTrack>())
+            {
+                if (track == null || track.NodeId != selectedId || track.Keys == null) continue;
+                foreach (var key in track.Keys)
+                    if (key != null) candidates.Add(Tuple.Create(track, key, Math.Abs(key.Time - _timelineController.CurrentTime)));
+            }
+            var nearest = candidates.OrderBy(candidate => candidate.Item3).FirstOrDefault();
+            if (nearest != null)
+            {
+                _editingInterpolationTrack = nearest.Item1;
+                _editingInterpolationKeyframe = nearest.Item2;
+            }
+        }
+
+        private void RefreshInterpolationGraphPanel(bool stateMachine)
+        {
+            Canvas canvas = stateMachine ? _stateMachineInterpolationGraphCanvas : _timelineInterpolationGraphCanvas;
+            ComboBox combo = stateMachine ? _stateMachineInterpolationModeCombo : _timelineInterpolationModeCombo;
+            TextBlock caption = stateMachine ? _stateMachineInterpolationGraphCaption : _timelineInterpolationGraphCaption;
+            if (canvas == null) return;
+
+            InterpMode mode = InterpMode.Linear;
+            double x1 = 0.25, y1 = 0.1, x2 = 0.25, y2 = 1.0;
+            bool hasTarget = false;
+            if (stateMachine && _selectedGraphTransition != null)
+            {
+                var transition = _selectedGraphTransition;
+                mode = transition.Interpolation;
+                x1 = transition.X1; y1 = transition.Y1; x2 = transition.X2; y2 = transition.Y2;
+                hasTarget = true;
+                if (caption != null) caption.Text = "Transition · " + TransitionConditionSummary(transition);
+            }
+            else if (!stateMachine && _editingInterpolationKeyframe != null)
+            {
+                var key = _editingInterpolationKeyframe;
+                mode = key.Interp;
+                x1 = key.X1; y1 = key.Y1; x2 = key.X2; y2 = key.Y2;
+                hasTarget = true;
+                if (caption != null) caption.Text = string.Format("{0} · {1:0.00}s", _editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Key", key.Time);
+            }
+            else if (caption != null)
+            {
+                caption.Text = stateMachine ? "Select a transition" : "Select a layer and key a property";
+            }
+
+            _isRefreshingInterpolationPanels = true;
+            if (combo != null)
+            {
+                combo.IsEnabled = hasTarget;
+                combo.SelectedIndex = (int)mode;
+            }
+            _isRefreshingInterpolationPanels = false;
+            DrawInterpolationCurve(canvas, hasTarget, mode, x1, y1, x2, y2);
+        }
+
+        private void DrawInterpolationCurve(Canvas canvas, bool hasTarget, InterpMode mode, double x1, double y1, double x2, double y2)
+        {
+            if (canvas == null) return;
+            canvas.Children.Clear();
+            double width = Math.Max(130.0, canvas.ActualWidth > 20.0 ? canvas.ActualWidth : canvas.MinWidth);
+            double height = Math.Max(42.0, canvas.ActualHeight > 20.0 ? canvas.ActualHeight : canvas.Height);
+            double left = 8.0, right = width - 8.0, top = 5.0, bottom = height - 5.0;
+            var gridLine = new SolidColorBrush(Color.FromRgb(49, 56, 69));
+            canvas.Children.Add(new Line { X1 = left, Y1 = bottom, X2 = right, Y2 = bottom, Stroke = gridLine, StrokeThickness = 1 });
+            canvas.Children.Add(new Line { X1 = left, Y1 = top, X2 = right, Y2 = top, Stroke = new SolidColorBrush(Color.FromRgb(39, 45, 57)), StrokeThickness = 1 });
+            canvas.Children.Add(new Line { X1 = left, Y1 = top, X2 = left, Y2 = bottom, Stroke = gridLine, StrokeThickness = 1 });
+            canvas.Children.Add(new Line { X1 = right, Y1 = top, X2 = right, Y2 = bottom, Stroke = gridLine, StrokeThickness = 1 });
+            if (!hasTarget)
+            {
+                var hint = new TextBlock { Text = "No curve selected", FontSize = 8, Foreground = new SolidColorBrush(Color.FromRgb(104, 117, 137)), HorizontalAlignment = HorizontalAlignment.Center };
+                Canvas.SetLeft(hint, Math.Max(10, width / 2.0 - 44));
+                Canvas.SetTop(hint, Math.Max(4, height / 2.0 - 6));
+                canvas.Children.Add(hint);
+                return;
+            }
+            x1 = Math.Max(0.0, Math.Min(1.0, x1)); x2 = Math.Max(0.0, Math.Min(1.0, x2));
+            y1 = Math.Max(0.0, Math.Min(1.0, y1)); y2 = Math.Max(0.0, Math.Min(1.0, y2));
+            Point start = new Point(left, bottom), end = new Point(right, top);
+            var geometry = new PathGeometry();
+            var figure = new PathFigure { StartPoint = start, IsClosed = false };
+            if (mode == InterpMode.Hold)
+            {
+                figure.Segments.Add(new LineSegment(new Point(right, bottom), true));
+                figure.Segments.Add(new LineSegment(end, true));
+            }
+            else if (mode == InterpMode.Linear)
+            {
+                figure.Segments.Add(new LineSegment(end, true));
+            }
+            else
+            {
+                Point c1 = new Point(left + x1 * (right - left), bottom - y1 * (bottom - top));
+                Point c2 = new Point(left + x2 * (right - left), bottom - y2 * (bottom - top));
+                figure.Segments.Add(new BezierSegment(c1, c2, end, true));
+                canvas.Children.Add(new Line { X1 = start.X, Y1 = start.Y, X2 = c1.X, Y2 = c1.Y, Stroke = new SolidColorBrush(Color.FromRgb(89, 99, 118)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 2, 2 } });
+                canvas.Children.Add(new Line { X1 = end.X, Y1 = end.Y, X2 = c2.X, Y2 = c2.Y, Stroke = new SolidColorBrush(Color.FromRgb(89, 99, 118)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 2, 2 } });
+                AddInterpolationHandle(canvas, c1, 1);
+                AddInterpolationHandle(canvas, c2, 2);
+            }
+            geometry.Figures.Add(figure);
+            canvas.Children.Add(new System.Windows.Shapes.Path { Data = geometry, Stroke = new SolidColorBrush(Color.FromRgb(80, 180, 255)), StrokeThickness = 2, Fill = Brushes.Transparent, IsHitTestVisible = false });
+        }
+
+        private static void AddInterpolationHandle(Canvas canvas, Point point, int id)
+        {
+            var handle = new Ellipse { Width = 7, Height = 7, Fill = new SolidColorBrush(Color.FromRgb(245, 112, 175)), Stroke = new SolidColorBrush(Color.FromRgb(250, 205, 225)), StrokeThickness = 1, Tag = id, IsHitTestVisible = false };
+            Canvas.SetLeft(handle, point.X - 3.5);
+            Canvas.SetTop(handle, point.Y - 3.5);
+            canvas.Children.Add(handle);
+        }
+
+        private void HandleInterpolationGraphMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            var canvas = sender as Canvas;
+            if (canvas == null) return;
+            bool stateMachine = canvas.Tag is bool && (bool)canvas.Tag;
+            if (stateMachine ? _selectedGraphTransition == null : _editingInterpolationKeyframe == null) return;
+            if (stateMachine && _selectedGraphTransition.Interpolation != InterpMode.Cubic) return;
+            if (!stateMachine && _editingInterpolationKeyframe.Interp != InterpMode.Cubic) return;
+            Point point = e.GetPosition(canvas);
+            double width = Math.Max(130.0, canvas.ActualWidth > 20.0 ? canvas.ActualWidth : canvas.MinWidth);
+            double height = Math.Max(42.0, canvas.ActualHeight > 20.0 ? canvas.ActualHeight : canvas.Height);
+            double left = 8.0, right = width - 8.0, top = 5.0, bottom = height - 5.0;
+            double x1, y1, x2, y2;
+            GetInterpolationControlPoints(stateMachine, out x1, out y1, out x2, out y2);
+            Point p1 = new Point(left + x1 * (right - left), bottom - y1 * (bottom - top));
+            Point p2 = new Point(left + x2 * (right - left), bottom - y2 * (bottom - top));
+            _interpolationControlHandle = (point - p1).Length < (point - p2).Length ? 1 : 2;
+            canvas.CaptureMouse();
+            e.Handled = true;
+        }
+
+        private void GetInterpolationControlPoints(bool stateMachine, out double x1, out double y1, out double x2, out double y2)
+        {
+            if (stateMachine && _selectedGraphTransition != null)
+            {
+                x1 = _selectedGraphTransition.X1; y1 = _selectedGraphTransition.Y1; x2 = _selectedGraphTransition.X2; y2 = _selectedGraphTransition.Y2;
+            }
+            else if (!stateMachine && _editingInterpolationKeyframe != null)
+            {
+                x1 = _editingInterpolationKeyframe.X1; y1 = _editingInterpolationKeyframe.Y1; x2 = _editingInterpolationKeyframe.X2; y2 = _editingInterpolationKeyframe.Y2;
+            }
+            else { x1 = 0.25; y1 = 0.1; x2 = 0.25; y2 = 1.0; }
+        }
+
+        private void HandleInterpolationGraphMouseMove(object sender, MouseEventArgs e)
+        {
+            if (_interpolationControlHandle < 0) return;
+            var canvas = sender as Canvas;
+            if (canvas == null || !canvas.IsMouseCaptured) return;
+            bool stateMachine = canvas.Tag is bool && (bool)canvas.Tag;
+            Point point = e.GetPosition(canvas);
+            double width = Math.Max(130.0, canvas.ActualWidth > 20.0 ? canvas.ActualWidth : canvas.MinWidth);
+            double height = Math.Max(42.0, canvas.ActualHeight > 20.0 ? canvas.ActualHeight : canvas.Height);
+            double x = Math.Max(0.0, Math.Min(1.0, (point.X - 8.0) / Math.Max(1.0, width - 16.0)));
+            double y = Math.Max(0.0, Math.Min(1.0, 1.0 - (point.Y - 5.0) / Math.Max(1.0, height - 10.0)));
+            if (stateMachine && _selectedGraphTransition != null)
+            {
+                if (_interpolationControlHandle == 1) { _selectedGraphTransition.X1 = x; _selectedGraphTransition.Y1 = y; }
+                else { _selectedGraphTransition.X2 = x; _selectedGraphTransition.Y2 = y; }
+            }
+            else if (!stateMachine && _editingInterpolationKeyframe != null)
+            {
+                if (_interpolationControlHandle == 1) { _editingInterpolationKeyframe.X1 = x; _editingInterpolationKeyframe.Y1 = y; }
+                else { _editingInterpolationKeyframe.X2 = x; _editingInterpolationKeyframe.Y2 = y; }
+            }
+            double x1, y1, x2, y2;
+            GetInterpolationControlPoints(stateMachine, out x1, out y1, out x2, out y2);
+            InterpMode mode = stateMachine && _selectedGraphTransition != null ? _selectedGraphTransition.Interpolation : (_editingInterpolationKeyframe != null ? _editingInterpolationKeyframe.Interp : InterpMode.Cubic);
+            DrawInterpolationCurve(canvas, true, mode, x1, y1, x2, y2);
+            if (History != null) History.MarkDirty();
+            e.Handled = true;
+        }
+
+        private void HandleInterpolationGraphMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            var canvas = sender as Canvas;
+            if (canvas != null && canvas.IsMouseCaptured) canvas.ReleaseMouseCapture();
+            _interpolationControlHandle = -1;
+            if (canvas != null)
+            {
+                bool stateMachine = canvas.Tag is bool && (bool)canvas.Tag;
+                RefreshInterpolationGraphPanel(stateMachine);
+                if (stateMachine) TriggerStateMachineStep();
+            }
+        }
+
         private FrameworkElement CreateStateMachineControlsPanel()
         {
             var border = new Border
@@ -8530,137 +10762,184 @@ namespace Kerf.UI
                 Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(36, 42, 60)),
                 BorderThickness = new Thickness(0, 1, 0, 0),
-                Padding = new Thickness(16, 10, 16, 12)
+                Padding = new Thickness(8, 6, 8, 8)
             };
+            var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            var mainGrid = new Grid();
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Header & Status Bar
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Inputs & Controls
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // States & Transitions
+            var header = new DockPanel { LastChildFill = false, Margin = new Thickness(4, 0, 4, 6) };
+            var title = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            title.Children.Add(new TextBlock { Text = "State Machine", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White });
+            _stateMachineStatusBadge = new TextBlock { Text = "● Entry", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(74, 222, 128)), Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            title.Children.Add(_stateMachineStatusBadge);
+            DockPanel.SetDock(title, Dock.Left);
+            header.Children.Add(title);
 
-            // 1. Header Toolbar
-            var headerDock = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 10) };
-
-            var titleStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            var titleIcon = new TextBlock
-            {
-                Text = "⚡ ",
-                FontSize = 13,
-                Foreground = new SolidColorBrush(Color.FromRgb(245, 158, 11))
-            };
-            titleStack.Children.Add(titleIcon);
-
-            var title = new TextBlock
-            {
-                Text = "Interactive Vector State Machine",
-                FontSize = 13,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            titleStack.Children.Add(title);
-
-            // Active State Live Badge
-            _stateMachineStatusBadge = new TextBlock
-            {
-                Text = "● Active State: Idle",
-                FontSize = 11,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94)), // Emerald
-                Margin = new Thickness(12, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            titleStack.Children.Add(_stateMachineStatusBadge);
-
-            DockPanel.SetDock(titleStack, Dock.Left);
-            headerDock.Children.Add(titleStack);
-
-            // Right side: Interactive Canvas Toggle & Step Frame
-            var rightStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-
-            _canvasInteractBtn = new Border
-            {
-                Background = new SolidColorBrush(Color.FromArgb(40, 34, 197, 94)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(34, 197, 94)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(8, 3, 8, 3),
-                Margin = new Thickness(0, 0, 8, 0),
-                Cursor = Cursors.Hand
-            };
-            _canvasInteractText = new TextBlock
-            {
-                Text = "Canvas Interaction: ON",
-                FontSize = 10,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(74, 222, 128))
-            };
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            _canvasInteractBtn = new Border { Background = new SolidColorBrush(Color.FromArgb(34, 34, 197, 94)), BorderBrush = new SolidColorBrush(Color.FromRgb(56, 128, 98)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(7, 3, 7, 3), Margin = new Thickness(0, 0, 6, 0), Cursor = Cursors.Hand };
+            _canvasInteractText = new TextBlock { Text = "Preview: On", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(134, 239, 172)) };
             _canvasInteractBtn.Child = _canvasInteractText;
             _canvasInteractBtn.MouseLeftButtonUp += (s, e) =>
             {
                 _interactiveCanvasEnabled = !_interactiveCanvasEnabled;
-                _canvasInteractText.Text = _interactiveCanvasEnabled ? "Canvas Interaction: ON" : "Canvas Interaction: OFF";
-                _canvasInteractBtn.Background = _interactiveCanvasEnabled
-                    ? new SolidColorBrush(Color.FromArgb(40, 34, 197, 94))
-                    : new SolidColorBrush(Color.FromArgb(40, 100, 116, 139));
-                _canvasInteractBtn.BorderBrush = _interactiveCanvasEnabled
-                    ? new SolidColorBrush(Color.FromRgb(34, 197, 94))
-                    : new SolidColorBrush(Color.FromRgb(100, 116, 139));
-                _canvasInteractText.Foreground = _interactiveCanvasEnabled
-                    ? new SolidColorBrush(Color.FromRgb(74, 222, 128))
-                    : new SolidColorBrush(Color.FromRgb(148, 163, 184));
+                _canvasInteractText.Text = _interactiveCanvasEnabled ? "Preview: On" : "Preview: Off";
+                _canvasInteractBtn.Background = _interactiveCanvasEnabled ? new SolidColorBrush(Color.FromArgb(34, 34, 197, 94)) : new SolidColorBrush(Color.FromArgb(30, 100, 116, 139));
             };
-            rightStack.Children.Add(_canvasInteractBtn);
+            actions.Children.Add(_canvasInteractBtn);
+            var graphZoomControls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 2, 0) };
+            var zoomOut = CreateSmallTimelineButton("−", () => ZoomStateGraphBy(1.0 / 1.15));
+            zoomOut.Padding = new Thickness(7, 4, 7, 4);
+            var zoomIn = CreateSmallTimelineButton("+", () => ZoomStateGraphBy(1.15));
+            zoomIn.Padding = new Thickness(7, 4, 7, 4);
+            _stateMachineGraphZoomText = new TextBlock { Text = "100%", Width = 38, TextAlignment = TextAlignment.Center, FontSize = 9, Foreground = new SolidColorBrush(Color.FromRgb(154, 167, 188)), VerticalAlignment = VerticalAlignment.Center };
+            graphZoomControls.Children.Add(zoomOut);
+            graphZoomControls.Children.Add(_stateMachineGraphZoomText);
+            graphZoomControls.Children.Add(zoomIn);
+            graphZoomControls.Children.Add(CreateSmallTimelineButton("Fit", FitStateGraphToView));
+            actions.Children.Add(graphZoomControls);
+            actions.Children.Add(CreateSmallTimelineButton("+ State", AddStateMachineState));
+            actions.Children.Add(CreateSmallTimelineButton("+ Transition", ShowAddTransitionDialog));
+            DockPanel.SetDock(actions, Dock.Right);
+            header.Children.Add(actions);
+            Grid.SetRow(header, 0);
+            grid.Children.Add(header);
 
-            var tickBtn = CreateSmallTimelineButton("▶ Step Frame (0.016s)", () => TriggerStateMachineStep());
-            rightStack.Children.Add(tickBtn);
+            var body = new Grid();
+            body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(232) });
+            var graph = new Grid { Margin = new Thickness(0, 0, 8, 0) };
+            graph.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            graph.RowDefinitions.Add(new RowDefinition { Height = new GridLength(80) });
+            _stateMachineGraphCanvas = new Canvas { Width = 780, Height = 230, Background = new SolidColorBrush(Color.FromRgb(18, 21, 28)), LayoutTransform = _stateMachineGraphScale };
+            _stateMachineGraphCanvas.PreviewMouseDown += HandleStateGraphPanStart;
+            _stateMachineGraphCanvas.PreviewMouseUp += HandleStateGraphPanEnd;
+            _stateMachineGraphCanvas.MouseMove += HandleStateGraphMouseMove;
+            _stateMachineGraphCanvas.MouseLeftButtonUp += HandleStateGraphMouseUp;
+            _stateMachineGraphScrollViewer = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _stateMachineGraphCanvas };
+            _stateMachineGraphScrollViewer.PreviewMouseWheel += HandleStateGraphMouseWheel;
+            var graphBorder = new Border { Background = new SolidColorBrush(Color.FromRgb(18, 21, 28)), BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 62)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Child = _stateMachineGraphScrollViewer };
+            Grid.SetRow(graphBorder, 0);
+            graph.Children.Add(graphBorder);
+            var curvePanel = CreateInterpolationGraphPanel(true);
+            Grid.SetRow(curvePanel, 1);
+            graph.Children.Add(curvePanel);
+            Grid.SetColumn(graph, 0);
+            body.Children.Add(graph);
 
-            DockPanel.SetDock(rightStack, Dock.Right);
-            headerDock.Children.Add(rightStack);
+            var side = new StackPanel();
+            _stateMachineInputsStack = new StackPanel();
+            var inputs = CreateStateMachineCollapsibleSection("Inputs", _stateMachineInputsStack, ShowAddViewModelPropertyDialog, out _stateMachineInputSearch);
+            side.Children.Add(inputs);
+            _stateMachineListenersStack = new StackPanel();
+            var listeners = CreateStateMachineCollapsibleSection("Listeners", _stateMachineListenersStack, ShowAddStateMachineListenerDialog, out _stateMachineListenerSearch);
+            listeners.Margin = new Thickness(0, 6, 0, 0);
+            side.Children.Add(listeners);
+            side.Children.Add(new TextBlock { Text = "Drag a port to another state to add a transition. Double-click a state to edit its timeline.", FontSize = 9, Foreground = new SolidColorBrush(Color.FromRgb(112, 126, 148)), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 8, 4, 0) });
+            var sideScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = side };
+            Grid.SetColumn(sideScroll, 1);
+            body.Children.Add(sideScroll);
+            Grid.SetRow(body, 1);
+            grid.Children.Add(body);
 
-            Grid.SetRow(headerDock, 0);
-            mainGrid.Children.Add(headerDock);
-
-            // 2. Inputs & Triggers Row
-            var inputsRow = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
-            var inputsHeader = new TextBlock
-            {
-                Text = "STATE MACHINE INPUTS (CLICK OR TOGGLE TO TRIGGER POSE TRANSITIONS):",
-                FontSize = 10,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
-                Margin = new Thickness(0, 0, 0, 6)
-            };
-            inputsRow.Children.Add(inputsHeader);
-
-            _stateMachineInputsStack = new StackPanel { Orientation = Orientation.Horizontal };
+            border.Child = grid;
             BuildStateMachineInputsControls();
-            inputsRow.Children.Add(_stateMachineInputsStack);
-
-            Grid.SetRow(inputsRow, 1);
-            mainGrid.Children.Add(inputsRow);
-
-            // 3. States & Transitions Graph Row
-            var statesRow = new StackPanel();
-            var statesHeader = new TextBlock
-            {
-                Text = "MACHINE STATES & TRANSITION GRAPH (CLICK STATE TO PREVIEW POSE):",
-                FontSize = 10,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
-                Margin = new Thickness(0, 0, 0, 6)
-            };
-            statesRow.Children.Add(statesHeader);
-
-            _stateMachineStatesStack = new StackPanel { Orientation = Orientation.Horizontal };
+            BuildStateMachineListeners();
             BuildStateMachineStatesGraph();
-            statesRow.Children.Add(_stateMachineStatesStack);
-
-            Grid.SetRow(statesRow, 2);
-            mainGrid.Children.Add(statesRow);
-
-            border.Child = mainGrid;
             return border;
+        }
+
+        private FrameworkElement CreateStateMachineCollapsibleSection(string title, Panel items, Action addAction, out TextBox searchBox)
+        {
+            var section = new Border { Background = new SolidColorBrush(Color.FromRgb(26, 30, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(48, 55, 68)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(6) };
+            var content = new StackPanel();
+            var header = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
+            var toggle = new TextBlock { Text = "⌄  " + title, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(204, 211, 222)), VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand };
+            DockPanel.SetDock(toggle, Dock.Left);
+            header.Children.Add(toggle);
+            var add = CreateSmallTimelineButton("+", addAction);
+            add.Width = 24;
+            add.Height = 22;
+            DockPanel.SetDock(add, Dock.Right);
+            header.Children.Add(add);
+            content.Children.Add(header);
+            searchBox = new TextBox { Text = "Search " + title, ToolTip = "Search " + title, Height = 23, Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 0, 4), Background = new SolidColorBrush(Color.FromRgb(18, 21, 28)), Foreground = new SolidColorBrush(Color.FromRgb(118, 130, 149)), BorderBrush = new SolidColorBrush(Color.FromRgb(45, 52, 64)), FontSize = 10 };
+            var search = searchBox;
+            content.Children.Add(searchBox);
+            string placeholder = "Search " + title;
+            search.GotKeyboardFocus += (s, e) =>
+            {
+                if (string.Equals(search.Text, placeholder, StringComparison.Ordinal))
+                {
+                    search.Text = string.Empty;
+                    search.Foreground = new SolidColorBrush(Color.FromRgb(205, 213, 224));
+                }
+            };
+            search.LostKeyboardFocus += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(search.Text))
+                {
+                    search.Text = placeholder;
+                    search.Foreground = new SolidColorBrush(Color.FromRgb(118, 130, 149));
+                }
+            };
+            var list = new ScrollViewer { Height = 83, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = items };
+            content.Children.Add(list);
+            toggle.MouseLeftButtonUp += (s, e) =>
+            {
+                bool open = search.Visibility == Visibility.Visible;
+                search.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+                list.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+                toggle.Text = (open ? "›  " : "⌄  ") + title;
+            };
+            search.TextChanged += (s, e) => FilterStateMachineItems(items, search.Text);
+            section.Child = content;
+            return section;
+        }
+
+        private void FilterStateMachineItems(Panel items, string query)
+        {
+            if (items == null) return;
+            string filter = (query ?? string.Empty).Trim();
+            if (string.Equals(filter, "Search Inputs", StringComparison.OrdinalIgnoreCase) || string.Equals(filter, "Search Listeners", StringComparison.OrdinalIgnoreCase)) filter = string.Empty;
+            foreach (UIElement item in items.Children)
+            {
+                var element = item as FrameworkElement;
+                if (element == null) continue;
+                string name = element.Tag as string ?? string.Empty;
+                element.Visibility = string.IsNullOrEmpty(filter) || name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+
+        private StateMachineRuntime EnsureStateMachineRuntime()
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (_timelineController == null) return null;
+            if (_timelineController.ActiveStateMachine != null) return _timelineController.ActiveStateMachine;
+            if (Document == null) return null;
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (Document.Animation.Clips.Count == 0)
+            {
+                var clip = new Clip(100, "Default Animation", Math.Max(0.1, _timelineController.Duration), _timelineController.Fps, LoopMode.Loop);
+                Document.Animation.Clips.Add(clip);
+                _timelineController.ActiveClip = clip;
+            }
+            int activeClipIndex = Document.Animation.Clips.IndexOf(_timelineController.ActiveClip);
+            if (activeClipIndex < 0) activeClipIndex = 0;
+            var definition = new StateMachineDefinition("State Machine 1");
+            definition.AddViewModelProperty(new ViewModelPropertyDefinition("Hovering", ViewModelPropertyKind.Boolean));
+            var layer = new MachineLayer("Base Layer");
+            int entry = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int idle = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, activeClipIndex));
+            layer.AddState(new MachineState(2, "Any State", StateKind.Any));
+            layer.AddState(new MachineState(3, "Exit", StateKind.Exit));
+            layer.AddTransition(new StateTransition(entry, idle, 0.0));
+            definition.AddLayer(layer);
+            Document.Animation.StateMachine = definition;
+            _timelineController.ActiveStateMachine = new StateMachineRuntime(definition, Document.Animation.Clips);
+            if (History != null) History.MarkDirty();
+            return _timelineController.ActiveStateMachine;
         }
 
         private void BuildStateMachineInputsControls()
@@ -8673,13 +10952,14 @@ namespace Kerf.UI
                 EnsureTimelineControllerInitialized();
             }
 
-            var sm = _timelineController.ActiveStateMachine;
+            var sm = EnsureStateMachineRuntime();
             if (sm == null || sm.Definition == null) return;
 
             for (int i = 0; i < sm.Definition.Inputs.Count; i++)
             {
                 int inIdx = i;
                 var input = sm.Definition.Inputs[i];
+                if (input == null) continue;
 
                 if (input.Kind == InputKind.Trigger)
                 {
@@ -8702,9 +10982,9 @@ namespace Kerf.UI
                     trgBtn.MouseLeftButtonUp += (s, e) =>
                     {
                         sm.FireTrigger(inIdx);
-                        TriggerStateMachineStep();
+                        TriggerStateMachineStep(continuePlayback: true);
                     };
-                    _stateMachineInputsStack.Children.Add(trgBtn);
+                    AddStateMachineInputElement(trgBtn, input.Name);
                 }
                 else if (input.Kind == InputKind.Bool)
                 {
@@ -8731,9 +11011,9 @@ namespace Kerf.UI
                         sm.SetBool(inIdx, newVal);
                         tb.Text = string.Format("⏻ {0}: {1}", input.Name, newVal ? "ON" : "OFF");
                         boolBtn.Background = newVal ? new SolidColorBrush(Color.FromRgb(16, 185, 129)) : new SolidColorBrush(Color.FromRgb(37, 99, 235));
-                        TriggerStateMachineStep();
+                        TriggerStateMachineStep(continuePlayback: true);
                     };
-                    _stateMachineInputsStack.Children.Add(boolBtn);
+                    AddStateMachineInputElement(boolBtn, input.Name);
                 }
                 else if (input.Kind == InputKind.Number)
                 {
@@ -8763,74 +11043,1216 @@ namespace Kerf.UI
                     slider.ValueChanged += (s, e) =>
                     {
                         sm.SetNumber(inIdx, slider.Value);
-                        TriggerStateMachineStep();
+                        TriggerStateMachineStep(continuePlayback: true);
                     };
                     numStack.Children.Add(slider);
-                    _stateMachineInputsStack.Children.Add(numStack);
+                    AddStateMachineInputElement(numStack, input.Name);
                 }
             }
+
+            if (sm.Definition.ViewModelProperties != null)
+            {
+                foreach (var property in sm.Definition.ViewModelProperties)
+                {
+                    if (property == null) continue;
+                    string propertyName = property.Name;
+                    if (property.Kind == ViewModelPropertyKind.Trigger)
+                    {
+                        var triggerButton = CreateSmallTimelineButton("⚡ " + propertyName, () =>
+                        {
+                            sm.FireViewModelTrigger(propertyName);
+                            TriggerStateMachineStep();
+                        });
+                        AddStateMachineInputElement(triggerButton, propertyName);
+                    }
+                    else if (property.Kind == ViewModelPropertyKind.Boolean)
+                    {
+                        bool current = sm.ViewModel.GetBool(propertyName);
+                        var booleanInput = new CheckBox
+                        {
+                            Content = propertyName,
+                            IsChecked = current,
+                            Foreground = new SolidColorBrush(Color.FromRgb(202, 211, 224)),
+                            FontSize = 10.5,
+                            Margin = new Thickness(1, 2, 0, 2),
+                            Cursor = Cursors.Hand
+                        };
+                        booleanInput.Checked += (s, e) =>
+                        {
+                            sm.SetViewModelBool(propertyName, true);
+                            TriggerStateMachineStep();
+                        };
+                        booleanInput.Unchecked += (s, e) =>
+                        {
+                            sm.SetViewModelBool(propertyName, false);
+                            TriggerStateMachineStep();
+                        };
+                        AddStateMachineInputElement(booleanInput, propertyName);
+                    }
+                    else if (property.Kind == ViewModelPropertyKind.Number)
+                    {
+                        var numberPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+                        double current = sm.GetViewModelNumber(propertyName);
+                        var label = new TextBlock
+                        {
+                            Text = propertyName + "  " + current.ToString("0.##"),
+                            FontSize = 10.5,
+                            Foreground = new SolidColorBrush(Color.FromRgb(180, 194, 216)),
+                            VerticalAlignment = VerticalAlignment.Center,
+                            MinWidth = 74
+                        };
+                        var slider = new Slider { Minimum = 0.0, Maximum = string.Equals(propertyName, "playbackSpeed", StringComparison.OrdinalIgnoreCase) ? 4.0 : 1.0,
+                            Value = Math.Max(0.0, Math.Min(string.Equals(propertyName, "playbackSpeed", StringComparison.OrdinalIgnoreCase) ? 4.0 : 1.0, current)),
+                            Width = 88, VerticalAlignment = VerticalAlignment.Center };
+                        slider.ValueChanged += (s, e) =>
+                        {
+                            sm.SetViewModelNumber(propertyName, slider.Value);
+                            label.Text = propertyName + "  " + slider.Value.ToString("0.##");
+                            TriggerStateMachineStep();
+                        };
+                        numberPanel.Children.Add(label);
+                        numberPanel.Children.Add(slider);
+                        AddStateMachineInputElement(numberPanel, propertyName);
+                    }
+                    else if (property.Kind == ViewModelPropertyKind.Text)
+                    {
+                        var textPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+                        textPanel.Children.Add(new TextBlock { Text = propertyName, FontSize = 10.5, Foreground = new SolidColorBrush(Color.FromRgb(180, 194, 216)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                        var textInput = new TextBox { Text = sm.ViewModel.GetText(propertyName), Width = 110, Height = 25, Padding = new Thickness(6, 3, 6, 3), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+                        textInput.LostKeyboardFocus += (s, e) => sm.SetViewModelText(propertyName, textInput.Text);
+                        textInput.KeyDown += (s, e) =>
+                        {
+                            if (e.Key == Key.Enter)
+                            {
+                                sm.SetViewModelText(propertyName, textInput.Text);
+                                Keyboard.ClearFocus();
+                                TriggerStateMachineStep();
+                            }
+                        };
+                        textPanel.Children.Add(textInput);
+                        AddStateMachineInputElement(textPanel, propertyName);
+                    }
+                }
+            }
+            if (_stateMachineInputSearch != null)
+                FilterStateMachineItems(_stateMachineInputsStack, _stateMachineInputSearch.Text);
+        }
+
+        private void AddStateMachineInputElement(UIElement element, string name)
+        {
+            var framework = element as FrameworkElement;
+            if (framework != null)
+            {
+                framework.Tag = name ?? string.Empty;
+                framework.Margin = new Thickness(0, 2, 0, 2);
+            }
+            if (_stateMachineInputsStack != null && element != null) _stateMachineInputsStack.Children.Add(element);
+        }
+
+        private void AddStateMachineState()
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            if (sm.Definition == null || sm.Definition.Layers == null || sm.Definition.Layers.Count == 0) return;
+            var layer = sm.Definition.Layers[0];
+            string name = "State " + (layer.States.Count + 1);
+            uint clipId = unchecked((uint)(DateTime.UtcNow.Ticks & 0xffffffff));
+            var clip = new Clip(clipId, name, Math.Max(0.1, _timelineController.Duration), _timelineController.Fps, LoopMode.Loop);
+            int clipIndex = sm.Clips.Count;
+            sm.Clips.Add(clip);
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (!ReferenceEquals(Document.Animation.Clips, sm.Clips)) Document.Animation.Clips.Add(clip);
+            int stateIndex = layer.AddState(new MachineState(layer.States.Count, name, StateKind.Animation, clipIndex));
+            int entryIndex = layer.States.FindIndex(state => state != null && state.Kind == StateKind.Entry);
+            if (entryIndex >= 0 && !layer.Transitions.Any(transition => transition != null && transition.FromState == entryIndex))
+                layer.AddTransition(new StateTransition(entryIndex, stateIndex, 0.0));
+            _selectedGraphStateIndex = stateIndex;
+            History.MarkDirty();
+            BuildStateMachineStatesGraph();
+            RefreshTimelineUI();
+        }
+
+        private void ShowAddViewModelPropertyDialog()
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            var dialog = new Window
+            {
+                Title = "Add View Model Property",
+                Width = 330,
+                Height = 235,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
+                Foreground = Brushes.White
+            };
+            var owner = Window.GetWindow(this);
+            if (owner != null) dialog.Owner = owner;
+            var form = new StackPanel { Margin = new Thickness(18) };
+            var nameBox = new TextBox { Text = "newProperty", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)), Margin = new Thickness(0, 0, 0, 10) };
+            form.Children.Add(CreateTransitionFormRow("Name", nameBox));
+            var kindBox = CreateModernComboBox(30);
+            foreach (var kind in new ViewModelPropertyKind[] { ViewModelPropertyKind.Boolean, ViewModelPropertyKind.Number, ViewModelPropertyKind.Trigger, ViewModelPropertyKind.Text })
+                kindBox.Items.Add(new ComboBoxItem { Content = kind.ToString(), Tag = kind });
+            kindBox.SelectedIndex = 0;
+            form.Children.Add(CreateTransitionFormRow("Type", kindBox));
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
+            var cancel = CreateSmallButton("Cancel", "Close without changes", () => dialog.Close());
+            cancel.Width = 72;
+            var create = CreateSmallButton("Create", "Create property", () =>
+            {
+                string propertyName = nameBox.Text.Trim();
+                if (string.IsNullOrEmpty(propertyName)) return;
+                if (sm.Definition.ViewModelProperties.Any(p => p != null && string.Equals(p.Name, propertyName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    MessageBox.Show("A View Model property with this name already exists.", "State Machine", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                var selected = kindBox.SelectedItem as ComboBoxItem;
+                var kind = selected != null ? (ViewModelPropertyKind)selected.Tag : ViewModelPropertyKind.Boolean;
+                sm.Definition.AddViewModelProperty(new ViewModelPropertyDefinition(propertyName, kind));
+                sm.RebuildViewModel();
+                History.MarkDirty();
+                BuildStateMachineInputsControls();
+                BuildStateMachineStatesGraph();
+                dialog.Close();
+            });
+            create.Width = 78;
+            create.Margin = new Thickness(8, 0, 0, 0);
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(create);
+            form.Children.Add(buttons);
+            dialog.Content = form;
+            dialog.ShowDialog();
+        }
+
+        private void ShowAddStateMachineListenerDialog()
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null || Document == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            var page = Document.GetActivePage();
+            var layers = page != null ? page.GetAllLayersFlat().Where(l => l != null).ToList() : new List<LayerNode>();
+            if (layers.Count == 0 || sm.Definition.ViewModelProperties == null || sm.Definition.ViewModelProperties.Count == 0) return;
+
+            var dialog = new Window
+            {
+                Title = "Add Pointer Listener",
+                Width = 380,
+                Height = 370,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
+                Foreground = Brushes.White
+            };
+            var owner = Window.GetWindow(this);
+            if (owner != null) dialog.Owner = owner;
+            var form = new StackPanel { Margin = new Thickness(18) };
+            var targetBox = CreateModernComboBox(30);
+            foreach (var layer in layers) targetBox.Items.Add(new ComboBoxItem { Content = layer.Name, Tag = layer });
+            targetBox.SelectedIndex = 0;
+            form.Children.Add(CreateTransitionFormRow("Layer", targetBox));
+            var eventBox = CreateModernComboBox(30);
+            foreach (var kind in new PointerEventKind[] { PointerEventKind.Down, PointerEventKind.Up, PointerEventKind.Enter, PointerEventKind.Exit, PointerEventKind.Move })
+                eventBox.Items.Add(new ComboBoxItem { Content = kind.ToString(), Tag = kind });
+            eventBox.SelectedIndex = 2;
+            form.Children.Add(CreateTransitionFormRow("Event", eventBox));
+            var propertyBox = CreateModernComboBox(30);
+            foreach (var property in sm.Definition.ViewModelProperties)
+                if (property != null) propertyBox.Items.Add(new ComboBoxItem { Content = property.Name + " · " + property.Kind, Tag = property });
+            if (propertyBox.Items.Count > 0) propertyBox.SelectedIndex = 0;
+            form.Children.Add(CreateTransitionFormRow("Property", propertyBox));
+            var valueBox = new TextBox { Text = "1", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            form.Children.Add(CreateTransitionFormRow("Set value", valueBox));
+            form.Children.Add(new TextBlock { Text = "Click a listener chip below to remove it.", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)), Margin = new Thickness(0, 0, 0, 8) });
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            var cancel = CreateSmallButton("Cancel", "Close without changes", () => dialog.Close());
+            cancel.Width = 72;
+            var create = CreateSmallButton("Create", "Create listener", () =>
+            {
+                var layerItem = targetBox.SelectedItem as ComboBoxItem;
+                var eventItem = eventBox.SelectedItem as ComboBoxItem;
+                var propertyItem = propertyBox.SelectedItem as ComboBoxItem;
+                if (layerItem == null || eventItem == null || propertyItem == null) return;
+                var target = layerItem.Tag as LayerNode;
+                var property = propertyItem.Tag as ViewModelPropertyDefinition;
+                if (target == null || property == null) return;
+                double numeric;
+                if (!double.TryParse(valueBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out numeric)) numeric = 1.0;
+                var listener = new NodeListener(PropertyBinder.GetNumericNodeId(target.Id), (PointerEventKind)eventItem.Tag);
+                ListenerAction action;
+                if (property.Kind == ViewModelPropertyKind.Boolean)
+                    action = new ListenerAction(ActionKind.SetViewModelBool, property.Name, numeric > 0.5 ? 1.0 : 0.0);
+                else if (property.Kind == ViewModelPropertyKind.Number)
+                    action = new ListenerAction(ActionKind.SetViewModelNumber, property.Name, numeric);
+                else if (property.Kind == ViewModelPropertyKind.Trigger)
+                    action = new ListenerAction(ActionKind.FireViewModelTrigger, property.Name);
+                else
+                {
+                    action = new ListenerAction(ActionKind.SetViewModelText, property.Name);
+                    action.TextValue = valueBox.Text;
+                }
+                listener.Actions.Add(action);
+                sm.Definition.AddListener(listener);
+                History.MarkDirty();
+                BuildStateMachineListeners();
+                dialog.Close();
+            });
+            create.Width = 78;
+            create.Margin = new Thickness(8, 0, 0, 0);
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(create);
+            form.Children.Add(buttons);
+            dialog.Content = form;
+            dialog.ShowDialog();
+        }
+
+        private void BuildStateMachineListeners()
+        {
+            if (_stateMachineListenersStack == null) return;
+            _stateMachineListenersStack.Children.Clear();
+            var sm = _timelineController != null ? _timelineController.ActiveStateMachine : null;
+            if (sm == null || sm.Definition == null || sm.Definition.Listeners == null) return;
+            var page = Document != null ? Document.GetActivePage() : null;
+            foreach (var listener in sm.Definition.Listeners.ToList())
+            {
+                if (listener == null) continue;
+                var layer = page != null ? page.GetAllLayersFlat().FirstOrDefault(l => PropertyBinder.GetNumericNodeId(l.Id) == listener.TargetNodeId) : null;
+                string actionText = listener.Actions != null && listener.Actions.Count > 0 && listener.Actions[0] != null
+                    ? listener.Actions[0].PropertyName : "action";
+                var chip = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(27, 32, 46)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(48, 58, 80)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(7, 5, 7, 5),
+                    Margin = new Thickness(0, 2, 0, 2),
+                    Child = new TextBlock { Text = (layer != null ? layer.Name : "Layer") + " · " + listener.Kind + " → " + actionText, FontSize = 9.5, Foreground = new SolidColorBrush(Color.FromRgb(165, 178, 201)) },
+                    ToolTip = "Click to remove listener",
+                    Cursor = Cursors.Hand
+                };
+                chip.MouseLeftButtonUp += (s, e) =>
+                {
+                    sm.Definition.Listeners.Remove(listener);
+                    History.MarkDirty();
+                    BuildStateMachineListeners();
+                };
+                chip.Tag = (layer != null ? layer.Name : "Layer") + " " + listener.Kind + " " + actionText;
+                _stateMachineListenersStack.Children.Add(chip);
+            }
+            if (_stateMachineListenerSearch != null)
+                FilterStateMachineItems(_stateMachineListenersStack, _stateMachineListenerSearch.Text);
+        }
+
+        private void ShowAddTransitionDialog()
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            if (sm.Definition == null || sm.Definition.Layers == null || sm.Definition.Layers.Count == 0) return;
+            var layer = sm.Definition.Layers[0];
+            if (layer.States == null || layer.States.Count < 2) return;
+
+            var dialog = new Window
+            {
+                Title = "Add Transition",
+                Width = 400,
+                Height = 500,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
+                Foreground = Brushes.White
+            };
+            var owner = Window.GetWindow(this);
+            if (owner != null) dialog.Owner = owner;
+            var form = new StackPanel { Margin = new Thickness(18) };
+            ComboBox fromBox = CreateModernComboBox(30);
+            ComboBox toBox = CreateModernComboBox(30);
+            for (int i = 0; i < layer.States.Count; i++)
+            {
+                var fromItem = new ComboBoxItem { Content = layer.States[i].Name, Tag = i };
+                fromBox.Items.Add(fromItem);
+                if (layer.States[i].Kind != StateKind.Entry && layer.States[i].Kind != StateKind.Any)
+                    toBox.Items.Add(new ComboBoxItem { Content = layer.States[i].Name, Tag = i });
+            }
+            if (fromBox.Items.Count > 0) fromBox.SelectedIndex = 0;
+            if (toBox.Items.Count > 0) toBox.SelectedIndex = Math.Min(1, toBox.Items.Count - 1);
+            form.Children.Add(CreateTransitionFormRow("From", fromBox));
+            form.Children.Add(CreateTransitionFormRow("To", toBox));
+
+            var durationBox = new TextBox { Text = "0.2", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            form.Children.Add(CreateTransitionFormRow("Blend (s)", durationBox));
+
+            var interpolationBox = CreateModernComboBox(30);
+            interpolationBox.Items.Add(new ComboBoxItem { Content = "Hold", Tag = InterpMode.Hold });
+            interpolationBox.Items.Add(new ComboBoxItem { Content = "Linear", Tag = InterpMode.Linear });
+            interpolationBox.Items.Add(new ComboBoxItem { Content = "Cubic", Tag = InterpMode.Cubic });
+            interpolationBox.SelectedIndex = 2;
+            form.Children.Add(CreateTransitionFormRow("Interpolation", interpolationBox));
+
+            var conditionPicker = CreateModernComboBox(30);
+            conditionPicker.Items.Add(new ComboBoxItem { Content = "Always", Tag = null });
+            foreach (var property in sm.Definition.ViewModelProperties ?? new List<ViewModelPropertyDefinition>())
+                if (property != null) conditionPicker.Items.Add(new ComboBoxItem { Content = property.Name, Tag = property });
+            for (int i = 0; i < sm.Definition.Inputs.Count; i++)
+                if (sm.Definition.Inputs[i] != null) conditionPicker.Items.Add(new ComboBoxItem { Content = sm.Definition.Inputs[i].Name, Tag = i });
+            conditionPicker.SelectedIndex = 0;
+            form.Children.Add(CreateTransitionFormRow("When", conditionPicker));
+
+            var opBox = CreateModernComboBox(30);
+            foreach (var op in new ConditionOp[] { ConditionOp.Eq, ConditionOp.Ne, ConditionOp.Gt, ConditionOp.Ge, ConditionOp.Lt, ConditionOp.Le })
+                opBox.Items.Add(new ComboBoxItem { Content = op.ToString(), Tag = op });
+            opBox.SelectedIndex = 0;
+            var valueBox = new TextBox { Text = "1", Width = 74, Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            var conditionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+            conditionRow.Children.Add(opBox);
+            conditionRow.Children.Add(valueBox);
+            form.Children.Add(conditionRow);
+
+            var conditions = new List<TransitionCondition>();
+            var conditionTokens = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var addConditionButton = CreateSmallButton("+ AND condition", "Add another condition to this transition", () =>
+            {
+                var selected = conditionPicker.SelectedItem as ComboBoxItem;
+                if (selected == null || selected.Tag == null) return;
+                double threshold;
+                if (!double.TryParse(valueBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out threshold)) threshold = 1.0;
+                var opItem = opBox.SelectedItem as ComboBoxItem;
+                var operation = opItem != null ? (ConditionOp)opItem.Tag : ConditionOp.Eq;
+                var property = selected.Tag as ViewModelPropertyDefinition;
+                TransitionCondition condition;
+                if (property != null)
+                {
+                    condition = new TransitionCondition(property.Name, operation, threshold);
+                    if (property.Kind == ViewModelPropertyKind.Text) condition.TextValue = valueBox.Text;
+                }
+                else if (selected.Tag is int)
+                {
+                    condition = new TransitionCondition((int)selected.Tag, operation, threshold);
+                }
+                else return;
+                conditions.Add(condition);
+                var token = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(38, 48, 66)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(7, 3, 7, 3),
+                    Margin = new Thickness(0, 0, 5, 4),
+                    Child = new TextBlock { Text = (property != null ? property.Name : selected.Content.ToString()) + " " + operation.ToString() + " " + (property != null && property.Kind == ViewModelPropertyKind.Text ? valueBox.Text : threshold.ToString("0.##")), FontSize = 9.5, Foreground = new SolidColorBrush(Color.FromRgb(195, 207, 226)) }
+                };
+                token.ToolTip = "Click to remove condition";
+                token.Cursor = Cursors.Hand;
+                token.MouseLeftButtonUp += (s, e) =>
+                {
+                    conditions.Remove(condition);
+                    conditionTokens.Children.Remove(token);
+                };
+                conditionTokens.Children.Add(token);
+            });
+            form.Children.Add(addConditionButton);
+            form.Children.Add(conditionTokens);
+
+            var bidirectional = new CheckBox { Content = "Also add a reverse transition", Foreground = new SolidColorBrush(Color.FromRgb(184, 194, 210)), FontSize = 10.5, Margin = new Thickness(0, 2, 0, 4) };
+            form.Children.Add(bidirectional);
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+            var cancelButton = CreateSmallButton("Cancel", "Close without changes", () => dialog.Close());
+            cancelButton.Width = 72;
+            var addButton = CreateSmallButton("Create", "Create transition", () =>
+            {
+                var from = fromBox.SelectedItem as ComboBoxItem;
+                var to = toBox.SelectedItem as ComboBoxItem;
+                if (from == null || to == null) return;
+                double duration;
+                if (!double.TryParse(durationBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out duration)) duration = 0.2;
+                int fromIndex = (int)from.Tag;
+                int toIndex = (int)to.Tag;
+                var transition = new StateTransition(fromIndex, toIndex, Math.Max(0.0, duration));
+                var interpolation = interpolationBox.SelectedItem as ComboBoxItem;
+                if (interpolation != null && interpolation.Tag is InterpMode) transition.Interpolation = (InterpMode)interpolation.Tag;
+                transition.Conditions.AddRange(conditions);
+                layer.AddTransition(transition);
+                _selectedGraphTransition = transition;
+                _selectedGraphTransitionLayer = layer;
+                if (bidirectional.IsChecked == true) AddReverseTransition(layer, transition);
+                History.MarkDirty();
+                BuildStateMachineStatesGraph();
+                RefreshTimelineUI();
+                dialog.Close();
+            });
+            addButton.Width = 78;
+            addButton.Margin = new Thickness(8, 0, 0, 0);
+            buttons.Children.Add(cancelButton);
+            buttons.Children.Add(addButton);
+            form.Children.Add(buttons);
+            dialog.Content = form;
+            dialog.ShowDialog();
+        }
+
+        private void ShowEditTransitionDialog(StateTransition transition, MachineLayer layer)
+        {
+            if (transition == null || layer == null || _timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            var dialog = new Window { Title = "Transition", Width = 360, Height = 330, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)), Foreground = Brushes.White };
+            var owner = Window.GetWindow(this); if (owner != null) dialog.Owner = owner;
+            var form = new StackPanel { Margin = new Thickness(16) };
+            var duration = new TextBox { Text = transition.Duration.ToString("0.##", CultureInfo.InvariantCulture), Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            form.Children.Add(CreateTransitionFormRow("Blend (s)", duration));
+            var interpolation = CreateModernComboBox(30);
+            foreach (InterpMode mode in new[] { InterpMode.Hold, InterpMode.Linear, InterpMode.Cubic }) interpolation.Items.Add(new ComboBoxItem { Content = mode.ToString(), Tag = mode });
+            interpolation.SelectedIndex = (int)transition.Interpolation;
+            form.Children.Add(CreateTransitionFormRow("Interpolation", interpolation));
+
+            var conditionPicker = CreateModernComboBox(30);
+            conditionPicker.Items.Add(new ComboBoxItem { Content = "Always", Tag = null });
+            foreach (var property in sm.Definition.ViewModelProperties ?? new List<ViewModelPropertyDefinition>())
+                if (property != null) conditionPicker.Items.Add(new ComboBoxItem { Content = property.Name, Tag = property });
+            for (int i = 0; i < sm.Definition.Inputs.Count; i++)
+                if (sm.Definition.Inputs[i] != null) conditionPicker.Items.Add(new ComboBoxItem { Content = sm.Definition.Inputs[i].Name, Tag = i });
+            var existingCondition = transition.Conditions != null ? transition.Conditions.FirstOrDefault() : null;
+            if (existingCondition == null) conditionPicker.SelectedIndex = 0;
+            else
+            {
+                conditionPicker.SelectedIndex = conditionPicker.Items.Cast<ComboBoxItem>().Select((item, index) => new { item, index }).Where(pair =>
+                {
+                    var property = pair.item.Tag as ViewModelPropertyDefinition;
+                    if (property != null) return string.Equals(property.Name, existingCondition.PropertyName, StringComparison.OrdinalIgnoreCase);
+                    if (pair.item.Tag is int) return (int)pair.item.Tag == existingCondition.InputIndex;
+                    return false;
+                }).Select(pair => pair.index).FirstOrDefault();
+            }
+            form.Children.Add(CreateTransitionFormRow("When", conditionPicker));
+            var operators = CreateModernComboBox(30);
+            foreach (var op in new[] { ConditionOp.Eq, ConditionOp.Ne, ConditionOp.Gt, ConditionOp.Ge, ConditionOp.Lt, ConditionOp.Le }) operators.Items.Add(new ComboBoxItem { Content = op.ToString(), Tag = op });
+            var initialOp = existingCondition != null ? (int)existingCondition.Op : 0;
+            operators.SelectedIndex = Math.Max(0, Math.Min(5, initialOp));
+            var value = new TextBox { Text = existingCondition != null ? (existingCondition.TextValue ?? existingCondition.Value.ToString("0.##", CultureInfo.InvariantCulture)) : "1", Width = 100, Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            var conditionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            conditionRow.Children.Add(operators); conditionRow.Children.Add(value); form.Children.Add(conditionRow);
+            bool reverseExists = layer.Transitions.Any(candidate => candidate != null && candidate != transition && candidate.FromState == transition.ToState && candidate.ToState == transition.FromState);
+            var bidirectional = new CheckBox { Content = "Add reverse transition", IsChecked = reverseExists, IsEnabled = !reverseExists, Foreground = new SolidColorBrush(Color.FromRgb(184, 194, 210)), FontSize = 10.5, Margin = new Thickness(0, 0, 0, 8) };
+            form.Children.Add(bidirectional);
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            buttons.Children.Add(CreateSmallButton("Cancel", "Close without changes", () => dialog.Close()));
+            var saveButton = CreateSmallButton("Save", "Save transition", () =>
+            {
+                double blend;
+                if (!double.TryParse(duration.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out blend)) blend = transition.Duration;
+                transition.Duration = Math.Max(0.0, blend);
+                var mode = interpolation.SelectedItem as ComboBoxItem;
+                if (mode != null && mode.Tag is InterpMode) transition.Interpolation = (InterpMode)mode.Tag;
+                var reverseTransition = layer.Transitions.FirstOrDefault(candidate => candidate != null && candidate != transition && candidate.FromState == transition.ToState && candidate.ToState == transition.FromState);
+                if (reverseTransition != null)
+                {
+                    reverseTransition.Duration = transition.Duration;
+                    reverseTransition.Interpolation = transition.Interpolation;
+                    reverseTransition.X1 = transition.X1; reverseTransition.Y1 = transition.Y1;
+                    reverseTransition.X2 = transition.X2; reverseTransition.Y2 = transition.Y2;
+                }
+                var retainedConditions = transition.Conditions.Skip(1).Where(condition => condition != null).ToList();
+                transition.Conditions.Clear();
+                var selected = conditionPicker.SelectedItem as ComboBoxItem;
+                var opItem = operators.SelectedItem as ComboBoxItem;
+                var operation = opItem != null ? (ConditionOp)opItem.Tag : ConditionOp.Eq;
+                double threshold;
+                if (!double.TryParse(value.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out threshold)) threshold = 1.0;
+                if (selected != null && selected.Tag != null)
+                {
+                    var property = selected.Tag as ViewModelPropertyDefinition;
+                    if (property != null)
+                    {
+                        var condition = new TransitionCondition(property.Name, operation, threshold);
+                        if (property.Kind == ViewModelPropertyKind.Text) condition.TextValue = value.Text;
+                        transition.Conditions.Add(condition);
+                    }
+                    else if (selected.Tag is int) transition.Conditions.Add(new TransitionCondition((int)selected.Tag, operation, threshold));
+                    transition.Conditions.AddRange(retainedConditions);
+                }
+                if (reverseTransition != null && transition.Conditions.Count == 1)
+                {
+                    var condition = transition.Conditions[0];
+                    reverseTransition.Conditions.Clear();
+                    reverseTransition.Conditions.Add(new TransitionCondition(condition.InputIndex, InvertCondition(condition.Op), condition.Value) { PropertyName = condition.PropertyName, TextValue = condition.TextValue });
+                }
+                else if (reverseTransition != null && transition.Conditions.Count == 0)
+                {
+                    layer.Transitions.Remove(reverseTransition);
+                }
+                _selectedGraphTransition = transition;
+                _selectedGraphTransitionLayer = layer;
+                if (bidirectional.IsChecked == true && !reverseExists) AddReverseTransition(layer, transition);
+                History.MarkDirty();
+                BuildStateMachineStatesGraph();
+                dialog.Close();
+            });
+            saveButton.Margin = new Thickness(8, 0, 0, 0);
+            buttons.Children.Add(saveButton);
+            form.Children.Add(buttons);
+            dialog.Content = form;
+            dialog.ShowDialog();
+        }
+
+        private FrameworkElement CreateTransitionFormRow(string label, FrameworkElement control)
+        {
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var text = new TextBlock { Text = label, Foreground = new SolidColorBrush(Color.FromRgb(165, 178, 201)), VerticalAlignment = VerticalAlignment.Center, FontSize = 11 };
+            Grid.SetColumn(text, 0);
+            Grid.SetColumn(control, 1);
+            grid.Children.Add(text);
+            grid.Children.Add(control);
+            return grid;
+        }
+
+        private MachineLayer EnsureStateMachineGraphLayer(StateMachineDefinition definition)
+        {
+            if (definition == null) return null;
+            bool changed = false;
+            if (definition.Layers == null) definition.Layers = new List<MachineLayer>();
+            if (definition.Layers.Count == 0) { definition.Layers.Add(new MachineLayer("Base Layer")); changed = true; }
+            var layer = definition.Layers[0];
+            if (layer.States == null) layer.States = new List<MachineState>();
+            if (layer.Transitions == null) layer.Transitions = new List<StateTransition>();
+            if (!layer.States.Any(state => state != null && state.Kind == StateKind.Entry)) { layer.AddState(new MachineState(layer.States.Count, "Entry", StateKind.Entry)); changed = true; }
+            if (!layer.States.Any(state => state != null && state.Kind == StateKind.Any)) { layer.AddState(new MachineState(layer.States.Count, "Any State", StateKind.Any)); changed = true; }
+            if (!layer.States.Any(state => state != null && state.Kind == StateKind.Exit)) { layer.AddState(new MachineState(layer.States.Count, "Exit", StateKind.Exit)); changed = true; }
+            for (int i = 0; i < layer.States.Count; i++) if (layer.States[i] != null) layer.States[i].Id = i;
+            int entryIndex = layer.States.FindIndex(state => state != null && state.Kind == StateKind.Entry);
+            int initialAnimationIndex = layer.States.FindIndex(state => state != null && (state.Kind == StateKind.Animation || state.Kind == StateKind.Blend1D || state.Kind == StateKind.BlendDirect));
+            if (entryIndex >= 0 && initialAnimationIndex >= 0 && !layer.Transitions.Any(transition => transition != null && transition.FromState == entryIndex))
+            {
+                layer.AddTransition(new StateTransition(entryIndex, initialAnimationIndex, 0.0));
+                changed = true;
+            }
+            if (changed && _timelineController != null && _timelineController.ActiveStateMachine != null)
+            {
+                _timelineController.ActiveStateMachine = new StateMachineRuntime(definition, _timelineController.ActiveStateMachine.Clips);
+                if (History != null) History.MarkDirty();
+            }
+            return layer;
+        }
+
+        private void EnsureStateGraphPositions(MachineLayer layer)
+        {
+            if (layer == null || layer.States == null) return;
+            int animationIndex = 0;
+            bool changed = false;
+            for (int i = 0; i < layer.States.Count; i++)
+            {
+                var state = layer.States[i];
+                if (state == null || (state.GraphX >= 0 && state.GraphY >= 0)) continue;
+                if (state.Kind == StateKind.Entry) { state.GraphX = 24; state.GraphY = 88; }
+                else if (state.Kind == StateKind.Any) { state.GraphX = 510; state.GraphY = 18; }
+                else if (state.Kind == StateKind.Exit) { state.GraphX = 680; state.GraphY = 88; }
+                else
+                {
+                    state.GraphX = 166 + (animationIndex % 3) * 150;
+                    state.GraphY = 70 + (animationIndex / 3) * 82;
+                    animationIndex++;
+                }
+                changed = true;
+            }
+            if (changed && History != null) History.MarkDirty();
+        }
+
+        private void UpdateStateGraphCanvasSize(MachineLayer layer)
+        {
+            if (_stateMachineGraphCanvas == null || layer == null || layer.States == null) return;
+            double width = 780.0;
+            double height = 230.0;
+            foreach (var state in layer.States)
+            {
+                if (state == null) continue;
+                double nodeWidth = state.Kind == StateKind.Entry ? 88.0 : state.Kind == StateKind.Any ? 116.0 : state.Kind == StateKind.Exit ? 78.0 : 132.0;
+                double nodeHeight = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit ? 40.0 : 48.0;
+                width = Math.Max(width, state.GraphX + nodeWidth + 56.0);
+                height = Math.Max(height, state.GraphY + nodeHeight + 56.0);
+            }
+            _stateMachineGraphCanvas.Width = width;
+            _stateMachineGraphCanvas.Height = height;
+        }
+
+        private Rect GetStateGraphBounds()
+        {
+            var bounds = Rect.Empty;
+            var states = _timelineController != null && _timelineController.ActiveStateMachine != null && _timelineController.ActiveStateMachine.Definition.Layers.Count > 0
+                ? _timelineController.ActiveStateMachine.Definition.Layers[0].States
+                : null;
+            if (states != null)
+            {
+                foreach (var state in states)
+                {
+                    if (state == null) continue;
+                    double width = state.Kind == StateKind.Entry ? 88.0 : state.Kind == StateKind.Any ? 116.0 : state.Kind == StateKind.Exit ? 78.0 : 132.0;
+                    double height = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit ? 40.0 : 48.0;
+                    bounds.Union(new Rect(state.GraphX, state.GraphY, width, height));
+                }
+            }
+            return bounds.IsEmpty ? new Rect(0.0, 0.0, 780.0, 230.0) : bounds;
+        }
+
+        private void UpdateStateGraphZoomLabel()
+        {
+            if (_stateMachineGraphZoomText != null)
+                _stateMachineGraphZoomText.Text = Math.Round(_stateMachineGraphZoom * 100.0).ToString(CultureInfo.InvariantCulture) + "%";
+        }
+
+        private void SetStateGraphZoom(double zoom, Point viewportAnchor)
+        {
+            if (_stateMachineGraphScrollViewer == null) return;
+            zoom = Math.Max(0.25, Math.Min(2.5, zoom));
+            double oldZoom = _stateMachineGraphZoom;
+            if (Math.Abs(zoom - oldZoom) < 0.001) return;
+            double anchorX = (_stateMachineGraphScrollViewer.HorizontalOffset + viewportAnchor.X) / oldZoom;
+            double anchorY = (_stateMachineGraphScrollViewer.VerticalOffset + viewportAnchor.Y) / oldZoom;
+            _stateMachineGraphZoom = zoom;
+            _stateMachineGraphScale.ScaleX = zoom;
+            _stateMachineGraphScale.ScaleY = zoom;
+            UpdateStateGraphZoomLabel();
+            Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
+            {
+                if (_stateMachineGraphScrollViewer == null) return;
+                _stateMachineGraphScrollViewer.ScrollToHorizontalOffset(anchorX * zoom - viewportAnchor.X);
+                _stateMachineGraphScrollViewer.ScrollToVerticalOffset(anchorY * zoom - viewportAnchor.Y);
+            }));
+        }
+
+        private void ZoomStateGraphBy(double factor)
+        {
+            if (_stateMachineGraphScrollViewer == null) return;
+            SetStateGraphZoom(_stateMachineGraphZoom * factor, new Point(_stateMachineGraphScrollViewer.ViewportWidth / 2.0, _stateMachineGraphScrollViewer.ViewportHeight / 2.0));
+        }
+
+        private void FitStateGraphToView()
+        {
+            if (_stateMachineGraphScrollViewer == null) return;
+            var bounds = GetStateGraphBounds();
+            double viewWidth = Math.Max(1.0, _stateMachineGraphScrollViewer.ViewportWidth - 40.0);
+            double viewHeight = Math.Max(1.0, _stateMachineGraphScrollViewer.ViewportHeight - 40.0);
+            double zoom = Math.Min(viewWidth / Math.Max(1.0, bounds.Width), viewHeight / Math.Max(1.0, bounds.Height));
+            zoom = Math.Max(0.25, Math.Min(2.5, zoom));
+            _stateMachineGraphZoom = zoom;
+            _stateMachineGraphScale.ScaleX = zoom;
+            _stateMachineGraphScale.ScaleY = zoom;
+            UpdateStateGraphZoomLabel();
+            Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
+            {
+                if (_stateMachineGraphScrollViewer == null) return;
+                _stateMachineGraphScrollViewer.ScrollToHorizontalOffset(bounds.X * zoom + bounds.Width * zoom / 2.0 - _stateMachineGraphScrollViewer.ViewportWidth / 2.0);
+                _stateMachineGraphScrollViewer.ScrollToVerticalOffset(bounds.Y * zoom + bounds.Height * zoom / 2.0 - _stateMachineGraphScrollViewer.ViewportHeight / 2.0);
+            }));
+        }
+
+        private void HandleStateGraphMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if ((Keyboard.Modifiers & ModifierKeys.Control) == 0 || _stateMachineGraphScrollViewer == null) return;
+            Point anchor = e.GetPosition(_stateMachineGraphScrollViewer);
+            SetStateGraphZoom(_stateMachineGraphZoom * (e.Delta > 0 ? 1.12 : 1.0 / 1.12), anchor);
+            e.Handled = true;
+        }
+
+        private void HandleStateGraphPanStart(object sender, MouseButtonEventArgs e)
+        {
+            bool spacePan = e.ChangedButton == MouseButton.Left && Keyboard.IsKeyDown(Key.Space);
+            bool middlePan = e.ChangedButton == MouseButton.Middle;
+            if ((!spacePan && !middlePan) || _stateMachineGraphCanvas == null || _stateMachineGraphScrollViewer == null) return;
+            _isPanningStateGraph = true;
+            _stateGraphPanStart = e.GetPosition(_stateMachineGraphScrollViewer);
+            _stateGraphPanStartHorizontalOffset = _stateMachineGraphScrollViewer.HorizontalOffset;
+            _stateGraphPanStartVerticalOffset = _stateMachineGraphScrollViewer.VerticalOffset;
+            _stateMachineGraphCanvas.Cursor = Cursors.ScrollAll;
+            _stateMachineGraphCanvas.CaptureMouse();
+            e.Handled = true;
+        }
+
+        private void HandleStateGraphPanEnd(object sender, MouseButtonEventArgs e)
+        {
+            if (!_isPanningStateGraph || (e.ChangedButton != MouseButton.Left && e.ChangedButton != MouseButton.Middle)) return;
+            _isPanningStateGraph = false;
+            if (_stateMachineGraphCanvas != null)
+            {
+                if (_stateMachineGraphCanvas.IsMouseCaptured) _stateMachineGraphCanvas.ReleaseMouseCapture();
+                _stateMachineGraphCanvas.Cursor = Cursors.Arrow;
+            }
+            e.Handled = true;
         }
 
         private void BuildStateMachineStatesGraph()
         {
-            if (_stateMachineStatesStack == null) return;
-            _stateMachineStatesStack.Children.Clear();
+            if (_stateMachineGraphCanvas == null) return;
+            var sm = EnsureStateMachineRuntime();
+            if (sm == null || sm.Definition == null) return;
+            var layer = EnsureStateMachineGraphLayer(sm.Definition);
+            if (layer == null) return;
+            EnsureStateGraphPositions(layer);
+            UpdateStateGraphCanvasSize(layer);
+            _stateMachineGraphCanvas.Children.Clear();
+            _stateGraphNodes.Clear();
+            DrawStateMachineConnections(layer);
 
+            int currentState = sm.LayerRuntimes.Count > 0 ? sm.LayerRuntimes[0].CurrentState : -1;
+            int targetState = sm.LayerRuntimes.Count > 0 && sm.LayerRuntimes[0].ActiveTransition != null ? sm.LayerRuntimes[0].ActiveTransition.ToState : -1;
+            _lastGraphStateMachine = sm;
+            _lastGraphCurrentState = currentState;
+            _lastGraphTransitionTarget = targetState;
+
+            for (int i = 0; i < layer.States.Count; i++)
+            {
+                int stateIndex = i;
+                var state = layer.States[i];
+                if (state == null) continue;
+                double width = state.Kind == StateKind.Entry ? 88 : state.Kind == StateKind.Any ? 116 : state.Kind == StateKind.Exit ? 78 : 132;
+                double height = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit ? 40 : 48;
+                bool active = stateIndex == currentState || stateIndex == targetState;
+                bool selected = stateIndex == _selectedGraphStateIndex;
+                var node = new Border
+                {
+                    Width = width,
+                    Height = height,
+                    Background = new SolidColorBrush(state.Kind == StateKind.Entry ? Color.FromRgb(29, 44, 42) : state.Kind == StateKind.Any ? Color.FromRgb(24, 40, 48) : state.Kind == StateKind.Exit ? Color.FromRgb(45, 31, 34) : Color.FromRgb(38, 40, 45)),
+                    BorderBrush = new SolidColorBrush(active ? Color.FromRgb(91, 196, 144) : selected ? Color.FromRgb(236, 72, 153) : Color.FromRgb(70, 75, 85)),
+                    BorderThickness = new Thickness(active || selected ? 1.5 : 1),
+                    CornerRadius = new CornerRadius(5),
+                    Cursor = state.Kind == StateKind.Exit ? Cursors.Arrow : Cursors.SizeAll,
+                    ToolTip = state.Kind + (state.Kind == StateKind.Animation ? " · double-click to edit timeline" : string.Empty)
+                };
+                var content = new Grid { Margin = new Thickness(8, 4, state.Kind == StateKind.Exit ? 8 : 18, 4) };
+                var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                var name = new TextBlock { Text = state.Name, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(state.Kind == StateKind.Entry ? Color.FromRgb(110, 231, 183) : state.Kind == StateKind.Exit ? Color.FromRgb(248, 113, 113) : state.Kind == StateKind.Any ? Color.FromRgb(103, 232, 249) : new Color { A = 255, R = 218, G = 223, B = 232 }), TextTrimming = TextTrimming.CharacterEllipsis };
+                labels.Children.Add(name);
+                if (state.Kind == StateKind.Animation || state.Kind == StateKind.Blend1D || state.Kind == StateKind.BlendDirect)
+                {
+                    string clipName = state.ClipIndex >= 0 && state.ClipIndex < sm.Clips.Count && sm.Clips[state.ClipIndex] != null ? sm.Clips[state.ClipIndex].Name : state.Kind.ToString();
+                    labels.Children.Add(new TextBlock { Text = clipName, FontSize = 8.5, Foreground = new SolidColorBrush(Color.FromRgb(132, 141, 156)), TextTrimming = TextTrimming.CharacterEllipsis });
+                }
+                content.Children.Add(labels);
+                if (state.Kind != StateKind.Exit)
+                {
+                    var port = new Ellipse { Width = 9, Height = 9, Fill = new SolidColorBrush(Color.FromRgb(167, 176, 191)), Stroke = new SolidColorBrush(Color.FromRgb(35, 39, 47)), StrokeThickness = 2, Cursor = Cursors.Cross, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Tag = stateIndex };
+                    port.MouseLeftButtonDown += (s, e) => { StartStateGraphConnection(stateIndex, e.GetPosition(_stateMachineGraphCanvas)); e.Handled = true; };
+                    content.Children.Add(port);
+                }
+                node.Child = content;
+                Canvas.SetLeft(node, state.GraphX);
+                Canvas.SetTop(node, state.GraphY);
+                Panel.SetZIndex(node, 10);
+                node.MouseLeftButtonDown += (s, e) =>
+                {
+                    if (e.ClickCount >= 2 && state.Kind == StateKind.Animation)
+                    {
+                        OpenStateTimeline(state);
+                        e.Handled = true;
+                        return;
+                    }
+                    _selectedGraphStateIndex = stateIndex;
+                    if (state.Kind != StateKind.Exit) StartStateGraphNodeDrag(stateIndex, e.GetPosition(_stateMachineGraphCanvas));
+                    e.Handled = true;
+                };
+                node.MouseRightButtonUp += (s, e) => ShowStateNodeContextMenu(node, layer, state, stateIndex);
+                _stateGraphNodes[stateIndex] = node;
+                _stateMachineGraphCanvas.Children.Add(node);
+            }
+            AddStateGraphBackgroundHint();
+            RefreshInterpolationGraphPanels();
+        }
+
+        private void AddStateGraphBackgroundHint()
+        {
+            if (_stateMachineGraphCanvas == null) return;
+            var hint = new TextBlock { Text = "ENTRY  →  STATES  →  EXIT     ·     ANY STATE can enter a state at any time", FontSize = 8, Foreground = new SolidColorBrush(Color.FromRgb(78, 88, 104)), IsHitTestVisible = false };
+            Canvas.SetLeft(hint, 24);
+            Canvas.SetTop(hint, 206);
+            _stateMachineGraphCanvas.Children.Add(hint);
+        }
+
+        private void DrawStateMachineConnections(MachineLayer layer)
+        {
+            if (_stateMachineGraphCanvas == null || layer == null || layer.States == null || layer.Transitions == null) return;
+            foreach (var transition in layer.Transitions)
+            {
+                if (transition == null || transition.FromState < 0 || transition.FromState >= layer.States.Count || transition.ToState < 0 || transition.ToState >= layer.States.Count) continue;
+                var from = layer.States[transition.FromState];
+                var to = layer.States[transition.ToState];
+                if (from == null || to == null) continue;
+                double fromWidth = from.Kind == StateKind.Entry ? 88 : from.Kind == StateKind.Any ? 116 : from.Kind == StateKind.Exit ? 78 : 132;
+                double fromHeight = from.Kind == StateKind.Entry || from.Kind == StateKind.Exit ? 40 : 48;
+                double toWidth = to.Kind == StateKind.Entry ? 88 : to.Kind == StateKind.Any ? 116 : to.Kind == StateKind.Exit ? 78 : 132;
+                double toHeight = to.Kind == StateKind.Entry || to.Kind == StateKind.Exit ? 40 : 48;
+                Point start = new Point(from.GraphX + fromWidth, from.GraphY + fromHeight / 2.0);
+                Point end = new Point(to.GraphX, to.GraphY + toHeight / 2.0);
+                bool selfTransition = transition.ToState == transition.FromState;
+                bool backwards = !selfTransition && end.X < start.X - 20;
+                if (backwards) end = new Point(to.GraphX + toWidth, to.GraphY + toHeight / 2.0);
+                double reach = Math.Max(32.0, Math.Abs(end.X - start.X) * 0.42);
+                Point c1 = selfTransition ? new Point(start.X + 38.0, start.Y - 38.0) : new Point(start.X + (backwards ? -reach : reach), start.Y);
+                Point c2 = selfTransition ? new Point(end.X - 38.0, end.Y - 38.0) : new Point(end.X + (backwards ? reach : -reach), end.Y);
+                var figure = new PathFigure { StartPoint = start, IsClosed = false };
+                figure.Segments.Add(new BezierSegment(c1, c2, end, true));
+                var geometry = new PathGeometry();
+                geometry.Figures.Add(figure);
+                bool selected = ReferenceEquals(_selectedGraphTransition, transition);
+                var line = new System.Windows.Shapes.Path { Data = geometry, Stroke = new SolidColorBrush(selected ? Color.FromRgb(244, 114, 182) : Color.FromRgb(94, 108, 128)), StrokeThickness = selected ? 2 : 1.35, Fill = Brushes.Transparent, Cursor = Cursors.Hand, Tag = transition, ToolTip = from.Name + " → " + to.Name + " · " + TransitionConditionSummary(transition) };
+                line.MouseLeftButtonDown += (s, e) => { SelectGraphTransition(transition, layer); e.Handled = true; };
+                line.MouseRightButtonUp += (s, e) => ShowTransitionContextMenu(line, layer, transition);
+                Panel.SetZIndex(line, 0);
+                _stateMachineGraphCanvas.Children.Add(line);
+                Vector direction = end - c2;
+                if (direction.Length < 0.001) direction = new Vector(1, 0);
+                direction.Normalize();
+                Vector perpendicular = new Vector(-direction.Y, direction.X);
+                Point arrowBase = end - direction * 8.0;
+                var arrow = new Polygon
+                {
+                    Points = new PointCollection { end, arrowBase + perpendicular * 4.0, arrowBase - perpendicular * 4.0 },
+                    Fill = new SolidColorBrush(selected ? Color.FromRgb(244, 114, 182) : Color.FromRgb(94, 108, 128)),
+                    Tag = transition,
+                    IsHitTestVisible = false
+                };
+                Panel.SetZIndex(arrow, 11);
+                _stateMachineGraphCanvas.Children.Add(arrow);
+                Point middle = new Point((start.X + 3 * c1.X + 3 * c2.X + end.X) / 8.0, (start.Y + 3 * c1.Y + 3 * c2.Y + end.Y) / 8.0);
+                var label = new Border { Background = new SolidColorBrush(Color.FromRgb(31, 35, 43)), BorderBrush = new SolidColorBrush(selected ? Color.FromRgb(244, 114, 182) : Color.FromRgb(74, 83, 98)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(5, 2, 5, 2), Tag = transition, Cursor = Cursors.Hand, Child = new TextBlock { Text = string.Format("{0:0.##}s", transition.Duration), FontSize = 8, Foreground = new SolidColorBrush(Color.FromRgb(191, 200, 214)) }, ToolTip = TransitionConditionSummary(transition) + " · " + transition.Interpolation };
+                Canvas.SetLeft(label, middle.X - 17);
+                Canvas.SetTop(label, middle.Y - 8);
+                label.MouseLeftButtonDown += (s, e) =>
+                {
+                    if (e.ClickCount >= 2) ShowEditTransitionDialog(transition, layer);
+                    else SelectGraphTransition(transition, layer);
+                    e.Handled = true;
+                };
+                label.MouseRightButtonUp += (s, e) => ShowTransitionContextMenu(label, layer, transition);
+                Panel.SetZIndex(label, 2);
+                _stateMachineGraphCanvas.Children.Add(label);
+            }
+        }
+
+        private string TransitionConditionSummary(StateTransition transition)
+        {
+            if (transition == null || transition.Conditions == null || transition.Conditions.Count == 0) return "always";
+            var definition = _timelineController != null && _timelineController.ActiveStateMachine != null ? _timelineController.ActiveStateMachine.Definition : null;
+            return string.Join(" AND ", transition.Conditions.Select(condition =>
+            {
+                if (condition == null) return "condition";
+                if (!string.IsNullOrEmpty(condition.PropertyName)) return condition.PropertyName + " " + condition.Op + " " + (condition.TextValue ?? condition.Value.ToString("0.##"));
+                if (definition == null || condition.InputIndex < 0 || condition.InputIndex >= definition.Inputs.Count) return "input?";
+                return definition.Inputs[condition.InputIndex].Name + " " + condition.Op + " " + condition.Value.ToString("0.##");
+            }).ToArray());
+        }
+
+        private void SelectGraphTransition(StateTransition transition, MachineLayer layer)
+        {
+            _selectedGraphTransition = transition;
+            _selectedGraphTransitionLayer = layer;
+            BuildStateMachineStatesGraph();
+        }
+
+        private void StartStateGraphNodeDrag(int stateIndex, Point point)
+        {
+            _stateGraphPointerMode = 1;
+            _stateGraphPointerStateIndex = stateIndex;
+            _stateGraphPointerOrigin = point;
+            var state = _timelineController.ActiveStateMachine.Definition.Layers[0].States[stateIndex];
+            _stateGraphNodeOrigin = new Point(state.GraphX, state.GraphY);
+            _stateGraphMoved = false;
+            _stateMachineGraphCanvas.CaptureMouse();
+        }
+
+        private void StartStateGraphConnection(int stateIndex, Point point)
+        {
+            _stateGraphPointerMode = 2;
+            _stateGraphPointerStateIndex = stateIndex;
+            _stateMachineGraphCanvas.CaptureMouse();
+            DrawStateGraphConnectionPreview(point);
+        }
+
+        private void DrawStateGraphConnectionPreview(Point point)
+        {
+            if (_stateMachineGraphCanvas == null || _timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var layer = _timelineController.ActiveStateMachine.Definition.Layers[0];
+            foreach (var child in _stateMachineGraphCanvas.Children.OfType<FrameworkElement>().Where(element => string.Equals(element.Tag as string, "__connectionPreview", StringComparison.Ordinal)).ToList())
+                _stateMachineGraphCanvas.Children.Remove(child);
+            if (_stateGraphPointerStateIndex < 0 || _stateGraphPointerStateIndex >= layer.States.Count) return;
+            var state = layer.States[_stateGraphPointerStateIndex];
+            double width = state.Kind == StateKind.Entry ? 88 : state.Kind == StateKind.Any ? 116 : state.Kind == StateKind.Exit ? 78 : 132;
+            double height = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit ? 40 : 48;
+            Point start = new Point(state.GraphX + width, state.GraphY + height / 2.0);
+            var figure = new PathFigure { StartPoint = start, IsClosed = false };
+            figure.Segments.Add(new BezierSegment(new Point(start.X + 40, start.Y), new Point(point.X - 40, point.Y), point, true));
+            var geometry = new PathGeometry(); geometry.Figures.Add(figure);
+            var path = new System.Windows.Shapes.Path { Data = geometry, Stroke = new SolidColorBrush(Color.FromRgb(244, 114, 182)), StrokeThickness = 1.5, StrokeDashArray = new DoubleCollection { 3, 2 }, IsHitTestVisible = false, Tag = "__connectionPreview" };
+            Panel.SetZIndex(path, 20);
+            _stateMachineGraphCanvas.Children.Add(path);
+        }
+
+        private void HandleStateGraphMouseMove(object sender, MouseEventArgs e)
+        {
+            if (_isPanningStateGraph && _stateMachineGraphScrollViewer != null)
+            {
+                Point current = e.GetPosition(_stateMachineGraphScrollViewer);
+                Vector delta = current - _stateGraphPanStart;
+                _stateMachineGraphScrollViewer.ScrollToHorizontalOffset(_stateGraphPanStartHorizontalOffset - delta.X);
+                _stateMachineGraphScrollViewer.ScrollToVerticalOffset(_stateGraphPanStartVerticalOffset - delta.Y);
+                return;
+            }
+            if (_stateGraphPointerMode == 0 || _stateMachineGraphCanvas == null || !_stateMachineGraphCanvas.IsMouseCaptured) return;
+            Point point = e.GetPosition(_stateMachineGraphCanvas);
+            if (_stateGraphPointerMode == 1)
+            {
+                Vector delta = point - _stateGraphPointerOrigin;
+                if (delta.Length > 3.0) _stateGraphMoved = true;
+                if (!_stateGraphMoved) return;
+                var layer = _timelineController.ActiveStateMachine.Definition.Layers[0];
+                var state = layer.States[_stateGraphPointerStateIndex];
+                state.GraphX = Math.Max(4.0, _stateGraphNodeOrigin.X + delta.X);
+                state.GraphY = Math.Max(4.0, Math.Min(174.0, _stateGraphNodeOrigin.Y + delta.Y));
+                var node = _stateGraphNodes[_stateGraphPointerStateIndex];
+                Canvas.SetLeft(node, state.GraphX);
+                Canvas.SetTop(node, state.GraphY);
+                RefreshStateGraphConnectionVisuals(layer);
+            }
+            else if (_stateGraphPointerMode == 2)
+            {
+                DrawStateGraphConnectionPreview(point);
+            }
+        }
+
+        private void RefreshStateGraphConnectionVisuals(MachineLayer layer)
+        {
+            if (_stateMachineGraphCanvas == null) return;
+            foreach (var child in _stateMachineGraphCanvas.Children.OfType<FrameworkElement>().Where(element => element.Tag is StateTransition).ToList())
+                _stateMachineGraphCanvas.Children.Remove(child);
+            DrawStateMachineConnections(layer);
+            foreach (var node in _stateGraphNodes.Values) Panel.SetZIndex(node, 10);
+        }
+
+        private void HandleStateGraphMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (_stateGraphPointerMode == 0 || _stateMachineGraphCanvas == null) return;
+            int mode = _stateGraphPointerMode;
+            int stateIndex = _stateGraphPointerStateIndex;
+            Point point = e.GetPosition(_stateMachineGraphCanvas);
+            if (_stateMachineGraphCanvas.IsMouseCaptured) _stateMachineGraphCanvas.ReleaseMouseCapture();
+            _stateGraphPointerMode = 0;
+            _stateGraphPointerStateIndex = -1;
+            if (mode == 1)
+            {
+                if (_stateGraphMoved)
+                {
+                    if (History != null) History.MarkDirty();
+                    RefreshStateGraphConnectionVisuals(_timelineController.ActiveStateMachine.Definition.Layers[0]);
+                }
+                else PreviewStateMachineNode(stateIndex);
+            }
+            else if (mode == 2)
+            {
+                foreach (var child in _stateMachineGraphCanvas.Children.OfType<FrameworkElement>().Where(element => string.Equals(element.Tag as string, "__connectionPreview", StringComparison.Ordinal)).ToList())
+                    _stateMachineGraphCanvas.Children.Remove(child);
+                int target = HitTestStateGraphNode(point);
+                if (target >= 0 && target != stateIndex) CreateStateGraphTransition(stateIndex, target);
+            }
+            BuildStateMachineStatesGraph();
+            e.Handled = true;
+        }
+
+        private int HitTestStateGraphNode(Point point)
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return -1;
+            var states = _timelineController.ActiveStateMachine.Definition.Layers[0].States;
+            for (int i = states.Count - 1; i >= 0; i--)
+            {
+                var state = states[i];
+                if (state == null) continue;
+                double width = state.Kind == StateKind.Entry ? 88 : state.Kind == StateKind.Any ? 116 : state.Kind == StateKind.Exit ? 78 : 132;
+                double height = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit ? 40 : 48;
+                if (new Rect(state.GraphX, state.GraphY, width, height).Contains(point)) return i;
+            }
+            return -1;
+        }
+
+        private void PreviewStateMachineNode(int stateIndex)
+        {
             if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
             var sm = _timelineController.ActiveStateMachine;
-            if (sm.Definition == null || sm.Definition.Layers.Count == 0) return;
-
-            var layer = sm.Definition.Layers[0];
-            int curState = (sm.LayerRuntimes.Count > 0) ? sm.LayerRuntimes[0].CurrentState : 0;
-
-            for (int s = 0; s < layer.States.Count; s++)
+            if (sm.Definition.Layers.Count == 0 || stateIndex < 0 || stateIndex >= sm.Definition.Layers[0].States.Count) return;
+            var state = sm.Definition.Layers[0].States[stateIndex];
+            _selectedGraphStateIndex = stateIndex;
+            if (state.Kind == StateKind.Entry) sm.Reset();
+            else if (state.Kind == StateKind.Animation || state.Kind == StateKind.Blend1D || state.Kind == StateKind.BlendDirect)
             {
-                int stateIdx = s;
-                var st = layer.States[s];
-                bool isActive = (stateIdx == curState);
+                var runtime = sm.LayerRuntimes[0];
+                runtime.CurrentState = stateIndex;
+                runtime.CurTime = new ClipInstance(state.ClipIndex);
+                runtime.ActiveTransition = null;
+                runtime.IsFinished = false;
+            }
+            TriggerStateMachineStep();
+        }
 
-                var chip = new Border
-                {
-                    Background = isActive ? new SolidColorBrush(Color.FromArgb(60, 34, 197, 94)) : new SolidColorBrush(Color.FromRgb(33, 39, 54)),
-                    BorderBrush = isActive ? new SolidColorBrush(Color.FromRgb(34, 197, 94)) : new SolidColorBrush(Color.FromRgb(50, 60, 85)),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(5),
-                    Padding = new Thickness(10, 5, 10, 5),
-                    Margin = new Thickness(0, 0, 6, 0),
-                    Cursor = Cursors.Hand
-                };
-                var tb = new TextBlock
-                {
-                    Text = (isActive ? "● " : "○ ") + st.Name,
-                    FontSize = 11,
-                    FontWeight = isActive ? FontWeights.Bold : FontWeights.Normal,
-                    Foreground = isActive ? new SolidColorBrush(Color.FromRgb(74, 222, 128)) : new SolidColorBrush(Color.FromRgb(180, 195, 220))
-                };
-                chip.Child = tb;
-                chip.MouseLeftButtonUp += (s2, e2) =>
-                {
-                    if (sm.LayerRuntimes.Count > 0)
-                    {
-                        sm.LayerRuntimes[0].CurrentState = stateIdx;
-                        sm.LayerRuntimes[0].ActiveTransition = null;
-                        TriggerStateMachineStep();
-                    }
-                };
-                _stateMachineStatesStack.Children.Add(chip);
+        private void OpenStateTimeline(MachineState state)
+        {
+            if (state == null || _timelineController == null || _timelineController.ActiveStateMachine == null || state.Kind != StateKind.Animation) return;
+            var machine = _timelineController.ActiveStateMachine;
+            if (state.ClipIndex < 0 || state.ClipIndex >= machine.Clips.Count || machine.Clips[state.ClipIndex] == null)
+            {
+                if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+                if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+                uint id = Document.Animation.Clips.Count == 0 ? 100u : Document.Animation.Clips.Max(clipItem => clipItem == null ? 0u : clipItem.Id) + 1u;
+                var newClip = new Clip(id, state.Name, Math.Max(0.1, _timelineController.Duration), _timelineController.Fps, LoopMode.Loop);
+                if (!machine.Clips.Contains(newClip)) machine.Clips.Add(newClip);
+                if (!Document.Animation.Clips.Contains(newClip)) Document.Animation.Clips.Add(newClip);
+                state.ClipIndex = machine.Clips.Count - 1;
+                History.MarkDirty();
+                BuildStateMachineStatesGraph();
+            }
+            var clip = machine.Clips[state.ClipIndex];
+            if (clip != null) SelectAnimationClip(clip);
+        }
 
-                if (s < layer.States.Count - 1)
+        private void CreateStateGraphTransition(int fromIndex, int toIndex)
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            var layer = sm.Definition.Layers[0];
+            if (layer.States[toIndex].Kind == StateKind.Entry || layer.States[toIndex].Kind == StateKind.Any) return;
+            var existing = layer.Transitions.FirstOrDefault(candidateTransition => candidateTransition != null && candidateTransition.FromState == fromIndex && candidateTransition.ToState == toIndex);
+            if (existing != null) { SelectGraphTransition(existing, layer); ShowEditTransitionDialog(existing, layer); return; }
+            var transition = new StateTransition(fromIndex, toIndex, 0.25);
+            layer.AddTransition(transition);
+            _selectedGraphTransition = transition;
+            _selectedGraphTransitionLayer = layer;
+            History.MarkDirty();
+            BuildStateMachineStatesGraph();
+            ShowEditTransitionDialog(transition, layer);
+        }
+
+        private void ShowTransitionContextMenu(FrameworkElement target, MachineLayer layer, StateTransition transition)
+        {
+            var menu = new ContextMenu();
+            var edit = new MenuItem { Header = "Edit transition…" };
+            edit.Click += (s, e) => ShowEditTransitionDialog(transition, layer);
+            menu.Items.Add(edit);
+            var reverse = new MenuItem { Header = "Add reverse transition" };
+            reverse.Click += (s, e) => AddReverseTransition(layer, transition);
+            menu.Items.Add(reverse);
+            var remove = new MenuItem { Header = "Delete transition" };
+            remove.Click += (s, e) =>
+            {
+                layer.Transitions.Remove(transition);
+                if (ReferenceEquals(_selectedGraphTransition, transition)) { _selectedGraphTransition = null; _selectedGraphTransitionLayer = null; }
+                History.MarkDirty();
+                BuildStateMachineStatesGraph();
+            };
+            menu.Items.Add(remove);
+            menu.PlacementTarget = target;
+            menu.IsOpen = true;
+        }
+
+        private void AddReverseTransition(MachineLayer layer, StateTransition transition)
+        {
+            if (layer == null || transition == null) return;
+            if (transition.Conditions == null || transition.Conditions.Count != 1)
+            {
+                MessageBox.Show("A reverse link needs one condition that can be inverted. Add a single input condition, then create the reverse link.", "State Machine", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var reverse = new StateTransition(transition.ToState, transition.FromState, transition.Duration)
+            {
+                Interpolation = transition.Interpolation, X1 = transition.X1, Y1 = transition.Y1, X2 = transition.X2, Y2 = transition.Y2,
+                Interrupt = transition.Interrupt, ExitTime = null
+            };
+            if (transition.Conditions != null)
+            {
+                foreach (var condition in transition.Conditions)
                 {
-                    var arrow = new TextBlock
+                    if (condition == null) continue;
+                    reverse.Conditions.Add(new TransitionCondition(condition.InputIndex, InvertCondition(condition.Op), condition.Value)
                     {
-                        Text = "➔",
-                        FontSize = 11,
-                        Foreground = new SolidColorBrush(Color.FromRgb(100, 115, 145)),
-                        Margin = new Thickness(0, 0, 6, 0),
-                        VerticalAlignment = VerticalAlignment.Center
-                    };
-                    _stateMachineStatesStack.Children.Add(arrow);
+                        PropertyName = condition.PropertyName, TextValue = condition.TextValue
+                    });
                 }
             }
+            layer.AddTransition(reverse);
+            _selectedGraphTransition = reverse;
+            _selectedGraphTransitionLayer = layer;
+            History.MarkDirty();
+            BuildStateMachineStatesGraph();
+        }
+
+        private static ConditionOp InvertCondition(ConditionOp operation)
+        {
+            switch (operation)
+            {
+                case ConditionOp.Eq: return ConditionOp.Ne;
+                case ConditionOp.Ne: return ConditionOp.Eq;
+                case ConditionOp.Lt: return ConditionOp.Ge;
+                case ConditionOp.Le: return ConditionOp.Gt;
+                case ConditionOp.Gt: return ConditionOp.Le;
+                case ConditionOp.Ge: return ConditionOp.Lt;
+                default: return operation;
+            }
+        }
+
+        private void ShowStateNodeContextMenu(FrameworkElement target, MachineLayer layer, MachineState state, int stateIndex)
+        {
+            var menu = new ContextMenu();
+            if (state.Kind == StateKind.Animation)
+            {
+                var open = new MenuItem { Header = "Open timeline" };
+                open.Click += (s, e) => OpenStateTimeline(state);
+                menu.Items.Add(open);
+                var rename = new MenuItem { Header = "Rename state" };
+                rename.Click += (s, e) => ShowRenameStateDialog(layer, state);
+                menu.Items.Add(rename);
+                var remove = new MenuItem { Header = "Delete state" };
+                remove.Click += (s, e) =>
+                {
+                    var machine = _timelineController.ActiveStateMachine;
+                    int removedClipIndex = state.ClipIndex;
+                    Clip removedClip = removedClipIndex >= 0 && removedClipIndex < machine.Clips.Count ? machine.Clips[removedClipIndex] : null;
+                    layer.Transitions.RemoveAll(transition => transition == null || transition.FromState == stateIndex || transition.ToState == stateIndex);
+                    layer.States.RemoveAt(stateIndex);
+                    for (int i = 0; i < layer.States.Count; i++) layer.States[i].Id = i;
+                    foreach (var transition in layer.Transitions)
+                    {
+                        if (transition.FromState > stateIndex) transition.FromState--;
+                        if (transition.ToState > stateIndex) transition.ToState--;
+                    }
+                    if (removedClip != null)
+                    {
+                        machine.Clips.RemoveAt(removedClipIndex);
+                        if (Document != null && Document.Animation != null && Document.Animation.Clips != null && !ReferenceEquals(Document.Animation.Clips, machine.Clips))
+                            Document.Animation.Clips.Remove(removedClip);
+                        foreach (var remaining in layer.States)
+                            if (remaining != null && remaining.ClipIndex > removedClipIndex) remaining.ClipIndex--;
+                    }
+                    _selectedGraphTransition = null;
+                    _selectedGraphTransitionLayer = null;
+                    _selectedGraphStateIndex = -1;
+                    _timelineController.ActiveStateMachine = new StateMachineRuntime(machine.Definition, machine.Clips);
+                    History.MarkDirty();
+                    BuildStateMachineStatesGraph();
+                };
+                menu.Items.Add(remove);
+            }
+            menu.PlacementTarget = target;
+            menu.IsOpen = true;
+        }
+
+        private void ShowRenameStateDialog(MachineLayer layer, MachineState state)
+        {
+            if (state == null) return;
+            var dialog = new Window { Title = "Rename State", Width = 300, Height = 130, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)), Foreground = Brushes.White };
+            var owner = Window.GetWindow(this); if (owner != null) dialog.Owner = owner;
+            var stack = new StackPanel { Margin = new Thickness(14) };
+            var input = new TextBox { Text = state.Name, Height = 27, Padding = new Thickness(6, 4, 6, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            stack.Children.Add(input);
+            var save = CreateSmallButton("Save", "Rename state", () => { state.Name = input.Text.Trim(); if (History != null) History.MarkDirty(); BuildStateMachineStatesGraph(); dialog.Close(); });
+            save.Margin = new Thickness(0, 8, 0, 0); stack.Children.Add(save);
+            dialog.Content = stack; dialog.ShowDialog();
         }
 
         private void UpdateStateMachineStatusUI()
@@ -8862,34 +12284,74 @@ namespace Kerf.UI
                 }
             }
 
-            BuildStateMachineStatesGraph();
+            int transitionTarget = lr.ActiveTransition != null ? lr.ActiveTransition.ToState : -1;
+            if (!ReferenceEquals(_lastGraphStateMachine, sm) ||
+                _lastGraphCurrentState != lr.CurrentState ||
+                _lastGraphTransitionTarget != transitionTarget)
+                BuildStateMachineStatesGraph();
         }
 
-        private void TriggerStateMachineStep()
+        private void TriggerStateMachineStep(bool continuePlayback = false)
         {
             if (_timelineController != null)
             {
-                _timelineController.Step(0.016);
+                _timelineController.UseStateMachine = true;
+                // Input and pointer changes update the paused preview. Playback remains explicit.
+                _timelineController.Step(0.0);
                 UpdateStateMachineStatusUI();
                 RefreshTimelineCanvas();
-                StartAnimationTimer();
+            }
+        }
+
+        private void SetStateMachineBool(string inputName, bool value)
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            if (_timelineController.ActiveStateMachine.SetViewModelBool(inputName, value)) return;
+            StateMachineDefinition def = _timelineController.ActiveStateMachine.Definition;
+            for (int i = 0; def != null && i < def.Inputs.Count; i++)
+            {
+                if (def.Inputs[i].Kind == InputKind.Bool && string.Equals(def.Inputs[i].Name, inputName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _timelineController.ActiveStateMachine.SetBool(i, value);
+                    return;
+                }
+            }
+        }
+
+        private void SetStateMachineTrigger(string inputName)
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            if (_timelineController.ActiveStateMachine.FireViewModelTrigger(inputName)) return;
+            StateMachineDefinition def = _timelineController.ActiveStateMachine.Definition;
+            for (int i = 0; def != null && i < def.Inputs.Count; i++)
+            {
+                if (def.Inputs[i].Kind == InputKind.Trigger && string.Equals(def.Inputs[i].Name, inputName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _timelineController.ActiveStateMachine.FireTrigger(i);
+                    return;
+                }
             }
         }
 
         private void ToggleTimelineMode()
         {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
             _isStateMachineMode = !_isStateMachineMode;
+            _timelineController.UseStateMachine = _isStateMachineMode;
             if (_isStateMachineMode)
             {
                 _timelineTracksContainer.Visibility = Visibility.Collapsed;
-                _stateMachineContainer.Visibility = Visibility.Visible;
+                _stateMachineScrollContainer.Visibility = Visibility.Visible;
+                BuildStateMachineInputsControls();
+                BuildStateMachineStatesGraph();
             }
             else
             {
-                _stateMachineContainer.Visibility = Visibility.Collapsed;
+                _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
                 _timelineTracksContainer.Visibility = Visibility.Visible;
                 RefreshTimelineUI();
             }
+            _timelineController.Seek(_timelineController.CurrentTime);
         }
 
         private void CycleTimelineLoopMode()
@@ -8909,6 +12371,11 @@ namespace Kerf.UI
             {
                 _timelineController.LoopMode = LoopMode.Loop;
                 _timelineLoopText.Text = "🔁 Loop: All";
+            }
+            if (_timelineController.ActiveClip != null)
+            {
+                _timelineController.ActiveClip.LoopMode = _timelineController.LoopMode;
+                History.MarkDirty();
             }
         }
 
@@ -8932,6 +12399,373 @@ namespace Kerf.UI
             }
         }
 
+        private void BeginTimelineKeyframeDrag(AnimTrack track, Keyframe keyframe, MouseButtonEventArgs e)
+        {
+            if (_timelineCanvasHost == null || track == null || keyframe == null) return;
+            _timelineCanvasHost.Focus();
+            bool toggle = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+            bool additive = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
+            if (toggle && _selectedTimelineKeyframes.Contains(keyframe))
+            {
+                _selectedTimelineKeyframes.Remove(keyframe);
+                if (ReferenceEquals(_editingInterpolationKeyframe, keyframe))
+                {
+                    _editingInterpolationKeyframe = null;
+                    _editingInterpolationTrack = null;
+                }
+                RefreshTimelineCanvas();
+                e.Handled = true;
+                return;
+            }
+            if (!additive && !toggle && !_selectedTimelineKeyframes.Contains(keyframe))
+                _selectedTimelineKeyframes.Clear();
+            _selectedTimelineKeyframes.Add(keyframe);
+            _timelineKeyframeOwners[keyframe] = track;
+            _editingInterpolationTrack = track;
+            _editingInterpolationKeyframe = keyframe;
+            _timelineKeyframeDragStart = e.GetPosition(_timelineCanvasHost);
+            _timelineKeyframeDragStartTimes = new Dictionary<Keyframe, double>();
+            foreach (var selected in _selectedTimelineKeyframes)
+            {
+                if (_timelineKeyframeOwners.ContainsKey(selected))
+                    _timelineKeyframeDragStartTimes[selected] = selected.Time;
+            }
+            _timelineKeyframeDragMoved = false;
+            _isDraggingTimelineKeyframes = true;
+            _timelineCanvasHost.CaptureMouse();
+            RefreshInterpolationGraphPanels();
+            RefreshTimelineCanvas();
+            e.Handled = true;
+        }
+
+        private void HandleTimelineCanvasPreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            var hitTarget = e.OriginalSource as FrameworkElement;
+            var keyframe = hitTarget != null ? hitTarget.Tag as Keyframe : null;
+            AnimTrack track;
+            if (keyframe != null && _timelineKeyframeOwners.TryGetValue(keyframe, out track))
+            {
+                BeginTimelineKeyframeDrag(track, keyframe, e);
+                e.Handled = true;
+                return;
+            }
+
+            HandleTimelineCanvasMouseDown(sender, e);
+        }
+
+        private void HandleTimelineCanvasMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton != MouseButton.Left || _timelineCanvasHost == null) return;
+            Point point = e.GetPosition(_timelineCanvasHost);
+            _timelineCanvasHost.Focus();
+            _timelinePointerDown = true;
+            _timelineCandidateMarquee = point.Y > 22.0;
+            _timelineMarqueeAdditive = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift) || Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+            _timelineMarqueeStartPoint = point;
+            _timelineMarqueeInitialSelection = new HashSet<Keyframe>(_selectedTimelineKeyframes);
+            _timelineKeyframeDragMoved = false;
+            _isScrubbingTimeline = point.Y <= 22.0;
+            _timelineCanvasHost.CaptureMouse();
+            if (_isScrubbingTimeline) ScrubTimelineAtPoint(point);
+        }
+
+        private void HandleTimelineCanvasMouseMove(object sender, MouseEventArgs e)
+        {
+            if (_timelineCanvasHost == null || !_timelineCanvasHost.IsMouseCaptured) return;
+            Point point = e.GetPosition(_timelineCanvasHost);
+            if (_isDraggingTimelineKeyframes)
+            {
+                Vector drag = point - _timelineKeyframeDragStart;
+                if (!_timelineKeyframeDragMoved && drag.Length < 3.0) return;
+                _timelineKeyframeDragMoved = true;
+                double fps = _timelineController != null ? Math.Max(1.0, _timelineController.Fps) : 60.0;
+                double rawDelta = drag.X / Math.Max(1.0, _timelinePixelsPerSecond);
+                double delta = (Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt))
+                    ? rawDelta
+                    : Math.Round(rawDelta * fps) / fps;
+                double duration = _timelineController != null ? _timelineController.Duration : 10.0;
+                double minStart = _timelineKeyframeDragStartTimes.Count == 0 ? 0.0 : _timelineKeyframeDragStartTimes.Values.Min();
+                double maxStart = _timelineKeyframeDragStartTimes.Count == 0 ? duration : _timelineKeyframeDragStartTimes.Values.Max();
+                delta = Math.Max(-minStart, Math.Min(duration - maxStart, delta));
+                foreach (var entry in _timelineKeyframeDragStartTimes)
+                    entry.Key.Time = Math.Max(0.0, Math.Min(duration, entry.Value + delta));
+                SortSelectedKeyframeTracks();
+                RefreshTimelineCanvas();
+                return;
+            }
+            if (_timelineCandidateMarquee && _timelinePointerDown)
+            {
+                Vector drag = point - _timelineMarqueeStartPoint;
+                if (!_isTimelineMarqueeSelecting && drag.Length >= 4.0)
+                {
+                    _isTimelineMarqueeSelecting = true;
+                    _isScrubbingTimeline = false;
+                    if (!_timelineMarqueeAdditive) _selectedTimelineKeyframes.Clear();
+                }
+                if (_isTimelineMarqueeSelecting)
+                {
+                    SelectTimelineKeyframesInMarquee(point);
+                    UpdateTimelineKeyframeDiamondStyles();
+                    UpdateTimelineMarqueeVisual(point);
+                    RefreshInterpolationGraphPanels();
+                    return;
+                }
+            }
+            if (_isScrubbingTimeline) ScrubTimelineAtPoint(point);
+        }
+
+        private void HandleTimelineCanvasMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton != MouseButton.Left || _timelineCanvasHost == null) return;
+            Point point = e.GetPosition(_timelineCanvasHost);
+            if (_isDraggingTimelineKeyframes)
+            {
+                _isDraggingTimelineKeyframes = false;
+                if (_timelineCanvasHost.IsMouseCaptured) _timelineCanvasHost.ReleaseMouseCapture();
+                if (_timelineKeyframeDragMoved)
+                {
+                    var before = new Dictionary<Keyframe, double>(_timelineKeyframeDragStartTimes);
+                    var after = before.Keys.ToDictionary(keyframe => keyframe, keyframe => keyframe.Time);
+                    ExecuteKeyframeTimeChange(before, after);
+                }
+                else
+                {
+                    RefreshTimelineCanvas();
+                }
+                _timelineKeyframeDragStartTimes.Clear();
+                _timelineKeyframeDragMoved = false;
+                e.Handled = true;
+                return;
+            }
+            if (_isTimelineMarqueeSelecting)
+            {
+                _isTimelineMarqueeSelecting = false;
+                _timelineCandidateMarquee = false;
+                _timelinePointerDown = false;
+                RemoveTimelineMarqueeVisual();
+                if (_timelineCanvasHost.IsMouseCaptured) _timelineCanvasHost.ReleaseMouseCapture();
+                RefreshTimelineCanvas();
+                e.Handled = true;
+                return;
+            }
+            if (_timelineCandidateMarquee && _timelinePointerDown)
+            {
+                if (!_timelineMarqueeAdditive) _selectedTimelineKeyframes.Clear();
+                _isScrubbingTimeline = true;
+                ScrubTimelineAtPoint(point);
+            }
+            _timelinePointerDown = false;
+            _timelineCandidateMarquee = false;
+            _isScrubbingTimeline = false;
+            if (_timelineCanvasHost.IsMouseCaptured) _timelineCanvasHost.ReleaseMouseCapture();
+            RefreshTimelineCanvas();
+        }
+
+        private void SelectTimelineKeyframesInMarquee(Point currentPoint)
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null) return;
+            var selectionRect = CreateTimelineSelectionRect(_timelineMarqueeStartPoint, currentPoint);
+            _selectedTimelineKeyframes.Clear();
+            if (_timelineMarqueeAdditive)
+                foreach (var keyframe in _timelineMarqueeInitialSelection) _selectedTimelineKeyframes.Add(keyframe);
+            var selectedLayer = _selectedLayers.FirstOrDefault();
+            uint selectedId = selectedLayer != null ? PropertyBinder.GetNumericNodeId(selectedLayer.Id) : 0;
+            foreach (var track in _timelineController.ActiveClip.Tracks ?? new List<AnimTrack>())
+            {
+                if (selectedLayer != null && track.NodeId != selectedId) continue;
+                double centerY = 24.0 + GetPropRowIndex(track.Prop) * 21.0 + 10.5;
+                foreach (var keyframe in track.Keys ?? new List<Keyframe>())
+                {
+                    var keyRect = new Rect(keyframe.Time * _timelinePixelsPerSecond - 6.0, centerY - 6.0, 12.0, 12.0);
+                    if (selectionRect.IntersectsWith(keyRect))
+                    {
+                        _selectedTimelineKeyframes.Add(keyframe);
+                        _timelineKeyframeOwners[keyframe] = track;
+                    }
+                }
+            }
+            var first = _selectedTimelineKeyframes.FirstOrDefault();
+            if (first != null && _timelineKeyframeOwners.ContainsKey(first))
+            {
+                _editingInterpolationKeyframe = first;
+                _editingInterpolationTrack = _timelineKeyframeOwners[first];
+            }
+        }
+
+        private void UpdateTimelineKeyframeDiamondStyles()
+        {
+            if (_timelineCanvasHost == null) return;
+            foreach (var diamond in _timelineCanvasHost.Children.OfType<Polygon>())
+            {
+                var keyframe = diamond.Tag as Keyframe;
+                if (keyframe == null) continue;
+                diamond.Fill = _selectedTimelineKeyframes.Contains(keyframe)
+                    ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                    : ReferenceEquals(keyframe, _editingInterpolationKeyframe)
+                        ? new SolidColorBrush(Color.FromRgb(90, 170, 220))
+                        : new SolidColorBrush(Color.FromRgb(251, 191, 36));
+            }
+        }
+
+        private void UpdateTimelineMarqueeVisual(Point currentPoint)
+        {
+            RemoveTimelineMarqueeVisual();
+            var rect = CreateTimelineSelectionRect(_timelineMarqueeStartPoint, currentPoint);
+            _timelineMarqueeVisual = new Rectangle
+            {
+                Width = Math.Max(1.0, rect.Width),
+                Height = Math.Max(1.0, rect.Height),
+                Fill = new SolidColorBrush(Color.FromArgb(36, 80, 160, 255)),
+                Stroke = new SolidColorBrush(Color.FromRgb(80, 160, 255)),
+                StrokeThickness = 1,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(_timelineMarqueeVisual, rect.Left);
+            Canvas.SetTop(_timelineMarqueeVisual, rect.Top);
+            _timelineCanvasHost.Children.Add(_timelineMarqueeVisual);
+        }
+
+        private static Rect CreateTimelineSelectionRect(Point start, Point end)
+        {
+            return new Rect(
+                Math.Min(start.X, end.X),
+                Math.Min(start.Y, end.Y),
+                Math.Abs(end.X - start.X),
+                Math.Abs(end.Y - start.Y));
+        }
+
+        private void RemoveTimelineMarqueeVisual()
+        {
+            if (_timelineMarqueeVisual != null && _timelineCanvasHost != null)
+                _timelineCanvasHost.Children.Remove(_timelineMarqueeVisual);
+            _timelineMarqueeVisual = null;
+        }
+
+        private void SortSelectedKeyframeTracks()
+        {
+            foreach (var track in _selectedTimelineKeyframes
+                .Where(keyframe => _timelineKeyframeOwners.ContainsKey(keyframe))
+                .Select(keyframe => _timelineKeyframeOwners[keyframe]).Distinct())
+                track.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+        }
+
+        private void ExecuteKeyframeTimeChange(Dictionary<Keyframe, double> before, Dictionary<Keyframe, double> after)
+        {
+            if (before == null || after == null || before.Count == 0) return;
+            bool changed = before.Any(entry => after.ContainsKey(entry.Key) && Math.Abs(entry.Value - after[entry.Key]) > 0.000001);
+            if (!changed) return;
+            var owners = new Dictionary<Keyframe, AnimTrack>();
+            foreach (var keyframe in before.Keys)
+                if (_timelineKeyframeOwners.ContainsKey(keyframe)) owners[keyframe] = _timelineKeyframeOwners[keyframe];
+            History.Execute(new MoveKeyframesCommand(before, after, owners, () =>
+            {
+                foreach (var track in owners.Values.Distinct()) track.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+                if (_timelineController != null) _timelineController.Seek(_timelineController.CurrentTime);
+                RefreshTimelineCanvas();
+                RefreshTimelineTracks();
+                RefreshInterpolationGraphPanels();
+            }));
+        }
+
+        private void OffsetSelectedTimelineKeyframes(int frames)
+        {
+            if (_selectedTimelineKeyframes.Count == 0 || _timelineController == null) return;
+            double frameDuration = 1.0 / Math.Max(1.0, _timelineController.Fps);
+            double delta = frames * frameDuration;
+            double duration = _timelineController.Duration;
+            double minTime = _selectedTimelineKeyframes.Min(keyframe => keyframe.Time);
+            double maxTime = _selectedTimelineKeyframes.Max(keyframe => keyframe.Time);
+            delta = Math.Max(-minTime, Math.Min(duration - maxTime, delta));
+            var before = _selectedTimelineKeyframes.ToDictionary(keyframe => keyframe, keyframe => keyframe.Time);
+            var after = before.ToDictionary(entry => entry.Key, entry => Math.Max(0.0, Math.Min(duration, entry.Value + delta)));
+            ExecuteKeyframeTimeChange(before, after);
+        }
+
+        private void StaggerSelectedTimelineKeyframes(bool reverse)
+        {
+            if (_selectedTimelineKeyframes.Count < 2 || _timelineController == null) return;
+            double frameDuration = 1.0 / Math.Max(1.0, _timelineController.Fps);
+            double duration = _timelineController.Duration;
+            var ordered = _selectedTimelineKeyframes
+                .Where(keyframe => _timelineKeyframeOwners.ContainsKey(keyframe))
+                .OrderBy(keyframe => GetPropRowIndex(_timelineKeyframeOwners[keyframe].Prop))
+                .ThenBy(keyframe => keyframe.Time)
+                .ToList();
+            if (ordered.Count < 2) return;
+            double firstTime = ordered.Min(keyframe => keyframe.Time);
+            var before = ordered.ToDictionary(keyframe => keyframe, keyframe => keyframe.Time);
+            var after = new Dictionary<Keyframe, double>();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                int offsetIndex = reverse ? ordered.Count - 1 - i : i;
+                after[ordered[i]] = Math.Min(duration, firstTime + offsetIndex * frameDuration);
+            }
+            ExecuteKeyframeTimeChange(before, after);
+        }
+
+        private void SelectAllTimelineKeyframes()
+        {
+            _selectedTimelineKeyframes.Clear();
+            foreach (var keyframe in _timelineKeyframeOwners.Keys) _selectedTimelineKeyframes.Add(keyframe);
+            var first = _selectedTimelineKeyframes.FirstOrDefault();
+            if (first != null && _timelineKeyframeOwners.ContainsKey(first))
+            {
+                _editingInterpolationKeyframe = first;
+                _editingInterpolationTrack = _timelineKeyframeOwners[first];
+            }
+            UpdateTimelineKeyframeDiamondStyles();
+            RefreshInterpolationGraphPanels();
+        }
+
+        private void DeleteSelectedTimelineKeyframes()
+        {
+            if (_selectedTimelineKeyframes.Count == 0) return;
+            var before = new Dictionary<Keyframe, AnimTrack>();
+            foreach (var keyframe in _selectedTimelineKeyframes)
+                if (_timelineKeyframeOwners.ContainsKey(keyframe)) before[keyframe] = _timelineKeyframeOwners[keyframe];
+            if (before.Count == 0) return;
+            _selectedTimelineKeyframes.Clear();
+            if (_editingInterpolationKeyframe != null && before.ContainsKey(_editingInterpolationKeyframe))
+            {
+                _editingInterpolationKeyframe = null;
+                _editingInterpolationTrack = null;
+            }
+            History.Execute(new DeleteKeyframesCommand(before, () =>
+            {
+                if (_timelineController != null) _timelineController.Seek(_timelineController.CurrentTime);
+                RefreshTimelineCanvas();
+                RefreshTimelineTracks();
+                RefreshInterpolationGraphPanels();
+            }));
+        }
+
+        private void ShowTimelineKeyframeContextMenu(AnimTrack track, Keyframe keyframe, FrameworkElement target)
+        {
+            if (!_selectedTimelineKeyframes.Contains(keyframe))
+            {
+                _selectedTimelineKeyframes.Clear();
+                _selectedTimelineKeyframes.Add(keyframe);
+            }
+            _editingInterpolationTrack = track;
+            _editingInterpolationKeyframe = keyframe;
+            RefreshInterpolationGraphPanels();
+            UpdateTimelineKeyframeDiamondStyles();
+            var menu = new ContextMenu();
+            menu.Items.Add(new MenuItem { Header = "Offset −1 frame" });
+            ((MenuItem)menu.Items[0]).Click += (s, e) => OffsetSelectedTimelineKeyframes(-1);
+            menu.Items.Add(new MenuItem { Header = "Offset +1 frame" });
+            ((MenuItem)menu.Items[1]).Click += (s, e) => OffsetSelectedTimelineKeyframes(1);
+            menu.Items.Add(new MenuItem { Header = "Stagger selected keys" });
+            ((MenuItem)menu.Items[2]).Click += (s, e) => StaggerSelectedTimelineKeyframes(false);
+            menu.Items.Add(new Separator());
+            menu.Items.Add(new MenuItem { Header = "Select all visible keys" });
+            ((MenuItem)menu.Items[4]).Click += (s, e) => SelectAllTimelineKeyframes();
+            menu.Items.Add(new MenuItem { Header = "Delete selected keys" });
+            ((MenuItem)menu.Items[5]).Click += (s, e) => DeleteSelectedTimelineKeyframes();
+            menu.PlacementTarget = target;
+            menu.IsOpen = true;
+        }
+
         private void ScrubTimelineAtPoint(Point pt)
         {
             if (_timelineController == null) EnsureTimelineControllerInitialized();
@@ -8952,6 +12786,58 @@ namespace Kerf.UI
         {
             if (_timelineScrubber == null || _timelineController == null) return;
             _timelineScrubber.Value = _timelineController.CurrentTime;
+        }
+
+        private void ShowAnimationClipMenu(FrameworkElement target)
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (Document == null || Document.Animation == null || Document.Animation.Clips == null) return;
+            var menu = new ContextMenu();
+            foreach (var clip in Document.Animation.Clips.Where(c => c != null))
+            {
+                var item = new MenuItem { Header = clip.Name, IsCheckable = true, IsChecked = clip == _timelineController.ActiveClip };
+                item.Click += (s, e) => SelectAnimationClip(clip);
+                menu.Items.Add(item);
+            }
+            menu.PlacementTarget = target;
+            menu.Placement = PlacementMode.Bottom;
+            menu.IsOpen = true;
+        }
+
+        private void SelectAnimationClip(Clip clip)
+        {
+            if (clip == null || _timelineController == null) return;
+            PauseAnimation();
+            _timelineController.ActiveClip = clip;
+            _timelineController.LoopMode = clip.LoopMode;
+            _timelineController.UseStateMachine = false;
+            _isStateMachineMode = false;
+            if (_timelineController.ActiveStateMachine != null && Document.Animation != null && Document.Animation.StateMachine != null)
+                _timelineController.ActiveStateMachine = new StateMachineRuntime(Document.Animation.StateMachine, Document.Animation.Clips);
+            if (Document.Animation != null) Document.Animation.ActiveClipId = clip.Id;
+            if (_timelineScrubber != null)
+            {
+                _timelineScrubber.Maximum = _timelineController.Duration;
+                _timelineScrubber.Value = 0.0;
+            }
+            if (_timelineClipText != null) _timelineClipText.Text = "Clip: " + clip.Name;
+            if (_timelineLoopText != null) _timelineLoopText.Text = clip.LoopMode == LoopMode.Loop ? "🔁 Loop: All" : (clip.LoopMode == LoopMode.PingPong ? "🔁 Loop: PingPong" : "🔁 Loop: Once");
+            if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
+            if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Visible;
+            _timelineController.Seek(0.0);
+            History.MarkDirty();
+            RefreshTimelineUI();
+        }
+
+        private void AddAnimationClip()
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            uint id = Document.Animation.Clips.Count == 0 ? 100 : Document.Animation.Clips.Max(c => c == null ? 0u : c.Id) + 1u;
+            var clip = new Clip(id, "Animation " + (Document.Animation.Clips.Count + 1), Math.Max(0.1, _timelineController.Duration), _timelineController.Fps, _timelineController.LoopMode);
+            Document.Animation.Clips.Add(clip);
+            SelectAnimationClip(clip);
         }
 
         public void ToggleAnimationPlayback()
@@ -8988,6 +12874,8 @@ namespace Kerf.UI
             if (_timelineController != null)
             {
                 _timelineController.Stop();
+                if (_timelineController.UseStateMachine)
+                    UpdateStateMachineStatusUI();
                 UpdateTimelineTimeReadout();
                 UpdateTimelineScrubberPosition();
                 RefreshTimelineCanvas();
@@ -9006,7 +12894,14 @@ namespace Kerf.UI
                     {
                         if (_timelineController.IsPlaying)
                         {
-                            _timelineController.Step(0.016);
+                            DateTime now = DateTime.UtcNow;
+                            double dt = _lastAnimationTickUtc == DateTime.MinValue
+                                ? 1.0 / Math.Max(1.0, _timelineController.Fps)
+                                : Math.Max(0.0, Math.Min(0.1, (now - _lastAnimationTickUtc).TotalSeconds));
+                            _lastAnimationTickUtc = now;
+                            _timelineController.Step(dt);
+                            if (_timelineController.UseStateMachine)
+                                UpdateStateMachineStatusUI();
                             UpdateTimelineTimeReadout();
                             UpdateTimelineScrubberPosition();
                             RefreshTimelineCanvas();
@@ -9020,7 +12915,153 @@ namespace Kerf.UI
             }
             if (!_animationTimer.IsEnabled)
             {
+                _lastAnimationTickUtc = DateTime.UtcNow;
                 _animationTimer.Start();
+            }
+        }
+
+        private void CaptureAnimationRestPose()
+        {
+            if (Document == null) return;
+            _animationRestPose.Clear();
+            _animationNodesById.Clear();
+            var page = Document.GetActivePage();
+            if (page == null) return;
+            foreach (var layer in page.GetAllLayersFlat())
+            {
+                CaptureAnimationRestPoseForLayer(layer);
+            }
+        }
+
+        private void CaptureAnimationRestPoseForLayer(LayerNode layer)
+        {
+            if (layer == null) return;
+            uint id = PropertyBinder.GetNumericNodeId(layer.Id);
+            _animationRestPose[layer] = new AnimationRestPose
+            {
+                X = layer.X,
+                Y = layer.Y,
+                Width = layer.Width,
+                Height = layer.Height,
+                Rotation = layer.Rotation,
+                Opacity = layer.Opacity,
+                CornerRadius = layer.CornerRadius,
+                CornerRadiusTopLeft = layer.CornerRadiusTopLeft,
+                CornerRadiusTopRight = layer.CornerRadiusTopRight,
+                CornerRadiusBottomRight = layer.CornerRadiusBottomRight,
+                CornerRadiusBottomLeft = layer.CornerRadiusBottomLeft,
+                Geometry = layer.Geometry != null ? layer.Geometry.Clone() : null
+            };
+            _animationNodesById[id] = layer;
+        }
+
+        private void RestoreAnimationRestPose()
+        {
+            foreach (var pair in _animationRestPose)
+            {
+                LayerNode layer = pair.Key;
+                AnimationRestPose pose = pair.Value;
+                if (layer == null || pose == null) continue;
+                layer.X = pose.X;
+                layer.Y = pose.Y;
+                layer.Width = pose.Width;
+                layer.Height = pose.Height;
+                layer.Rotation = pose.Rotation;
+                layer.Opacity = pose.Opacity;
+                layer.CornerRadius = pose.CornerRadius;
+                layer.CornerRadiusTopLeft = pose.CornerRadiusTopLeft;
+                layer.CornerRadiusTopRight = pose.CornerRadiusTopRight;
+                layer.CornerRadiusBottomRight = pose.CornerRadiusBottomRight;
+                layer.CornerRadiusBottomLeft = pose.CornerRadiusBottomLeft;
+                if (pose.Geometry != null) layer.Geometry = pose.Geometry.Clone();
+            }
+        }
+
+        private void ApplyAnimationPose(Kerf.Model.Page page, Dictionary<uint, Dictionary<ushort, double>> pose)
+        {
+            if (page == null) return;
+            var layers = page.GetAllLayersFlat().ToList();
+            foreach (var layer in layers)
+            {
+                uint id = PropertyBinder.GetNumericNodeId(layer.Id);
+                if (!_animationRestPose.ContainsKey(layer))
+                {
+                    CaptureAnimationRestPoseForLayer(layer);
+                }
+            }
+
+            RestoreAnimationRestPose();
+            if (pose != null)
+            {
+                foreach (var item in pose)
+                {
+                    LayerNode layer;
+                    if (_animationNodesById.TryGetValue(item.Key, out layer))
+                        PropertyBinder.ApplyPoseToLayer(layer, item.Key, pose);
+                }
+            }
+
+            // Layer bounds are stored in canvas coordinates, so animating a frame's transform
+            // must explicitly carry its descendants along. Each child uses the resulting parent
+            // delta as its own basis, which composes correctly through nested frames.
+            if (page.Layers != null)
+            {
+                foreach (var root in page.Layers)
+                    ApplyAnimatedParentTransformToChildren(root);
+            }
+        }
+
+        private void ApplyAnimatedParentTransformToChildren(LayerNode parent)
+        {
+            if (parent == null || parent.Children == null || parent.Children.Count == 0) return;
+            AnimationRestPose parentRest;
+            if (!_animationRestPose.TryGetValue(parent, out parentRest) || parentRest == null) return;
+
+            double scaleX = parent.Width / Math.Max(0.001, parentRest.Width);
+            double scaleY = parent.Height / Math.Max(0.001, parentRest.Height);
+            double rotationDelta = parent.Rotation - parentRest.Rotation;
+            double radians = rotationDelta * Math.PI / 180.0;
+            double cos = Math.Cos(radians);
+            double sin = Math.Sin(radians);
+            double restCenterX = parentRest.X + parentRest.Width / 2.0;
+            double restCenterY = parentRest.Y + parentRest.Height / 2.0;
+            double currentCenterX = parent.X + parent.Width / 2.0;
+            double currentCenterY = parent.Y + parent.Height / 2.0;
+
+            foreach (var child in parent.Children)
+            {
+                if (child == null) continue;
+                AnimationRestPose childRest;
+                if (_animationRestPose.TryGetValue(child, out childRest) && childRest != null)
+                {
+                    double childCenterX = child.X + child.Width / 2.0;
+                    double childCenterY = child.Y + child.Height / 2.0;
+                    double relX = (childCenterX - restCenterX) * scaleX;
+                    double relY = (childCenterY - restCenterY) * scaleY;
+                    double nextCenterX = currentCenterX + relX * cos - relY * sin;
+                    double nextCenterY = currentCenterY + relX * sin + relY * cos;
+                    double nextWidth = Math.Max(1.0, child.Width * Math.Abs(scaleX));
+                    double nextHeight = Math.Max(1.0, child.Height * Math.Abs(scaleY));
+                    Rect nextBounds = new Rect(nextCenterX - nextWidth / 2.0, nextCenterY - nextHeight / 2.0, nextWidth, nextHeight);
+
+                    child.X = nextBounds.X;
+                    child.Y = nextBounds.Y;
+                    child.Width = nextBounds.Width;
+                    child.Height = nextBounds.Height;
+                    child.Rotation += rotationDelta;
+
+                    // Vector path points are canvas based, so scale/translate them with the frame too.
+                    if (child.Type == ElementType.Path && childRest.Geometry != null)
+                    {
+                        child.Geometry = childRest.Geometry.Clone();
+                        BezierVectorEngine.ScaleGeometry(
+                            child.Geometry,
+                            new Rect(childRest.X, childRest.Y, Math.Max(1.0, childRest.Width), Math.Max(1.0, childRest.Height)),
+                            nextBounds);
+                    }
+                }
+
+                ApplyAnimatedParentTransformToChildren(child);
             }
         }
 
@@ -9034,20 +13075,37 @@ namespace Kerf.UI
                 var page = Document != null ? Document.GetActivePage() : null;
                 if (page != null)
                 {
-                    PropertyBinder.ApplyPoseToLayers(page.GetAllLayersFlat(), pose);
+                    ApplyAnimationPose(page, pose);
                     _sceneGraph.InvalidateAll();
                     RefreshCanvas();
-                    RefreshPropertyInspector();
                 }
             };
 
-            var defaultClip = new Clip(1, "Default Animation", 2.0);
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (Document.Animation.Clips.Count > 0)
+            {
+                Clip activeClip = Document.Animation.Clips.FirstOrDefault(c => c.Id == Document.Animation.ActiveClipId);
+                if (activeClip == null) activeClip = Document.Animation.Clips[0];
+                Document.Animation.ActiveClipId = activeClip.Id;
+                _timelineController.ActiveClip = activeClip;
+                _timelineController.Duration = Math.Max(0.001, activeClip.Duration);
+                if (Document.Animation.StateMachine != null)
+                    _timelineController.ActiveStateMachine = new StateMachineRuntime(Document.Animation.StateMachine, Document.Animation.Clips);
+                if (_timelineScrubber != null) _timelineScrubber.Maximum = _timelineController.Duration;
+                if (_timelineClipText != null) _timelineClipText.Text = "Clip: " + activeClip.Name;
+                BuildStateMachineInputsControls();
+                BuildStateMachineStatesGraph();
+                return;
+            }
+
+            var defaultClip = new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.Loop);
 
             var pageLayers = (Document != null && Document.GetActivePage() != null) ? Document.GetActivePage().Layers : null;
             if (pageLayers != null && pageLayers.Count > 0)
             {
                 var target = pageLayers[0];
-                uint targetId = (uint)Math.Abs(target.Id.GetHashCode());
+                uint targetId = PropertyBinder.GetNumericNodeId(target.Id);
 
                 // Default Rotation track (0 -> 180 -> 360 deg)
                 var rotTrack = new AnimTrack(targetId, (ushort)PropKey.Rotation);
@@ -9065,108 +13123,34 @@ namespace Kerf.UI
             }
 
             _timelineController.ActiveClip = defaultClip;
+            _timelineController.Duration = defaultClip.Duration;
 
-            // Multi-State Distinct Clips: Idle, Hover, Pressed, Active
-            var clipIdle = new Clip(0, "Idle Pose", 1.0);
-            var clipHover = new Clip(1, "Hover Pose", 1.0);
-            var clipPressed = new Clip(2, "Pressed Pose", 1.0);
-            var clipActive = new Clip(3, "Active Pose", 1.0);
-
-            if (pageLayers != null && pageLayers.Count > 0)
-            {
-                var target = pageLayers[0];
-                uint targetId = (uint)Math.Abs(target.Id.GetHashCode());
-
-                // Idle: Rest position and scale
-                var trkIdleRot = new AnimTrack(targetId, (ushort)PropKey.Rotation);
-                trkIdleRot.AddKeyframe(Keyframe.Linear(0.0, 0.0));
-                clipIdle.Tracks.Add(trkIdleRot);
-
-                var trkIdleY = new AnimTrack(targetId, (ushort)PropKey.Y);
-                trkIdleY.AddKeyframe(Keyframe.Linear(0.0, target.Y));
-                clipIdle.Tracks.Add(trkIdleY);
-
-                // Hover: Elevated -8px
-                var trkHovRot = new AnimTrack(targetId, (ushort)PropKey.Rotation);
-                trkHovRot.AddKeyframe(Keyframe.Linear(0.0, 0.0));
-                clipHover.Tracks.Add(trkHovRot);
-
-                var trkHovY = new AnimTrack(targetId, (ushort)PropKey.Y);
-                trkHovY.AddKeyframe(Keyframe.Cubic(0.0, target.Y - 10.0, 0.25, 0.1, 0.25, 1.0));
-                clipHover.Tracks.Add(trkHovY);
-
-                // Pressed: Down +4px, opacity 0.85
-                var trkPresY = new AnimTrack(targetId, (ushort)PropKey.Y);
-                trkPresY.AddKeyframe(Keyframe.Linear(0.0, target.Y + 4.0));
-                clipPressed.Tracks.Add(trkPresY);
-
-                var trkPresOp = new AnimTrack(targetId, (ushort)PropKey.Opacity);
-                trkPresOp.AddKeyframe(Keyframe.Linear(0.0, Math.Max(0.2, target.Opacity * 0.85)));
-                clipPressed.Tracks.Add(trkPresOp);
-
-                // Active: Rotated 15 deg
-                var trkActRot = new AnimTrack(targetId, (ushort)PropKey.Rotation);
-                trkActRot.AddKeyframe(Keyframe.Cubic(0.0, 15.0, 0.34, 1.56, 0.64, 1.0));
-                clipActive.Tracks.Add(trkActRot);
-
-                var trkActY = new AnimTrack(targetId, (ushort)PropKey.Y);
-                trkActY.AddKeyframe(Keyframe.Linear(0.0, target.Y));
-                clipActive.Tracks.Add(trkActY);
-            }
-
-            // Real Vector State Machine Definition Setup
-            var smDef = new StateMachineDefinition("Interactive Vector SM");
-            int inHover = smDef.AddInput(MachineInput.Bool("isHovered", false));
-            int inPress = smDef.AddInput(MachineInput.Bool("isPressed", false));
-            int inActive = smDef.AddInput(MachineInput.Bool("isActive", false));
-            int inClick = smDef.AddInput(MachineInput.Trigger("clickTrigger"));
-            int inReset = smDef.AddInput(MachineInput.Trigger("resetTrigger"));
-            int inSpeed = smDef.AddInput(MachineInput.Number("speed", 1.0));
-
+            // Minimal, editable starter graph: Entry → Idle, plus an input-driven interrupt state.
+            var interruptClip = new Clip(101, "interrupt", defaultClip.Duration, 60.0, LoopMode.OneShot);
+            var smDef = new StateMachineDefinition("State Machine 1");
+            smDef.AddViewModelProperty(new ViewModelPropertyDefinition("Hovering", ViewModelPropertyKind.Boolean));
             var smLayer = new MachineLayer("Base Layer");
             int stEntry = smLayer.AddState(new MachineState(0, "Entry", StateKind.Entry));
             int stIdle = smLayer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
-            int stHover = smLayer.AddState(new MachineState(2, "Hover", StateKind.Animation, 1));
-            int stPressed = smLayer.AddState(new MachineState(3, "Pressed", StateKind.Animation, 2));
-            int stActive = smLayer.AddState(new MachineState(4, "Active", StateKind.Animation, 3));
-            int stAny = smLayer.AddState(new MachineState(5, "Any", StateKind.Any));
-
-            // Entry -> Idle (instant)
+            int stInterrupt = smLayer.AddState(new MachineState(2, "interrupt", StateKind.Animation, 1));
+            smLayer.AddState(new MachineState(3, "Any State", StateKind.Any));
+            smLayer.AddState(new MachineState(4, "Exit", StateKind.Exit));
             smLayer.AddTransition(new StateTransition(stEntry, stIdle, 0.0));
-
-            // Idle -> Hover (isHovered == true)
-            var tIdleHov = new StateTransition(stIdle, stHover, 0.25);
-            tIdleHov.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 1.0));
-            smLayer.AddTransition(tIdleHov);
-
-            // Hover -> Idle (isHovered == false)
-            var tHovIdle = new StateTransition(stHover, stIdle, 0.25);
-            tHovIdle.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 0.0));
-            smLayer.AddTransition(tHovIdle);
-
-            // Hover -> Pressed (isPressed == true)
-            var tHovPress = new StateTransition(stHover, stPressed, 0.10);
-            tHovPress.Conditions.Add(new TransitionCondition(inPress, ConditionOp.Eq, 1.0));
-            smLayer.AddTransition(tHovPress);
-
-            // Pressed -> Active (clickTrigger)
-            var tPressAct = new StateTransition(stPressed, stActive, 0.25);
-            tPressAct.Conditions.Add(new TransitionCondition(inClick, ConditionOp.Eq, 1.0));
-            smLayer.AddTransition(tPressAct);
-
-            // Active -> Idle (clickTrigger or resetTrigger)
-            var tActIdle = new StateTransition(stActive, stIdle, 0.30);
-            tActIdle.Conditions.Add(new TransitionCondition(inClick, ConditionOp.Eq, 1.0));
-            smLayer.AddTransition(tActIdle);
-
-            // Any -> Idle (resetTrigger)
-            var tAnyReset = new StateTransition(stAny, stIdle, 0.20);
-            tAnyReset.Conditions.Add(new TransitionCondition(inReset, ConditionOp.Eq, 1.0));
-            smLayer.AddTransition(tAnyReset);
-
+            var idleToInterrupt = new StateTransition(stIdle, stInterrupt, 0.25);
+            idleToInterrupt.Conditions.Add(new TransitionCondition("Hovering", ConditionOp.Eq, 1.0));
+            smLayer.AddTransition(idleToInterrupt);
+            var interruptToIdle = new StateTransition(stInterrupt, stIdle, 0.25);
+            interruptToIdle.Conditions.Add(new TransitionCondition("Hovering", ConditionOp.Eq, 0.0));
+            smLayer.AddTransition(interruptToIdle);
             smDef.AddLayer(smLayer);
-            var clips = new List<Clip> { clipIdle, clipHover, clipPressed, clipActive };
+            var clips = new List<Clip> { defaultClip, interruptClip };
             _timelineController.ActiveStateMachine = new StateMachineRuntime(smDef, clips);
+            Document.Animation.Clips = clips;
+            Document.Animation.StateMachine = smDef;
+            Document.Animation.ActiveClipId = defaultClip.Id;            if (_timelineScrubber != null) _timelineScrubber.Maximum = _timelineController.Duration;
+            if (_timelineClipText != null) _timelineClipText.Text = "Clip: " + defaultClip.Name;
+            BuildStateMachineInputsControls();
+            BuildStateMachineStatesGraph();
         }
 
         private void AddKeyframeForSelectedLayer()
@@ -9175,7 +13159,7 @@ namespace Kerf.UI
             var clip = _timelineController.ActiveClip;
             if (clip == null)
             {
-                clip = new Clip(1, "Default Animation", 2.0);
+                clip = new Clip(100, "Default Animation", _timelineController.Duration);
                 _timelineController.ActiveClip = clip;
             }
 
@@ -9187,7 +13171,7 @@ namespace Kerf.UI
             }
 
             double time = _timelineController.CurrentTime;
-            uint nodeId = (uint)Math.Abs(sel.Id.GetHashCode());
+            uint nodeId = PropertyBinder.GetNumericNodeId(sel.Id);
 
             AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.X, time, sel.X);
             AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Y, time, sel.Y);
@@ -9197,10 +13181,109 @@ namespace Kerf.UI
             AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Opacity, time, sel.Opacity);
             AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.CornerRadius, time, sel.CornerRadius);
 
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
+            Document.Animation.ActiveClipId = clip.Id;
+            _timelineController.UseStateMachine = false;
+            History.MarkDirty();
+
             RefreshTimelineUI();
         }
 
-        private static void AddOrUpdateTrackKeyframe(Clip clip, uint nodeId, ushort propertyId, double time, double val)
+        private FrameworkElement CreateAnimatedPropertyField(FrameworkElement field, LayerNode layer, PropKey property)
+        {
+            if (field == null || _currentStudioMode != StudioMode.Animate) return field;
+            var grid = new Grid { Margin = new Thickness(0) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(23) });
+            Grid.SetColumn(field, 0);
+            grid.Children.Add(field);
+            var button = new Button
+            {
+                Content = HasPropertyKeyAtPlayhead(layer, property) ? "◆" : "◇",
+                Width = 20,
+                Height = 25,
+                Padding = new Thickness(0),
+                Margin = new Thickness(2, 0, 0, 0),
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                Foreground = new SolidColorBrush(IsPropertyAnimated(layer, property)
+                    ? Color.FromRgb(96, 165, 250) : Color.FromRgb(118, 129, 150)),
+                FontSize = 15,
+                Cursor = Cursors.Hand,
+                ToolTip = HasPropertyKeyAtPlayhead(layer, property) ? "Update key at playhead" : "Add key for this property"
+            };
+            button.Click += (s, e) =>
+            {
+                AddKeyframeForProperty(layer, property, GetPropertyValue(layer, property));
+                RefreshPropertyInspector();
+            };
+            Grid.SetColumn(button, 1);
+            grid.Children.Add(button);
+            return grid;
+        }
+
+        private bool IsPropertyAnimated(LayerNode layer, PropKey property)
+        {
+            var clip = _timelineController != null ? _timelineController.ActiveClip : null;
+            uint nodeId = layer != null ? PropertyBinder.GetNumericNodeId(layer.Id) : 0;
+            return clip != null && clip.Tracks != null && clip.Tracks.Any(t => t != null && t.NodeId == nodeId && t.Prop == (ushort)property);
+        }
+
+        private bool HasPropertyKeyAtPlayhead(LayerNode layer, PropKey property)
+        {
+            var clip = _timelineController != null ? _timelineController.ActiveClip : null;
+            if (clip == null || layer == null) return false;
+            uint nodeId = PropertyBinder.GetNumericNodeId(layer.Id);
+            var track = clip.Tracks.FirstOrDefault(t => t != null && t.NodeId == nodeId && t.Prop == (ushort)property);
+            return track != null && track.Keys != null && track.Keys.Any(k => Math.Abs(k.Time - _timelineController.CurrentTime) <= 0.02);
+        }
+
+        private static double GetPropertyValue(LayerNode layer, PropKey property)
+        {
+            if (layer == null) return 0.0;
+            switch (property)
+            {
+                case PropKey.X: return layer.X;
+                case PropKey.Y: return layer.Y;
+                case PropKey.Width: return layer.Width;
+                case PropKey.Height: return layer.Height;
+                case PropKey.Rotation: return layer.Rotation;
+                case PropKey.Opacity: return layer.Opacity;
+                case PropKey.CornerRadius: return layer.CornerRadius;
+                default: return 0.0;
+            }
+        }
+
+        private void AutoKeyProperty(LayerNode layer, PropKey property, double value)
+        {
+            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
+            AddKeyframeForProperty(layer, property, value);
+        }
+
+        private void AddKeyframeForProperty(LayerNode layer, PropKey property, double value)
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (_timelineController == null || layer == null) return;
+            var clip = _timelineController.ActiveClip;
+            if (clip == null)
+            {
+                clip = new Clip(100, "Default Animation", _timelineController.Duration);
+                _timelineController.ActiveClip = clip;
+            }
+            uint nodeId = PropertyBinder.GetNumericNodeId(layer.Id);
+            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)property, _timelineController.CurrentTime, value);
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
+            Document.Animation.ActiveClipId = clip.Id;
+            _timelineController.UseStateMachine = false;
+            History.MarkDirty();
+            RefreshTimelineCanvas();
+        }
+
+        private void AddOrUpdateTrackKeyframe(Clip clip, uint nodeId, ushort propertyId, double time, double val)
         {
             AnimTrack track = null;
             for (int i = 0; i < clip.Tracks.Count; i++)
@@ -9234,7 +13317,7 @@ namespace Kerf.UI
             }
             else
             {
-                track.AddKeyframe(Keyframe.Cubic(time, val, 0.42, 0.0, 0.58, 1.0));
+                track.AddKeyframe(new Keyframe(time, val, _defaultInterpolationMode, _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2));
             }
         }
 
@@ -9242,6 +13325,7 @@ namespace Kerf.UI
         {
             RefreshTimelineTracks();
             RefreshTimelineCanvas();
+            RefreshInterpolationGraphPanels();
             UpdateTimelineTimeReadout();
             UpdateTimelineScrubberPosition();
         }
@@ -9318,6 +13402,7 @@ namespace Kerf.UI
         {
             if (_timelineCanvasHost == null) return;
             _timelineCanvasHost.Children.Clear();
+            _timelineKeyframeOwners.Clear();
 
             double duration = (_timelineController != null) ? _timelineController.Duration : 2.0;
             double pps = _timelinePixelsPerSecond;
@@ -9387,7 +13472,7 @@ namespace Kerf.UI
             if (_timelineController != null && _timelineController.ActiveClip != null)
             {
                 var sel = _selectedLayers.FirstOrDefault();
-                uint selId = (sel != null) ? (uint)Math.Abs(sel.Id.GetHashCode()) : 0;
+                uint selId = (sel != null) ? PropertyBinder.GetNumericNodeId(sel.Id) : 0;
 
                 foreach (var track in _timelineController.ActiveClip.Tracks)
                 {
@@ -9398,21 +13483,43 @@ namespace Kerf.UI
 
                     foreach (var kf in track.Keys)
                     {
+                        _timelineKeyframeOwners[kf] = track;
                         double kx = kf.Time * pps;
+                        var keyframe = kf;
+                        var keyTrack = track;
+                        var hitTarget = new Ellipse
+                        {
+                            Width = 20,
+                            Height = 20,
+                            Fill = Brushes.Transparent,
+                            Stroke = Brushes.Transparent,
+                            Cursor = Cursors.SizeWE,
+                            ToolTip = string.Format("Drag to move {0} keyframe", ((PropKey)track.Prop).ToString()),
+                            Tag = keyframe
+                        };
+                        Canvas.SetLeft(hitTarget, kx - 10);
+                        Canvas.SetTop(hitTarget, ky - 10);
+                        _timelineCanvasHost.Children.Add(hitTarget);
+
                         var diamond = new Polygon
                         {
                             Points = new PointCollection
                             {
-                                new Point(kx, ky - 5),
-                                new Point(kx + 5, ky),
-                                new Point(kx, ky + 5),
-                                new Point(kx - 5, ky)
+                                new Point(kx, ky - 6),
+                                new Point(kx + 6, ky),
+                                new Point(kx, ky + 6),
+                                new Point(kx - 6, ky)
                             },
-                            Fill = new SolidColorBrush(Color.FromRgb(251, 191, 36)), // Gold/Amber
+                            Fill = _selectedTimelineKeyframes.Contains(kf)
+                                ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                                : ReferenceEquals(kf, _editingInterpolationKeyframe) ? new SolidColorBrush(Color.FromRgb(90, 170, 220)) : new SolidColorBrush(Color.FromRgb(251, 191, 36)),
                             Stroke = new SolidColorBrush(Color.FromRgb(30, 35, 48)),
                             StrokeThickness = 1,
-                            ToolTip = string.Format("Keyframe: {0:F2}s, Value: {1:F1}", kf.Time, kf.Value)
+                            ToolTip = string.Format("{0} · {1:F2}s · {2:F1}", ((PropKey)track.Prop).ToString(), kf.Time, kf.Value),
+                            Cursor = Cursors.SizeWE,
+                            Tag = keyframe
                         };
+                        diamond.MouseRightButtonUp += (s, e) => ShowTimelineKeyframeContextMenu(keyTrack, keyframe, diamond);
                         _timelineCanvasHost.Children.Add(diamond);
                     }
                 }
@@ -9429,9 +13536,10 @@ namespace Kerf.UI
                     X1 = px,
                     Y1 = 12,
                     X2 = px,
-                    Y2 = 180,
+                    Y2 = Math.Max(180, _timelineCanvasHost.ActualHeight - 4),
                     Stroke = new SolidColorBrush(Color.FromRgb(239, 68, 68)), // Red Playhead
-                    StrokeThickness = 1.5
+                    StrokeThickness = 1.5,
+                    IsHitTestVisible = false
                 };
                 _timelineCanvasHost.Children.Add(playheadLine);
 
@@ -9446,10 +13554,13 @@ namespace Kerf.UI
                         new Point(px, 14),
                         new Point(px - 5, 8)
                     },
-                    Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68))
+                    Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68)),
+                    IsHitTestVisible = false
                 };
                 _timelineCanvasHost.Children.Add(playheadHead);
             }
+            _selectedTimelineKeyframes.RemoveWhere(keyframe => !_timelineKeyframeOwners.ContainsKey(keyframe));
+            RefreshInterpolationGraphPanels();
         }
 
         private static int GetPropRowIndex(ushort propKey)

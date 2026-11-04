@@ -64,45 +64,43 @@ namespace Kerf.IO
             var serializer = new JavaScriptSerializer { MaxJsonLength = 100 * 1024 * 1024 };
             string json = serializer.Serialize(doc);
 
-            string directory = IOPath.GetDirectoryName(targetFilePath);
+            string fullTargetPath = IOPath.GetFullPath(targetFilePath);
+            string directory = IOPath.GetDirectoryName(fullTargetPath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
                 Directory.CreateDirectory(directory);
             }
 
-            // Write to temporary file first
-            string tempFile = targetFilePath + ".tmp." + Guid.NewGuid().ToString("N");
-            File.WriteAllText(tempFile, json, Encoding.UTF8);
-
-            // Create backup if target exists
-            if (File.Exists(targetFilePath))
+            string tempFile = IOPath.Combine(directory, IOPath.GetFileName(fullTargetPath) + ".tmp." + Guid.NewGuid().ToString("N"));
+            try
             {
-                string bakFile = targetFilePath + ".bak";
-                try
+                using (var stream = new FileStream(tempFile, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
                 {
-                    File.Copy(targetFilePath, bakFile, true);
-                }
-                catch
-                {
-                    // Non-fatal if backup copy fails
+                    writer.Write(json);
+                    writer.Flush();
+                    stream.Flush(true);
                 }
 
-                // Atomic replace
-                try
+                if (File.Exists(fullTargetPath))
                 {
-                    File.Delete(targetFilePath);
-                    File.Move(tempFile, targetFilePath);
+                    string backupFile = fullTargetPath + ".bak";
+                    try { File.Copy(fullTargetPath, backupFile, true); }
+                    catch { /* Keep the last known backup if the new copy cannot be made. */ }
+                    File.Replace(tempFile, fullTargetPath, null, true);
                 }
-                catch
+                else
                 {
-                    // Fallback to copy and delete
-                    File.Copy(tempFile, targetFilePath, true);
-                    File.Delete(tempFile);
+                    File.Move(tempFile, fullTargetPath);
                 }
             }
-            else
+            finally
             {
-                File.Move(tempFile, targetFilePath);
+                if (File.Exists(tempFile))
+                {
+                    try { File.Delete(tempFile); }
+                    catch { }
+                }
             }
         }
 

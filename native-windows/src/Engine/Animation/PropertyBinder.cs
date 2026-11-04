@@ -6,6 +6,21 @@ namespace Kerf.Engine.Animation
 {
     public static class PropertyBinder
     {
+        public static uint GetNumericNodeId(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return 0;
+            unchecked
+            {
+                uint hash = 2166136261;
+                for (int i = 0; i < id.Length; i++)
+                {
+                    hash ^= id[i];
+                    hash *= 16777619;
+                }
+                return hash == 0 ? 1u : hash;
+            }
+        }
+
         public static void ApplyPoseToLayer(
             LayerNode layer,
             uint numericNodeId,
@@ -42,7 +57,7 @@ namespace Kerf.Engine.Animation
             {
                 if (l != null)
                 {
-                    uint numId = (uint)Math.Abs(l.Id != null ? l.Id.GetHashCode() : 0);
+                    uint numId = GetNumericNodeId(l.Id);
                     ApplyPoseToLayer(l, numId, pose);
                 }
             }

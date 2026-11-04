@@ -11,8 +11,23 @@ namespace Kerf.Engine.Animation
         public double Speed { get; set; }
         public bool IsPlaying { get; private set; }
         public LoopMode LoopMode { get; set; }
+        public bool UseStateMachine { get; set; }
 
-        public Clip ActiveClip { get; set; }
+        private Clip _activeClip;
+        public Clip ActiveClip
+        {
+            get { return _activeClip; }
+            set
+            {
+                _activeClip = value;
+                if (_activeClip != null)
+                {
+                    Duration = Math.Max(0.001, _activeClip.Duration);
+                    CurrentTime = Math.Max(0.0, Math.Min(Duration, CurrentTime));
+                    LoopMode = _activeClip.LoopMode;
+                }
+            }
+        }
         public StateMachineRuntime ActiveStateMachine { get; set; }
 
         public event EventHandler<Dictionary<uint, Dictionary<ushort, double>>> FrameUpdated;
@@ -27,6 +42,7 @@ namespace Kerf.Engine.Animation
             Speed = 1.0;
             IsPlaying = false;
             LoopMode = LoopMode.Loop;
+            UseStateMachine = false;
             _currentPose = new Dictionary<uint, Dictionary<ushort, double>>();
         }
 
@@ -43,67 +59,72 @@ namespace Kerf.Engine.Animation
         public void Stop()
         {
             IsPlaying = false;
+            if (ActiveStateMachine != null) ActiveStateMachine.Reset();
             Seek(0.0);
         }
 
         public void Seek(double time)
         {
+            if (double.IsNaN(time) || double.IsInfinity(time)) time = 0.0;
             CurrentTime = Math.Max(0.0, Math.Min(Duration, time));
             EvaluateAndNotify(0.0);
         }
 
         public void Step(double dt)
         {
-            double stepDt = dt * Speed;
-            CurrentTime += stepDt;
+            if (double.IsNaN(dt) || double.IsInfinity(dt)) dt = 0.0;
+            if (double.IsNaN(Speed) || double.IsInfinity(Speed)) Speed = 1.0;
+            dt = Math.Max(0.0, dt);
+            double stepDt = dt * Math.Abs(Speed);
+            double nextTime = CurrentTime + stepDt * _playDirection;
 
             switch (LoopMode)
             {
                 case LoopMode.OneShot:
-                    if (CurrentTime >= Duration)
+                    if (nextTime >= Duration)
                     {
                         CurrentTime = Duration;
                         IsPlaying = false;
                     }
-                    else if (CurrentTime < 0.0)
+                    else if (nextTime <= 0.0)
                     {
                         CurrentTime = 0.0;
                         IsPlaying = false;
                     }
+                    else CurrentTime = nextTime;
                     break;
 
                 case LoopMode.Loop:
-                    while (CurrentTime >= Duration) CurrentTime -= Duration;
-                    while (CurrentTime < 0.0) CurrentTime += Duration;
+                    CurrentTime = PositiveModulo(nextTime, Duration);
+                    _playDirection = 1;
                     break;
 
                 case LoopMode.PingPong:
-                    while (CurrentTime > Duration || CurrentTime < 0.0)
-                    {
-                        if (CurrentTime > Duration)
-                        {
-                            CurrentTime = 2.0 * Duration - CurrentTime;
-                            Speed = -Math.Abs(Speed);
-                        }
-                        if (CurrentTime < 0.0)
-                        {
-                            CurrentTime = -CurrentTime;
-                            Speed = Math.Abs(Speed);
-                        }
-                    }
+                    double phase = PositiveModulo(nextTime, Duration * 2.0);
+                    CurrentTime = phase <= Duration ? phase : (Duration * 2.0 - phase);
+                    _playDirection = (phase <= Duration ? 1 : -1) * _playDirection;
                     break;
             }
 
-            EvaluateAndNotify(dt);
+            EvaluateAndNotify(stepDt);
+        }
+
+        private int _playDirection = 1;
+
+        private static double PositiveModulo(double value, double modulus)
+        {
+            if (modulus <= 0.0) return 0.0;
+            double result = value % modulus;
+            return result < 0.0 ? result + modulus : result;
         }
 
         private void EvaluateAndNotify(double dt)
         {
             _currentPose.Clear();
 
-            if (ActiveStateMachine != null)
+            if (UseStateMachine && ActiveStateMachine != null)
             {
-                ActiveStateMachine.Update(dt, _currentPose);
+                ActiveStateMachine.Update(Math.Abs(dt), _currentPose);
             }
             else if (ActiveClip != null)
             {

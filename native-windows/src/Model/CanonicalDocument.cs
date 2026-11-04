@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Media;
+using Kerf.Engine.Animation;
 
 namespace Kerf.Model
 {
@@ -567,7 +568,7 @@ namespace Kerf.Model
             PaddingBottom = 16.0;
             PaddingLeft = 16.0;
             AlignItems = AlignItems.Start;
-            JustifyContent = JustifyContent.Start;
+            JustifyContent = JustifyContent.SpaceEvenly;
             SizingH = SizingMode.Hug;
             SizingV = SizingMode.Hug;
             GridColumns = 2;
@@ -664,6 +665,8 @@ namespace Kerf.Model
         public bool IgnoreAutoLayout { get; set; }
         public SizingMode LayoutSizingH { get; set; }
         public SizingMode LayoutSizingV { get; set; }
+        public double AutoLayoutBaseWidth { get; set; }
+        public double AutoLayoutBaseHeight { get; set; }
         public double MinWidth { get; set; }
         public double MaxWidth { get; set; }
         public double MinHeight { get; set; }
@@ -718,6 +721,8 @@ namespace Kerf.Model
             IgnoreAutoLayout = false;
             LayoutSizingH = SizingMode.Fixed;
             LayoutSizingV = SizingMode.Fixed;
+            AutoLayoutBaseWidth = 0.0;
+            AutoLayoutBaseHeight = 0.0;
             MinWidth = 0.0;
             MaxWidth = 100000.0;
             MinHeight = 0.0;
@@ -790,6 +795,8 @@ namespace Kerf.Model
                 IgnoreAutoLayout = this.IgnoreAutoLayout,
                 LayoutSizingH = this.LayoutSizingH,
                 LayoutSizingV = this.LayoutSizingV,
+                AutoLayoutBaseWidth = this.AutoLayoutBaseWidth,
+                AutoLayoutBaseHeight = this.AutoLayoutBaseHeight,
                 MinWidth = this.MinWidth,
                 MaxWidth = this.MaxWidth,
                 MinHeight = this.MinHeight,
@@ -871,6 +878,7 @@ namespace Kerf.Model
         public string Name { get; set; }
         public string BackgroundColor { get; set; }
         public bool ShowGrid { get; set; }
+        public bool ShowGuides { get; set; }
         public string GridType { get; set; } // dots, lines, isometric, none
         public double GridSize { get; set; }
         public List<GuideLine> Guides { get; set; }
@@ -882,6 +890,7 @@ namespace Kerf.Model
             Name = "Page 1";
             BackgroundColor = "#1E1E22";
             ShowGrid = true;
+            ShowGuides = true;
             GridType = "dots";
             GridSize = 32.0;
             Guides = new List<GuideLine>();
@@ -896,6 +905,7 @@ namespace Kerf.Model
                 Name = this.Name + " Copy",
                 BackgroundColor = this.BackgroundColor,
                 ShowGrid = this.ShowGrid,
+                ShowGuides = this.ShowGuides,
                 GridType = this.GridType,
                 GridSize = this.GridSize,
                 Guides = new List<GuideLine>(),
@@ -1090,6 +1100,7 @@ namespace Kerf.Model
         public List<Page> Pages { get; set; }
         public string ActivePageId { get; set; }
         public Dictionary<string, string> AssetLibrary { get; set; } // id -> data URI or path
+        public AnimationProjectData Animation { get; set; }
 
         public KerfDocument()
         {
@@ -1103,6 +1114,7 @@ namespace Kerf.Model
             Pages.Add(defaultPage);
             ActivePageId = defaultPage.Id;
             AssetLibrary = new Dictionary<string, string>();
+            Animation = new AnimationProjectData();
         }
 
         public Page GetActivePage()
