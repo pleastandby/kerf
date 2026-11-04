@@ -984,11 +984,17 @@ namespace Kerf.Engine
         private readonly Page _page;
         private readonly LayerNode _frame;
         private readonly List<ChildRecord> _records;
+        private readonly ChildRecord _consumedBgRecord;
         private readonly string _frameParentId;
         private readonly int _frameInsertIndex;
         private readonly Action _onRender;
 
         public AutoLayoutSelectionCommand(Page page, LayerNode frame, List<ChildRecord> records, string frameParentId, int frameInsertIndex, Action onRender)
+            : this(page, frame, records, frameParentId, frameInsertIndex, onRender, null)
+        {
+        }
+
+        public AutoLayoutSelectionCommand(Page page, LayerNode frame, List<ChildRecord> records, string frameParentId, int frameInsertIndex, Action onRender, ChildRecord consumedBgRecord)
         {
             _page = page;
             _frame = frame;
@@ -996,6 +1002,7 @@ namespace Kerf.Engine
             _frameParentId = frameParentId;
             _frameInsertIndex = frameInsertIndex;
             _onRender = onRender;
+            _consumedBgRecord = consumedBgRecord;
         }
 
         public void Execute()
@@ -1009,6 +1016,11 @@ namespace Kerf.Engine
             {
                 var p = _page.FindLayerById(_frameParentId);
                 frameContainer = (p != null && p.Children != null) ? p.Children : _page.Layers;
+            }
+
+            if (_consumedBgRecord != null && _consumedBgRecord.Layer != null)
+            {
+                _page.RemoveLayerEverywhere(_consumedBgRecord.Layer);
             }
 
             foreach (var rec in _records)
@@ -1036,6 +1048,33 @@ namespace Kerf.Engine
             if (_frame.Children != null)
             {
                 _frame.Children.Clear();
+            }
+
+            if (_consumedBgRecord != null && _consumedBgRecord.Layer != null)
+            {
+                var bg = _consumedBgRecord.Layer;
+                bg.X = _consumedBgRecord.OriginalX;
+                bg.Y = _consumedBgRecord.OriginalY;
+                bg.Width = _consumedBgRecord.OriginalWidth;
+                bg.Height = _consumedBgRecord.OriginalHeight;
+                bg.ParentId = _consumedBgRecord.OriginalParentId;
+
+                List<LayerNode> bgContainer;
+                if (string.IsNullOrEmpty(_consumedBgRecord.OriginalParentId))
+                {
+                    bgContainer = _page.Layers;
+                }
+                else
+                {
+                    var p = _page.FindLayerById(_consumedBgRecord.OriginalParentId);
+                    bgContainer = (p != null && p.Children != null) ? p.Children : _page.Layers;
+                }
+
+                int bgIdx = Math.Max(0, Math.Min(_consumedBgRecord.OriginalIndex, bgContainer.Count));
+                if (!bgContainer.Contains(bg))
+                {
+                    bgContainer.Insert(bgIdx, bg);
+                }
             }
 
             // Restore all wrapped layers back to their original parent containers and coordinates

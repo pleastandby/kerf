@@ -1029,3 +1029,46 @@ esetTrigger (.20\text{s}$)
   - Verified 2D grid/flow patterns detection as `Wrap`.
   - Verified Alt-drag duplication leaves cloned frames as canvas-level roots (`ParentId == null`) and not children of the original frame.
   - Verified 3x3 alignment pad spatial math for Start, Center, End, and SpaceBetween.
+
+---
+
+## Milestone 26: Button Auto Layout Creation from Text/Object Over Shape (`Shift + A`)
+
+### 1. Shape-Over-Object Detection (`FindBackgroundShapeForSelection`)
+- **Figma Button Pattern Recognition:**
+  - Detects when a selection consists of a background shape (Rectangle or non-AutoLayout Frame) with one or more foreground elements (such as text, icons, or badges) positioned over it.
+  - Performs spatial containment and center alignment analysis with generous, intuitive tolerances for slightly overflowing text or hand-drawn rectangles.
+  - Seamlessly distinguishes between container patterns (button, badge, tag, card) and sibling flows (side-by-side buttons, stacked cards). If no shape acts as an enclosing background, preserves normal multi-layer auto-framing.
+
+### 2. Auto Layout Button Frame Generation (`BuildButtonFrameFromBackground`)
+- **Visual Inheritance from Background Shape:**
+  - The background shape is transformed into the Auto Layout frame itself, inheriting all visual characteristics:
+    - Fills (solid colors, linear/radial/angular gradients).
+    - Strokes (colors, stroke weights, dash patterns, alignment).
+    - Corner Radii (uniform or per-corner rounded edges).
+    - Effects (drop shadows, inner shadows, layer blurs, liquid glass).
+    - Opacity and blend modes.
+- **Smart Centering & Symmetrical Padding:**
+  - Automatically identifies horizontal and vertical centering:
+    - Sets `JustifyContent = JustifyContent.Center` and `AlignItems = AlignItems.Center`.
+    - Computes balanced, symmetrical horizontal and vertical padding ($(	ext{padLeft} + 	ext{padRight}) / 2$, $(	ext{padTop} + 	ext{padBottom}) / 2$).
+  - For left-aligned text fields or inputs, respects left alignment with `JustifyContent.Start`.
+  - Configures `SizingH = SizingMode.Hug` and `SizingV = SizingMode.Hug`.
+  - When text is edited or expanded, the button frame dynamically grows while keeping text centered with identical padding.
+
+### 3. Reversible Undo/Redo Architecture
+- Updated `AutoLayoutSelectionCommand` in `CommandHistory.cs` to track `_consumedBgRecord`.
+- On `Execute`: removes the background rectangle and reparents the foreground layers inside the new button frame.
+- On `Unexecute`: removes the button frame and cleanly restores the original background rectangle and foreground layers at their exact coordinates and layer order.
+
+### 4. Automated Verification Suite
+- **Total Tests:** 43
+- **Passing:** 43 (100%)
+- **Failing:** 0
+- Added `TestButtonPatternFromShapeAndForeground`:
+  - Verified background rectangle identification and conversion into a button frame.
+  - Verified inheritance of rectangle fill (`#18A0FB`) and corner radius ($8	ext{px}$).
+  - Verified horizontal & vertical center alignment (`JustifyContent.Center`, `AlignItems.Center`).
+  - Verified initial button dimensions ($120 	imes 44$) match rectangle, with text centered at $(135, 112)$.
+  - Verified dynamic hug expansion upon editing text width ($50 ightarrow 100 \implies 	ext{width} = 170$).
+  - Verified full undo/redo round-trip command execution and restoration.

@@ -70,6 +70,7 @@ namespace Kerf.Tests
             RunTest("Component File Persistence Across Save/Open & Real Vector State Machine (Milestone 24)", TestMilestone24Features);
             RunTest("Nested Auto Layout Frames, Instant Single-Pass Stabilization, and Auto Align Undo/Redo", TestNestedAutoLayoutAndSinglePassStabilization);
             RunTest("Figma Auto Layout Parity: Smart Mode Detection, Full Bounding Enclosure, and Alt-Drag Duplication Isolation", TestFigmaAutoLayoutParityAndAltDragDuplication);
+            RunTest("Button Pattern: Text/Object over Shape Auto Layout & Center Alignment", TestButtonPatternFromShapeAndForeground);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -2971,6 +2972,120 @@ namespace Kerf.Tests
             AutoLayoutEngine.Reflow(alignFrame);
             Assert(alignFrame.Children[0].X == 0.0, "Space between: first item at X=0");
             Assert(alignFrame.Children[1].X == 350.0, string.Format("Space between: last item at X=350, got {0}", alignFrame.Children[1].X));
+        }
+
+        private static void TestButtonPatternFromShapeAndForeground()
+        {
+            var page = new Page();
+
+            // 1. Text over Rectangle -> Button Auto Layout Frame
+            var btnRect = new LayerNode
+            {
+                Id = "btn_bg",
+                Name = "Button Background",
+                Type = ElementType.Rectangle,
+                X = 100,
+                Y = 100,
+                Width = 120,
+                Height = 44,
+                CornerRadius = 8.0,
+                Fills = new List<Paint> { Paint.Solid("#18A0FB") }
+            };
+            var btnText = new LayerNode
+            {
+                Id = "btn_txt",
+                Name = "Sign Up",
+                Type = ElementType.Text,
+                X = 135,
+                Y = 112,
+                Width = 50,
+                Height = 20
+            };
+            page.Layers.Add(btnRect);
+            page.Layers.Add(btnText);
+
+            var detectedBg = AutoLayoutEngine.FindBackgroundShapeForSelection(new List<LayerNode> { btnRect, btnText });
+            Assert(detectedBg == btnRect, "FindBackgroundShapeForSelection identifies rectangle as background container");
+
+            var buttonFrame = AutoLayoutEngine.AutoAlignSelection(page, new List<LayerNode> { btnRect, btnText });
+            Assert(buttonFrame != null, "AutoAlignSelection created button frame");
+            Assert(buttonFrame.Type == ElementType.Frame, "Button is a Frame");
+            Assert(buttonFrame.CornerRadius == 8.0, "Button frame inherits 8px corner radius from rectangle");
+            Assert(buttonFrame.Fills != null && buttonFrame.Fills.Count > 0 && buttonFrame.Fills[0].ColorHex == "#18A0FB", "Button frame inherits solid fill #18A0FB from rectangle");
+            Assert(!page.Layers.Contains(btnRect), "Original rectangle was consumed into frame");
+            Assert(buttonFrame.Children.Count == 1, "Button frame has 1 child (the text)");
+            Assert(buttonFrame.Children[0] == btnText, "Child is the text node");
+
+            // Verify Auto Layout Properties: Horizontal, Centered, Hug
+            Assert(buttonFrame.AutoLayout.Mode == AutoLayoutMode.Horizontal, "Button Auto Layout Mode is Horizontal");
+            Assert(buttonFrame.AutoLayout.JustifyContent == JustifyContent.Center, "Button JustifyContent is Center");
+            Assert(buttonFrame.AutoLayout.AlignItems == AlignItems.Center, "Button AlignItems is Center");
+            Assert(buttonFrame.AutoLayout.SizingH == SizingMode.Hug, "Button SizingH is Hug");
+            Assert(buttonFrame.AutoLayout.SizingV == SizingMode.Hug, "Button SizingV is Hug");
+
+            // Dimensions and Text Centering inside the button
+            Assert(buttonFrame.Width == 120.0, string.Format("Button frame initial width matches rectangle (120), got {0}", buttonFrame.Width));
+            Assert(buttonFrame.Height == 44.0, string.Format("Button frame initial height matches rectangle (44), got {0}", buttonFrame.Height));
+            Assert(btnText.X == 135.0, string.Format("Button text centered horizontally at X=135, got {0}", btnText.X));
+            Assert(btnText.Y == 112.0, string.Format("Button text centered vertically at Y=112, got {0}", btnText.Y));
+
+            // Dynamic Hug Expansion: When text expands, button width expands automatically
+            btnText.Width = 100.0;
+            AutoLayoutEngine.Reflow(buttonFrame);
+            // With padH = 35 on left and right, 100 + 35 + 35 = 170
+            Assert(buttonFrame.Width == 170.0, string.Format("Button dynamically hugs expanded text width (expected 170, got {0})", buttonFrame.Width));
+            Assert(btnText.X == 100.0 + 35.0, "Button text remains centered inside expanded button");
+
+            // 2. Command Pattern Undo/Redo Test
+            var page2 = new Page();
+            var rect2 = new LayerNode
+            {
+                Id = "r2",
+                Name = "Rect 2",
+                Type = ElementType.Rectangle,
+                X = 200,
+                Y = 200,
+                Width = 140,
+                Height = 50,
+                CornerRadius = 12.0,
+                Fills = new List<Paint> { Paint.Solid("#10B981") }
+            };
+            var text2 = new LayerNode
+            {
+                Id = "t2",
+                Name = "Download",
+                Type = ElementType.Text,
+                X = 240,
+                Y = 215,
+                Width = 60,
+                Height = 20
+            };
+            page2.Layers.Add(rect2);
+            page2.Layers.Add(text2);
+
+            var cmd = AutoLayoutEngine.CreateAutoLayoutCommand(page2, new List<LayerNode> { rect2, text2 }, null);
+            Assert(cmd != null, "CreateAutoLayoutCommand created command for button");
+            cmd.Execute();
+
+            var alCmd = cmd as AutoLayoutSelectionCommand;
+            Assert(alCmd != null && alCmd.CreatedFrame != null, "Exposes created button frame");
+            Assert(page2.Layers.Contains(alCmd.CreatedFrame), "Page contains button frame after Execute");
+            Assert(!page2.Layers.Contains(rect2), "Page does not contain original rect after Execute");
+            Assert(alCmd.CreatedFrame.Children.Contains(text2), "Button frame contains text after Execute");
+
+            // Undo: restores rectangle and text back to page layers
+            cmd.Unexecute();
+            Assert(!page2.Layers.Contains(alCmd.CreatedFrame), "Page does not contain button frame after Unexecute");
+            Assert(page2.Layers.Contains(rect2), "Page contains restored rect after Unexecute");
+            Assert(page2.Layers.Contains(text2), "Page contains restored text after Unexecute");
+            Assert(rect2.Width == 140.0 && rect2.Height == 50.0, "Restored rect dimensions preserved");
+            Assert(rect2.Fills[0].ColorHex == "#10B981", "Restored rect fill preserved");
+
+            // Redo: recreates button frame cleanly
+            cmd.Execute();
+            Assert(page2.Layers.Contains(alCmd.CreatedFrame), "Page contains button frame after Redo");
+            Assert(!page2.Layers.Contains(rect2), "Page does not contain original rect after Redo");
+            Assert(alCmd.CreatedFrame.Children.Contains(text2), "Button frame contains text after Redo");
         }
     }
 }

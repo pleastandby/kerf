@@ -1041,6 +1041,261 @@ namespace Kerf.Tools
             return (deltaCenterX >= deltaCenterY) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
         }
 
+        public static LayerNode FindBackgroundShapeForSelection(List<LayerNode> layers)
+        {
+            if (layers == null || layers.Count < 2) return null;
+
+            // Candidates are shapes that can act as a background button/card container:
+            // Rectangle, or Frame without active AutoLayout (or with Mode == None).
+            var candidates = layers.Where(l => 
+                l != null && (
+                    l.Type == ElementType.Rectangle || 
+                    (l.Type == ElementType.Frame && (l.AutoLayout == null || l.AutoLayout.Mode == AutoLayoutMode.None))
+                )
+            ).ToList();
+
+            if (candidates.Count == 0) return null;
+
+            LayerNode bestBg = null;
+            double bestArea = -1;
+
+            foreach (var cand in candidates)
+            {
+                var others = layers.Where(l => l != cand && l != null).ToList();
+                if (others.Count == 0) continue;
+
+                double fgMinX = others.Min(l => l.X);
+                double fgMaxX = others.Max(l => l.X + Math.Max(1.0, l.Width));
+                double fgMinY = others.Min(l => l.Y);
+                double fgMaxY = others.Max(l => l.Y + Math.Max(1.0, l.Height));
+                double fgW = Math.Max(1.0, fgMaxX - fgMinX);
+                double fgH = Math.Max(1.0, fgMaxY - fgMinY);
+
+                double candW = Math.Max(1.0, cand.Width);
+                double candH = Math.Max(1.0, cand.Height);
+
+                // Tolerance for slight overlap/overflow:
+                double tolX = Math.Max(16.0, candW * 0.20);
+                double tolY = Math.Max(12.0, candH * 0.25);
+
+                bool withinX = (fgMinX >= cand.X - tolX) && (fgMaxX <= cand.X + candW + tolX);
+                bool withinY = (fgMinY >= cand.Y - tolY) && (fgMaxY <= cand.Y + candH + tolY);
+
+                // Foreground center should fall within candidate bounds
+                double fgCenterX = fgMinX + fgW / 2.0;
+                double fgCenterY = fgMinY + fgH / 2.0;
+                bool centerInside = (fgCenterX >= cand.X - 4.0 && fgCenterX <= cand.X + candW + 4.0 &&
+                                     fgCenterY >= cand.Y - 4.0 && fgCenterY <= cand.Y + candH + 4.0);
+
+                if (withinX && withinY && centerInside)
+                {
+                    double area = candW * candH;
+                    if (area > bestArea)
+                    {
+                        bestArea = area;
+                        bestBg = cand;
+                    }
+                }
+            }
+
+            return bestBg;
+        }
+
+        private static LayerNode BuildButtonFrameFromBackground(LayerNode bgShape, List<LayerNode> fgLayers, out List<LayerNode> orderedFg)
+        {
+            var mode = (fgLayers.Count >= 2) ? DetectSmartLayoutMode(fgLayers) : AutoLayoutMode.Horizontal;
+
+            if (mode == AutoLayoutMode.Horizontal)
+                orderedFg = fgLayers.OrderBy(l => l.X).ThenBy(l => l.Y).ToList();
+            else if (mode == AutoLayoutMode.Vertical)
+                orderedFg = fgLayers.OrderBy(l => l.Y).ThenBy(l => l.X).ToList();
+            else
+                orderedFg = fgLayers.OrderBy(l => l.Y).ThenBy(l => l.X).ToList();
+
+            double fgMinX = orderedFg.Min(l => l.X);
+            double fgMaxX = orderedFg.Max(l => l.X + Math.Max(1.0, l.Width));
+            double fgMinY = orderedFg.Min(l => l.Y);
+            double fgMaxY = orderedFg.Max(l => l.Y + Math.Max(1.0, l.Height));
+            double fgW = Math.Max(1.0, fgMaxX - fgMinX);
+            double fgH = Math.Max(1.0, fgMaxY - fgMinY);
+
+            double measuredGap = 8.0;
+            if (orderedFg.Count > 1)
+            {
+                if (mode == AutoLayoutMode.Horizontal)
+                {
+                    double sumW = orderedFg.Sum(l => l.Width);
+                    measuredGap = Math.Max(0.0, (fgW - sumW) / (orderedFg.Count - 1));
+                }
+                else if (mode == AutoLayoutMode.Vertical)
+                {
+                    double sumH = orderedFg.Sum(l => l.Height);
+                    measuredGap = Math.Max(0.0, (fgH - sumH) / (orderedFg.Count - 1));
+                }
+                else
+                {
+                    measuredGap = MeasureWrapGap(orderedFg);
+                }
+            }
+
+            double rawPadLeft = Math.Max(0.0, fgMinX - bgShape.X);
+            double rawPadRight = Math.Max(0.0, (bgShape.X + bgShape.Width) - fgMaxX);
+            double rawPadTop = Math.Max(0.0, fgMinY - bgShape.Y);
+            double rawPadBottom = Math.Max(0.0, (bgShape.Y + bgShape.Height) - fgMaxY);
+
+            // Centering analysis: text/objects centered over the shape align in center of the frame
+            double centerDeltaX = Math.Abs((bgShape.X + bgShape.Width / 2.0) - (fgMinX + fgW / 2.0));
+            bool isHorizCentered = (centerDeltaX <= Math.Max(10.0, bgShape.Width * 0.20)) || (Math.Abs(rawPadLeft - rawPadRight) <= Math.Max(14.0, bgShape.Width * 0.25));
+
+            double centerDeltaY = Math.Abs((bgShape.Y + bgShape.Height / 2.0) - (fgMinY + fgH / 2.0));
+            bool isVertCentered = (centerDeltaY <= Math.Max(8.0, bgShape.Height * 0.25)) || (Math.Abs(rawPadTop - rawPadBottom) <= Math.Max(10.0, bgShape.Height * 0.25));
+
+            double padLeft, padRight, padTop, padBottom;
+            JustifyContent justifyContent;
+            AlignItems alignItems;
+
+            if (mode == AutoLayoutMode.Horizontal || mode == AutoLayoutMode.Wrap)
+            {
+                if (isHorizCentered)
+                {
+                    justifyContent = JustifyContent.Center;
+                    double padH = Math.Round((rawPadLeft + rawPadRight) / 2.0);
+                    padLeft = padH;
+                    padRight = padH;
+                }
+                else if (rawPadLeft <= rawPadRight)
+                {
+                    justifyContent = JustifyContent.Start;
+                    padLeft = Math.Round(rawPadLeft);
+                    padRight = Math.Round(rawPadRight);
+                }
+                else
+                {
+                    justifyContent = JustifyContent.End;
+                    padLeft = Math.Round(rawPadLeft);
+                    padRight = Math.Round(rawPadRight);
+                }
+
+                if (isVertCentered)
+                {
+                    alignItems = AlignItems.Center;
+                    double padV = Math.Round((rawPadTop + rawPadBottom) / 2.0);
+                    padTop = padV;
+                    padBottom = padV;
+                }
+                else if (rawPadTop <= rawPadBottom)
+                {
+                    alignItems = AlignItems.Start;
+                    padTop = Math.Round(rawPadTop);
+                    padBottom = Math.Round(rawPadBottom);
+                }
+                else
+                {
+                    alignItems = AlignItems.End;
+                    padTop = Math.Round(rawPadTop);
+                    padBottom = Math.Round(rawPadBottom);
+                }
+            }
+            else // Vertical
+            {
+                if (isVertCentered)
+                {
+                    justifyContent = JustifyContent.Center;
+                    double padV = Math.Round((rawPadTop + rawPadBottom) / 2.0);
+                    padTop = padV;
+                    padBottom = padV;
+                }
+                else if (rawPadTop <= rawPadBottom)
+                {
+                    justifyContent = JustifyContent.Start;
+                    padTop = Math.Round(rawPadTop);
+                    padBottom = Math.Round(rawPadBottom);
+                }
+                else
+                {
+                    justifyContent = JustifyContent.End;
+                    padTop = Math.Round(rawPadTop);
+                    padBottom = Math.Round(rawPadBottom);
+                }
+
+                if (isHorizCentered)
+                {
+                    alignItems = AlignItems.Center;
+                    double padH = Math.Round((rawPadLeft + rawPadRight) / 2.0);
+                    padLeft = padH;
+                    padRight = padH;
+                }
+                else if (rawPadLeft <= rawPadRight)
+                {
+                    alignItems = AlignItems.Start;
+                    padLeft = Math.Round(rawPadLeft);
+                    padRight = Math.Round(rawPadRight);
+                }
+                else
+                {
+                    alignItems = AlignItems.End;
+                    padLeft = Math.Round(rawPadLeft);
+                    padRight = Math.Round(rawPadRight);
+                }
+            }
+
+            var frame = new LayerNode
+            {
+                Id = Guid.NewGuid().ToString().Substring(0, 8),
+                Name = (orderedFg.Count == 1 && !string.IsNullOrEmpty(orderedFg[0].Name) && orderedFg[0].Type == ElementType.Text)
+                    ? orderedFg[0].Name
+                    : (!string.IsNullOrEmpty(bgShape.Name) && bgShape.Name != "Rectangle" && bgShape.Name != "Rectangle 1" ? bgShape.Name : "Button"),
+                Type = ElementType.Frame,
+                X = bgShape.X,
+                Y = bgShape.Y,
+                Width = bgShape.Width,
+                Height = bgShape.Height,
+                Rotation = bgShape.Rotation,
+                Opacity = bgShape.Opacity,
+                BlendMode = bgShape.BlendMode,
+                IsVisible = bgShape.IsVisible,
+                IsLocked = bgShape.IsLocked,
+                ClipContent = false,
+                CornerRadius = bgShape.CornerRadius,
+                CornerRadiusTopLeft = bgShape.CornerRadiusTopLeft,
+                CornerRadiusTopRight = bgShape.CornerRadiusTopRight,
+                CornerRadiusBottomRight = bgShape.CornerRadiusBottomRight,
+                CornerRadiusBottomLeft = bgShape.CornerRadiusBottomLeft,
+                Fills = new List<Paint>(),
+                Strokes = new List<StrokeData>(),
+                Effects = new List<EffectData>(),
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = mode,
+                    Gap = Math.Round(measuredGap, 1),
+                    PaddingLeft = Math.Round(padLeft, 1),
+                    PaddingRight = Math.Round(padRight, 1),
+                    PaddingTop = Math.Round(padTop, 1),
+                    PaddingBottom = Math.Round(padBottom, 1),
+                    JustifyContent = justifyContent,
+                    AlignItems = alignItems,
+                    SizingH = SizingMode.Hug,
+                    SizingV = SizingMode.Hug
+                },
+                Children = new List<LayerNode>()
+            };
+
+            if (bgShape.Fills != null)
+            {
+                foreach (var f in bgShape.Fills) frame.Fills.Add(f.Clone());
+            }
+            if (bgShape.Strokes != null)
+            {
+                foreach (var s in bgShape.Strokes) frame.Strokes.Add(s.Clone());
+            }
+            if (bgShape.Effects != null)
+            {
+                foreach (var eff in bgShape.Effects) frame.Effects.Add(eff.Clone());
+            }
+
+            return frame;
+        }
+
         public static LayerNode AutoAlignSelection(Page page, List<LayerNode> selectedLayers)
         {
             if (page == null || selectedLayers == null || selectedLayers.Count == 0) return null;
@@ -1134,6 +1389,38 @@ namespace Kerf.Tools
 
                 ReflowHierarchy(page, singleWrapFrame);
                 return singleWrapFrame;
+            }
+
+            // Check if one layer is a background container shape enclosing the other selected layers (e.g. Button pattern)
+            var bgShape = FindBackgroundShapeForSelection(topLayers);
+            if (bgShape != null)
+            {
+                var fgLayers = topLayers.Where(l => l != bgShape).ToList();
+                List<LayerNode> orderedFg;
+                var buttonFrame = BuildButtonFrameFromBackground(bgShape, fgLayers, out orderedFg);
+
+                LayerNode bgParent;
+                var bgContainer = page.FindContainer(bgShape, out bgParent);
+                if (bgContainer == null) bgContainer = page.Layers;
+                int bgInsertIdx = bgContainer.IndexOf(bgShape);
+                if (bgInsertIdx < 0) bgInsertIdx = bgContainer.Count;
+
+                page.RemoveLayerEverywhere(bgShape);
+                foreach (var child in orderedFg)
+                {
+                    page.RemoveLayerEverywhere(child);
+                    child.ParentId = buttonFrame.Id;
+                    buttonFrame.Children.Add(child);
+                }
+
+                buttonFrame.ParentId = bgParent != null ? bgParent.Id : null;
+                if (bgInsertIdx <= bgContainer.Count)
+                    bgContainer.Insert(bgInsertIdx, buttonFrame);
+                else
+                    bgContainer.Add(buttonFrame);
+
+                ReflowHierarchy(page, buttonFrame);
+                return buttonFrame;
             }
 
             // If multiple layers selected: smartly detect layout mode and wrap full bounding envelope into Auto Layout Frame
@@ -1338,6 +1625,53 @@ namespace Kerf.Tools
                 };
 
                 return new AutoLayoutSelectionCommand(page, singleWrapFrame, records, pId, insIdx, onRender);
+            }
+
+            // Check if one layer is a background container shape enclosing the other selected layers (e.g. Button pattern)
+            var bgShape = FindBackgroundShapeForSelection(topLayers);
+            if (bgShape != null)
+            {
+                var fgLayers = topLayers.Where(l => l != bgShape).ToList();
+                List<LayerNode> orderedFg;
+                var buttonFrame = BuildButtonFrameFromBackground(bgShape, fgLayers, out orderedFg);
+
+                LayerNode bgParent;
+                var bgContainer = page.FindContainer(bgShape, out bgParent);
+                string bgParentId = bgParent != null ? bgParent.Id : null;
+                int bgInsertIdx = (bgContainer != null) ? bgContainer.IndexOf(bgShape) : -1;
+                if (bgInsertIdx < 0) bgInsertIdx = (bgContainer != null ? bgContainer.Count : 0);
+
+                var bgRec = new AutoLayoutSelectionCommand.ChildRecord
+                {
+                    Layer = bgShape,
+                    OriginalParentId = bgParentId,
+                    OriginalIndex = bgInsertIdx,
+                    OriginalX = bgShape.X,
+                    OriginalY = bgShape.Y,
+                    OriginalWidth = bgShape.Width,
+                    OriginalHeight = bgShape.Height
+                };
+
+                var fgRecs = new List<AutoLayoutSelectionCommand.ChildRecord>();
+                for (int i = 0; i < orderedFg.Count; i++)
+                {
+                    var l = orderedFg[i];
+                    LayerNode lp;
+                    var lc = page.FindContainer(l, out lp);
+                    int li = lc != null ? lc.IndexOf(l) : i;
+                    fgRecs.Add(new AutoLayoutSelectionCommand.ChildRecord
+                    {
+                        Layer = l,
+                        OriginalParentId = lp != null ? lp.Id : null,
+                        OriginalIndex = li,
+                        OriginalX = l.X,
+                        OriginalY = l.Y,
+                        OriginalWidth = l.Width,
+                        OriginalHeight = l.Height
+                    });
+                }
+
+                return new AutoLayoutSelectionCommand(page, buttonFrame, fgRecs, bgParentId, bgInsertIdx, onRender, bgRec);
             }
 
             // Multiple layers: smartly detect layout mode and wrap
