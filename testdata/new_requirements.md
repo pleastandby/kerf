@@ -1,2 +1,3 @@
-1. The corder radius nodes are not working for frame and rectangle but the corder curve on effects panel is working.
-2. The autolayout frame should the the size of the both frames included, also the auto layouted frames cannot be moved easily out of the frame unless you drag it long out of the autolayout frame like in figma, the layout should be just like css flexbox, when i drag the size of the autolayout frame down, it'll jump up, i want the layout to stay same just like figma auto layout do it according to the exact model in figma, flexible, not laggy and snappy
+1. Add a uniforrm scale option for object in transform.
+2. You should be able to duplicate objects inside the autolayout if you click alt and drag if the innter item is selected using deep select
+3. The Animation system needs refinement, remove the existing animation system and redefine it with rive as a reference, you can use any powerful tools and techniques to replicate the modern Rive animation engine into this using state machines, inputs, views, listeners etc

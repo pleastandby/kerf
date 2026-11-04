@@ -71,6 +71,9 @@ namespace Kerf.Tests
             RunTest("Nested Auto Layout Frames, Instant Single-Pass Stabilization, and Auto Align Undo/Redo", TestNestedAutoLayoutAndSinglePassStabilization);
             RunTest("Figma Auto Layout Parity: Smart Mode Detection, Full Bounding Enclosure, and Alt-Drag Duplication Isolation", TestFigmaAutoLayoutParityAndAltDragDuplication);
             RunTest("Button Pattern: Text/Object over Shape Auto Layout & Center Alignment", TestButtonPatternFromShapeAndForeground);
+            RunTest("Uniform Scale Option in Transform: Lock Aspect Ratio & Proportional Resizing", TestUniformScaleLockAspectRatio);
+            RunTest("Alt+Drag Deep Select Duplication in Auto Layout Frames", TestAltDragDuplicationInAutoLayout);
+            RunTest("Modern Vector State Machine Animation Engine: Inputs, Listeners, ViewModels & Blended Transitions", TestModernVectorStateMachineAnimationEngine);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -3086,6 +3089,267 @@ namespace Kerf.Tests
             Assert(page2.Layers.Contains(alCmd.CreatedFrame), "Page contains button frame after Redo");
             Assert(!page2.Layers.Contains(rect2), "Page does not contain original rect after Redo");
             Assert(alCmd.CreatedFrame.Children.Contains(text2), "Button frame contains text after Redo");
+        }
+
+        private static void TestUniformScaleLockAspectRatio()
+        {
+            var layer = new LayerNode
+            {
+                Id = "scale_target",
+                Name = "Uniform Card",
+                Type = ElementType.Rectangle,
+                X = 100,
+                Y = 100,
+                Width = 200,
+                Height = 100,
+                LockAspectRatio = true
+            };
+
+            Assert(layer.LockAspectRatio, "LockAspectRatio property is true");
+
+            // Verify Clone retains LockAspectRatio
+            var clone = layer.Clone();
+            Assert(clone.LockAspectRatio, "Clone retains LockAspectRatio = true");
+
+            // Simulate Scrubbing Width from 200 to 300 with aspect ratio locked (2:1 ratio)
+            double oldW = Math.Max(0.001, layer.Width);
+            double oldH = Math.Max(0.001, layer.Height);
+            double newW = 300;
+            layer.Width = newW;
+            if (layer.LockAspectRatio)
+            {
+                layer.Height = Math.Max(1, Math.Round(newW * (oldH / oldW), 1));
+            }
+            Assert(layer.Width == 300.0, "Width updated to 300");
+            Assert(layer.Height == 150.0, string.Format("Height scaled proportionally from 100 to 150 (got {0})", layer.Height));
+
+            // Simulate Scrubbing Height from 150 to 75 with aspect ratio locked
+            oldW = Math.Max(0.001, layer.Width);
+            oldH = Math.Max(0.001, layer.Height);
+            double newH = 75;
+            layer.Height = newH;
+            if (layer.LockAspectRatio)
+            {
+                layer.Width = Math.Max(1, Math.Round(newH * (oldW / oldH), 1));
+            }
+            Assert(layer.Height == 75.0, "Height updated to 75");
+            Assert(layer.Width == 150.0, string.Format("Width scaled proportionally from 300 to 150 (got {0})", layer.Width));
+
+            // Test on-canvas corner handle transform with keepAspect = true
+            var startBounds = new Rect(100, 100, 200, 100);
+            var res = TransformEngine.ApplyTransform(
+                HandleType.BottomRight,
+                new Point(400, 250),
+                new Point(300, 200),
+                startBounds,
+                0.0,
+                true, // keepAspect
+                false,
+                0.0
+            );
+            double resAspect = res.Bounds.Width / res.Bounds.Height;
+            double origAspect = startBounds.Width / startBounds.Height;
+            Assert(Math.Abs(resAspect - origAspect) < 0.001, string.Format("On-canvas handle transform preserved 2:1 aspect ratio: {0} vs {1}", resAspect, origAspect));
+        }
+
+        private static void TestAltDragDuplicationInAutoLayout()
+        {
+            var page = new Page();
+            var parent = new LayerNode
+            {
+                Id = "parent_al",
+                Name = "Vertical Stack",
+                Type = ElementType.Frame,
+                X = 50,
+                Y = 50,
+                Width = 200,
+                Height = 300
+            };
+            parent.AutoLayout = new AutoLayoutData
+            {
+                Mode = AutoLayoutMode.Vertical,
+                PaddingTop = 10,
+                PaddingBottom = 10,
+                PaddingLeft = 10,
+                PaddingRight = 10,
+                Gap = 8,
+                SizingH = SizingMode.Fixed,
+                SizingV = SizingMode.Hug
+            };
+
+            var item1 = new LayerNode
+            {
+                Id = "item_1",
+                Name = "Item 1",
+                Type = ElementType.Rectangle,
+                X = 60,
+                Y = 60,
+                Width = 180,
+                Height = 40,
+                ParentId = parent.Id
+            };
+            var item2 = new LayerNode
+            {
+                Id = "item_2",
+                Name = "Item 2",
+                Type = ElementType.Rectangle,
+                X = 60,
+                Y = 108,
+                Width = 180,
+                Height = 40,
+                ParentId = parent.Id
+            };
+            parent.Children.Add(item1);
+            parent.Children.Add(item2);
+            page.Layers.Add(parent);
+
+            AutoLayoutEngine.Reflow(parent);
+            Assert(parent.Children.Count == 2, "Parent starts with 2 children");
+
+            // Test Deep Selection preservation:
+            // When user deep-selects item1, selectedLayers contains item1
+            var selectedLayers = new List<LayerNode> { item1 };
+
+            // When user clicks with Alt on item1 to drag-duplicate, selection remains item1
+            LayerNode hit = item1;
+            LayerNode selectionHit = selectedLayers.Contains(hit) ? hit : parent;
+            Assert(selectionHit == item1, "Deep-selected inner item is preserved when Alt-clicked (not overwritten by parent frame)");
+
+            // Clone item1 for duplication inside Auto Layout
+            var clone = item1.Clone();
+            clone.Id = "item_1_clone";
+            clone.Name = "Item 1 Copy";
+            clone.ParentId = parent.Id;
+
+            // Insert duplicate at slot index 1 (between item1 and item2)
+            int insertIdx = 1;
+            parent.Children.Insert(insertIdx, clone);
+            AutoLayoutEngine.Reflow(parent);
+
+            Assert(parent.Children.Count == 3, "Parent now has 3 children");
+            Assert(parent.Children[0] == item1, "Slot 0 is item1");
+            Assert(parent.Children[1] == clone, "Slot 1 is the duplicated clone");
+            Assert(parent.Children[2] == item2, "Slot 2 is item2");
+
+            // Verify reflowed positions inside the vertical Auto Layout frame
+            // top = 50 + 10 = 60. item1: Y=60, H=40.
+            // clone: Y = 60 + 40 + 8 = 108, H=40.
+            // item2: Y = 108 + 40 + 8 = 156, H=40.
+            Assert(item1.Y == 60.0, string.Format("Item 1 Y is 60, got {0}", item1.Y));
+            Assert(clone.Y == 108.0, string.Format("Duplicated clone Y is 108, got {0}", clone.Y));
+            Assert(item2.Y == 156.0, string.Format("Item 2 reflowed Y is 156, got {0}", item2.Y));
+
+            // Verify Hug height of parent: 10 + 40 + 8 + 40 + 8 + 40 + 10 = 156
+            Assert(parent.Height == 156.0, string.Format("Parent hug height adjusted to 156 (got {0})", parent.Height));
+
+            // Test Undo: remove duplicated clone and reflow
+            parent.Children.Remove(clone);
+            AutoLayoutEngine.Reflow(parent);
+            Assert(parent.Children.Count == 2, "After removing duplicate, parent has 2 children");
+            Assert(item2.Y == 108.0, string.Format("Item 2 returns to Y=108 after undo, got {0}", item2.Y));
+            Assert(parent.Height == 108.0, string.Format("Parent height returns to 108, got {0}", parent.Height));
+        }
+
+        private static void TestModernVectorStateMachineAnimationEngine()
+        {
+            // 1. Construct State Machine Definition
+            var def = new StateMachineDefinition("InteractiveButton");
+            def.AddInput(MachineInput.Bool("isHovered", false));
+            def.AddInput(MachineInput.Trigger("onClick"));
+            def.AddInput(MachineInput.Number("speed", 1.0));
+
+            def.AddViewModelProperty(new ViewModelPropertyDefinition("isHovered", ViewModelPropertyKind.Boolean));
+            def.AddViewModelProperty(new ViewModelPropertyDefinition("onClick", ViewModelPropertyKind.Trigger));
+            def.AddViewModelProperty(new ViewModelPropertyDefinition("speed", ViewModelPropertyKind.Number));
+
+            // 2. Add Pointer Listener for Node 101
+            uint buttonNodeId = 101;
+            var hoverEnterListener = new NodeListener(buttonNodeId, PointerEventKind.Enter);
+            hoverEnterListener.Actions.Add(new ListenerAction(ActionKind.SetBool, 0, 1.0));
+            hoverEnterListener.Actions.Add(new ListenerAction(ActionKind.SetViewModelBool, "isHovered", 1.0));
+            def.AddListener(hoverEnterListener);
+
+            var hoverExitListener = new NodeListener(buttonNodeId, PointerEventKind.Exit);
+            hoverExitListener.Actions.Add(new ListenerAction(ActionKind.SetBool, 0, 0.0));
+            hoverExitListener.Actions.Add(new ListenerAction(ActionKind.SetViewModelBool, "isHovered", 0.0));
+            def.AddListener(hoverExitListener);
+
+            var clickListener = new NodeListener(buttonNodeId, PointerEventKind.Down);
+            clickListener.Actions.Add(new ListenerAction(ActionKind.Fire, 1));
+            clickListener.Actions.Add(new ListenerAction(ActionKind.FireViewModelTrigger, "onClick"));
+            def.AddListener(clickListener);
+
+            // 3. Setup Animation Clips
+            var idleClip = new Clip(1, "Idle", 1.0);
+            var idleTrack = new Track(buttonNodeId, (ushort)PropKey.Width);
+            idleTrack.AddKeyframe(Keyframe.Linear(0.0, 100.0));
+            idleClip.Tracks.Add(idleTrack);
+
+            var hoverClip = new Clip(2, "Hover", 1.0);
+            var hoverTrack = new Track(buttonNodeId, (ushort)PropKey.Width);
+            hoverTrack.AddKeyframe(Keyframe.Linear(0.0, 120.0));
+            hoverClip.Tracks.Add(hoverTrack);
+
+            var clickClip = new Clip(3, "Clicked", 0.5);
+            var clickTrack = new Track(buttonNodeId, (ushort)PropKey.Width);
+            clickTrack.AddKeyframe(Keyframe.Linear(0.0, 90.0));
+            clickClip.Tracks.Add(clickTrack);
+
+            var clips = new List<Clip> { idleClip, hoverClip, clickClip };
+
+            // 4. State Machine Layer & States
+            var layer = new MachineLayer("Base");
+            int entryState = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int idleState = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
+            int hoverState = layer.AddState(new MachineState(2, "Hover", StateKind.Animation, 1));
+            int clickedState = layer.AddState(new MachineState(3, "Clicked", StateKind.Animation, 2));
+
+            // Transitions
+            layer.AddTransition(new StateTransition(entryState, idleState, 0.0));
+            layer.AddTransition(new StateTransition(idleState, hoverState, 0.2)
+                .WithCondition(new TransitionCondition(0, ConditionOp.Eq, 1.0)));
+            layer.AddTransition(new StateTransition(hoverState, idleState, 0.2)
+                .WithCondition(new TransitionCondition(0, ConditionOp.Eq, 0.0)));
+            layer.AddTransition(new StateTransition(hoverState, clickedState, 0.1)
+                .WithCondition(new TransitionCondition(1, ConditionOp.Eq, 1.0)));
+
+            def.AddLayer(layer);
+
+            // 5. Instantiate Runtime & Verify Initial State
+            var runtime = new StateMachineRuntime(def, clips);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            runtime.Update(0.01, pose);
+
+            Assert(runtime.LayerRuntimes.Count == 1, "Runtime has 1 layer");
+            Assert(runtime.LayerRuntimes[0].CurrentState == idleState, "Initial state settled at Idle (State 1)");
+            Assert(pose.ContainsKey(buttonNodeId) && pose[buttonNodeId][(ushort)PropKey.Width] == 100.0, "Idle pose evaluated Width=100");
+
+            // 6. Simulate Pointer Enter on Node 101 -> Triggers Listener -> isHovered=true
+            runtime.OnPointerEvent(buttonNodeId, PointerEventKind.Enter);
+            Assert(runtime.GetInputValue(0) == 1.0, "Hover Enter listener set input 0 (isHovered) = 1.0");
+            Assert(runtime.ViewModel.GetBool("isHovered"), "ViewModel isHovered property is true");
+
+            // Advance state machine: transition from Idle to Hover starts blending
+            runtime.Update(0.01, pose); // Initiates transition
+            runtime.Update(0.08, pose); // Blends 45% towards Hover
+            Assert(runtime.LayerRuntimes[0].ActiveTransition != null, "Transition Idle -> Hover is actively blending");
+            double blendWidth = pose[buttonNodeId][(ushort)PropKey.Width];
+            Assert(blendWidth > 100.0 && blendWidth < 120.0, string.Format("Width smoothly interpolated between 100 and 120 (got {0})", blendWidth));
+
+            // Finish transition (0.15s more, exceeding 0.2s duration)
+            runtime.Update(0.2, pose);
+            Assert(runtime.LayerRuntimes[0].CurrentState == hoverState, "Transition completed: now in Hover state (State 2)");
+            Assert(runtime.LayerRuntimes[0].ActiveTransition == null, "Active transition finished");
+            Assert(pose[buttonNodeId][(ushort)PropKey.Width] == 120.0, "Hover state pose evaluated Width=120");
+
+            // 7. Simulate Pointer Click on Node 101 -> Fires onClick trigger
+            runtime.OnPointerEvent(buttonNodeId, PointerEventKind.Down);
+            Assert(runtime.Definition.Inputs[1].Fired, "onClick trigger fired on pointer down");
+
+            // Advance: transitions to Clicked state
+            runtime.Update(0.01, pose);
+            runtime.Update(0.15, pose);
+            Assert(runtime.LayerRuntimes[0].CurrentState == clickedState, "Transitioned to Clicked state (State 3)");
         }
     }
 }

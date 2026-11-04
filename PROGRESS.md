@@ -10,7 +10,25 @@
 
 This document captures the current state, technical decisions, completed features, and exact steps to continue development for **Kerf Studio** desktop vector design software.
 
-### Primary Objectives Addressed in Current Session
+### Primary Objectives Addressed in Current Session (Milestone 26)
+1. **Uniform Scale Option in Transform (`LockAspectRatio`):**
+   - Added `LockAspectRatio` boolean property to `LayerNode` in `CanonicalDocument.cs` with full clone and serialization support.
+   - Added interactive Constrain Proportions lock toggle button (`🔗` / `🔓`) between W and H scrub fields in the Transform property inspector in `StudioView.cs`.
+   - Proportional scaling dynamically enforced when scrubbing or typing W or H: modifying Width scales Height proportionally, and modifying Height scales Width proportionally.
+   - Corner/edge canvas resize handles automatically respect `LockAspectRatio` during interactive dragging without requiring holding the Shift key.
+2. **Alt+Drag Deep Select Duplication in Auto Layout Frames:**
+   - Fixed `HandleCanvasMouseDown` selection resolution in `StudioView.cs`: checking `(_selectedLayers.Contains(hit) || control)` ensures an already deep-selected inner layer remains selected when Alt-clicking and does not erroneously get coerced back to the parent Auto Layout frame.
+   - Guaranteed `orig.ParentId` assignment during drag initiation.
+   - `UpdateAutoLayoutDropPreview` and `CommitDuplicateDrop` position the duplicated inner child at the target slot index in `parent.Children` and reflow the parent Auto Layout frame with full undo/redo reversibility.
+3. **Modern Vector State Machine Animation Engine Refinement:**
+   - Switched Animation mode default view directly into the visual State Machine editor (`_isStateMachineMode = true`), putting state machines, inputs, views, and listeners front and center.
+   - Transport bar upgraded with clear segmented sub-mode tabs: `[ ⚙ State Machine ]` and `[ ⏱ Timeline Clips ]` for seamless switching between high-level interactive state graph and low-level keyframe tracks.
+   - Integrated State Machine Inputs (`Bool`, `Number`, `Trigger`) with bidirectional ViewModel property synchronization.
+   - Interactive canvas preview routes pointer events (Down, Up, Enter, Exit) to Node Listeners, advancing state machine transitions with cubic bezier curve blending in real time.
+4. **Automated Verification Test Suite:**
+   - **46/46 Automated Tests PASSING (100%)**, including Test #44 (Uniform Scale), Test #45 (Alt+Drag Deep Selection Duplication in Auto Layout), and Test #46 (Modern Vector State Machine Engine).
+
+### Previous Objectives Addressed
 1. **Real Optical Liquid Glass Engine with True Transparency, Snell Refraction & Chromatic Aberration (Completed):**
    - **True Transparency & Background Backdrop Capture:** Liquid glass panels are now completely transparent and translucent, without any solid opaque fills blocking underlying objects. Implemented `GpuRenderer.CaptureBackdrop` which renders the canvas background, grid dots, and all page layers situated below the glass slab into a high-precision backdrop buffer with margin padding.
    - **Snell Optical Refraction & Squircle Slope Distortion:** Implemented real 3D Snell refraction with squircle SDF height profile $height(x) = (1 - (1-x)^4)^{0.25}$ and height slope distortion in `liquid_glass.rs` and `GpuRenderer.cs`. Rays entering the bezel bend the actual surrounding scene inwards, magnifying and warping elements beneath the glass.

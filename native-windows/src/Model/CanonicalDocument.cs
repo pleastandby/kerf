@@ -686,6 +686,7 @@ namespace Kerf.Model
 
         // Prototyping
         public PrototypeData Prototype { get; set; }
+        public bool LockAspectRatio { get; set; }
 
         // Flags & Hierarchy
         public bool IsVisible { get; set; }
@@ -738,6 +739,7 @@ namespace Kerf.Model
             IsVisible = true;
             IsLocked = false;
             IsCollapsed = false;
+            LockAspectRatio = false;
             ParentId = null;
             Children = new List<LayerNode>();
         }
@@ -804,6 +806,7 @@ namespace Kerf.Model
                 IsVisible = this.IsVisible,
                 IsLocked = this.IsLocked,
                 IsCollapsed = this.IsCollapsed,
+                LockAspectRatio = this.LockAspectRatio,
                 ParentId = this.ParentId,
                 Fills = new List<Paint>(),
                 Strokes = new List<StrokeData>(),

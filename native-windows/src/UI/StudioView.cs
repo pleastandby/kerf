@@ -60,7 +60,9 @@ namespace Kerf.UI
         private FrameworkElement _timelineTracksContainer;
         private FrameworkElement _stateMachineContainer;
         private FrameworkElement _stateMachineScrollContainer;
-        private bool _isStateMachineMode = false;
+        private bool _isStateMachineMode = true;
+        private Border _tabStateMachineBtn;
+        private Border _tabTimelineClipsBtn;
         private double _timelinePixelsPerSecond = 260.0;
         private bool _isScrubbingTimeline = false;
         private bool _timelinePointerDown;
@@ -330,9 +332,9 @@ namespace Kerf.UI
             _animationNodesById.Clear();
             _lastHoverNodeId = 0;
             _stateMachinePointerDownNodeId = 0;
-            _isStateMachineMode = false;
-            if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Visible;
-            if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
+            _isStateMachineMode = true;
+            if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
+            if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Visible;
             Document = doc ?? new KerfDocument();
             CurrentFilePath = filePath;
             History.Clear();
@@ -2790,37 +2792,87 @@ namespace Kerf.UI
 
             var row2 = new Grid { Margin = new Thickness(0, 0, 0, 6) };
             row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+            row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
             row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var wBox = ScrubControls.CreateScrubField("W", primary.Width, val =>
             {
+                double oldW = Math.Max(0.001, primary.Width);
+                double oldH = Math.Max(0.001, primary.Height);
                 primary.Width = Math.Max(1, val);
+                if (primary.LockAspectRatio)
+                {
+                    primary.Height = Math.Max(1, Math.Round(primary.Width * (oldH / oldW), 1));
+                    AutoKeyProperty(primary, PropKey.Height, primary.Height);
+                }
                 SetParentAutoLayoutSizingFixed(primary, true);
                 if (primary.AutoLayout != null && primary.AutoLayout.Mode != AutoLayoutMode.None)
                 {
                     primary.AutoLayout.SizingH = SizingMode.Fixed;
+                    if (primary.LockAspectRatio) primary.AutoLayout.SizingV = SizingMode.Fixed;
                     AutoLayoutEngine.ReflowRecursive(primary);
                 }
                 AutoKeyProperty(primary, PropKey.Width, primary.Width);
                 InvalidateAndRefresh(primary);
+                if (primary.LockAspectRatio) RefreshPropertyInspector();
             }, min: 1);
+
+            var lockBtn = new Border
+            {
+                Width = 20,
+                Height = 24,
+                Margin = new Thickness(2, 0, 2, 0),
+                Background = primary.LockAspectRatio ? new SolidColorBrush(Color.FromArgb(45, 13, 153, 255)) : Brushes.Transparent,
+                BorderBrush = primary.LockAspectRatio ? new SolidColorBrush(Color.FromRgb(13, 153, 255)) : new SolidColorBrush(Color.FromRgb(60, 68, 85)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Cursor = Cursors.Hand,
+                ToolTip = primary.LockAspectRatio ? "Uniform scale: Locked (Click to unlock aspect ratio)" : "Uniform scale: Unlocked (Click to lock aspect ratio)",
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            var lockText = new TextBlock
+            {
+                Text = primary.LockAspectRatio ? "🔗" : "🔓",
+                FontSize = 10,
+                Foreground = primary.LockAspectRatio ? new SolidColorBrush(Color.FromRgb(13, 153, 255)) : new SolidColorBrush(Color.FromRgb(130, 142, 165)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            lockBtn.Child = lockText;
+            lockBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                primary.LockAspectRatio = !primary.LockAspectRatio;
+                InvalidateAndRefresh(primary);
+                RefreshPropertyInspector();
+                History.MarkDirty();
+            };
+
             var hBox = ScrubControls.CreateScrubField("H", primary.Height, val =>
             {
+                double oldW = Math.Max(0.001, primary.Width);
+                double oldH = Math.Max(0.001, primary.Height);
                 primary.Height = Math.Max(1, val);
+                if (primary.LockAspectRatio)
+                {
+                    primary.Width = Math.Max(1, Math.Round(primary.Height * (oldW / oldH), 1));
+                    AutoKeyProperty(primary, PropKey.Width, primary.Width);
+                }
                 SetParentAutoLayoutSizingFixed(primary, false);
                 if (primary.AutoLayout != null && primary.AutoLayout.Mode != AutoLayoutMode.None)
                 {
                     primary.AutoLayout.SizingV = SizingMode.Fixed;
+                    if (primary.LockAspectRatio) primary.AutoLayout.SizingH = SizingMode.Fixed;
                     AutoLayoutEngine.ReflowRecursive(primary);
                 }
                 AutoKeyProperty(primary, PropKey.Height, primary.Height);
                 InvalidateAndRefresh(primary);
+                if (primary.LockAspectRatio) RefreshPropertyInspector();
             }, min: 1);
             wBox = CreateAnimatedPropertyField(wBox, primary, PropKey.Width);
             hBox = CreateAnimatedPropertyField(hBox, primary, PropKey.Height);
-            Grid.SetColumn(wBox, 0); Grid.SetColumn(hBox, 2);
-            row2.Children.Add(wBox); row2.Children.Add(hBox);
+            Grid.SetColumn(wBox, 0); Grid.SetColumn(lockBtn, 1); Grid.SetColumn(hBox, 2);
+            row2.Children.Add(wBox); row2.Children.Add(lockBtn); row2.Children.Add(hBox);
             _propertyInspectorStack.Children.Add(row2);
 
             var row3 = new Grid { Margin = new Thickness(0, 0, 0, 8) };
@@ -6840,7 +6892,7 @@ namespace Kerf.UI
                     {
                         bool control = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
                         bool shift = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
-                        var selectionHit = control ? hit : (clickCount >= 2
+                        var selectionHit = (_selectedLayers.Contains(hit) || control) ? hit : (clickCount >= 2
                             ? ResolveDeepSelectionTarget(hit, clickCount)
                             : ResolveAutoLayoutSelectionTarget(hit));
                         if (control)
@@ -7140,7 +7192,7 @@ namespace Kerf.UI
                     return;
                 }
 
-                bool keepAspect = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
+                bool keepAspect = _selectedLayers.Any(l => l != null && l.LockAspectRatio) || Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
                 bool fromCenter = Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt);
 
                 if (_activeHandle != HandleType.None)
@@ -7440,6 +7492,7 @@ namespace Kerf.UI
                             clone.Name = orig.Name;
                             LayerNode parent;
                             var container = page.FindContainer(orig, out parent);
+                            if (parent != null) orig.ParentId = parent.Id;
                             PreserveDuplicateSizeInAutoLayout(clone, parent);
                             OffsetLayerSubtree(clone, dx, dy);
                             if (container != null)
@@ -10278,8 +10331,17 @@ namespace Kerf.UI
 
                 EnsureTimelineControllerInitialized();
                 CaptureAnimationRestPose();
+                _isStateMachineMode = true;
+                if (_timelineController != null) _timelineController.UseStateMachine = true;
+                if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
+                if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Visible;
+                _interactiveCanvasEnabled = true;
+                if (_canvasInteractText != null) _canvasInteractText.Text = "Preview: On";
+                if (_canvasInteractBtn != null) _canvasInteractBtn.Background = new SolidColorBrush(Color.FromArgb(34, 34, 197, 94));
+                UpdateTimelineModeTabs();
                 _timelineController.Seek(_timelineController.CurrentTime);
                 BuildStateMachineInputsControls();
+                BuildStateMachineListeners();
                 BuildStateMachineStatesGraph();
                 RefreshTimelineUI();
             }
@@ -10381,10 +10443,11 @@ namespace Kerf.UI
             bodyGrid.Children.Add(rightCanvasBorder);
 
             _timelineTracksContainer = bodyGrid;
+            _timelineTracksContainer.Visibility = _isStateMachineMode ? Visibility.Collapsed : Visibility.Visible;
             Grid.SetRow(_timelineTracksContainer, 1);
             grid.Children.Add(_timelineTracksContainer);
 
-            // State Machine Live Testing View Container (Toggleable)
+            // State Machine Live Testing View Container (Default & Core Interactive View)
             _stateMachineContainer = CreateStateMachineControlsPanel();
             _stateMachineContainer.Visibility = Visibility.Visible;
             _stateMachineScrollContainer = new ScrollViewer
@@ -10392,7 +10455,7 @@ namespace Kerf.UI
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Content = _stateMachineContainer,
-                Visibility = Visibility.Collapsed
+                Visibility = _isStateMachineMode ? Visibility.Visible : Visibility.Collapsed
             };
             Grid.SetRow(_stateMachineScrollContainer, 1);
             grid.Children.Add(_stateMachineScrollContainer);
@@ -10562,24 +10625,56 @@ namespace Kerf.UI
             speedBtn.MouseLeftButtonUp += (s, e) => CycleTimelineSpeed();
             rightStack.Children.Add(speedBtn);
 
-            // Mode Toggle: [ Tracks ] vs [ State Machine ]
-            var modeToggleBtn = new Border
+            // Mode Tabs: [ ⚙ State Machine ] vs [ ⏱ Timeline Clips ]
+            var modePill = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(48, 56, 78)),
-                CornerRadius = new CornerRadius(5),
+                Background = new SolidColorBrush(Color.FromRgb(22, 26, 36)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(48, 56, 75)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(2),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            var modeStack = new StackPanel { Orientation = Orientation.Horizontal };
+
+            _tabStateMachineBtn = new Border
+            {
+                Background = _isStateMachineMode ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : Brushes.Transparent,
+                CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(10, 4, 10, 4),
                 Cursor = Cursors.Hand
             };
-            var modeToggleText = new TextBlock
+            var smText = new TextBlock
             {
-                Text = "State Machine ⚙",
+                Text = "⚙ State Machine",
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = Brushes.White
+                Foreground = _isStateMachineMode ? Brushes.White : new SolidColorBrush(Color.FromRgb(160, 175, 205))
             };
-            modeToggleBtn.Child = modeToggleText;
-            modeToggleBtn.MouseLeftButtonUp += (s, e) => ToggleTimelineMode();
-            rightStack.Children.Insert(0, modeToggleBtn);
+            _tabStateMachineBtn.Child = smText;
+            _tabStateMachineBtn.MouseLeftButtonUp += (s, e) => SwitchAnimationSubMode(true);
+
+            _tabTimelineClipsBtn = new Border
+            {
+                Background = !_isStateMachineMode ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : Brushes.Transparent,
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(10, 4, 10, 4),
+                Cursor = Cursors.Hand
+            };
+            var tcText = new TextBlock
+            {
+                Text = "⏱ Timeline Clips",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = !_isStateMachineMode ? Brushes.White : new SolidColorBrush(Color.FromRgb(160, 175, 205))
+            };
+            _tabTimelineClipsBtn.Child = tcText;
+            _tabTimelineClipsBtn.MouseLeftButtonUp += (s, e) => SwitchAnimationSubMode(false);
+
+            modeStack.Children.Add(_tabStateMachineBtn);
+            modeStack.Children.Add(_tabTimelineClipsBtn);
+            modePill.Child = modeStack;
+            rightStack.Children.Insert(0, modePill);
 
             Grid.SetRow(rightStack, 1);
             transportGrid.Children.Add(rightStack);
@@ -11048,7 +11143,12 @@ namespace Kerf.UI
             int activeClipIndex = Document.Animation.Clips.IndexOf(_timelineController.ActiveClip);
             if (activeClipIndex < 0) activeClipIndex = 0;
             var definition = new StateMachineDefinition("State Machine 1");
+            definition.AddInput(MachineInput.Bool("Hovering", false));
+            definition.AddInput(MachineInput.Trigger("Clicked"));
+            definition.AddInput(MachineInput.Number("Speed", 1.0));
             definition.AddViewModelProperty(new ViewModelPropertyDefinition("Hovering", ViewModelPropertyKind.Boolean));
+            definition.AddViewModelProperty(new ViewModelPropertyDefinition("Clicked", ViewModelPropertyKind.Trigger));
+            definition.AddViewModelProperty(new ViewModelPropertyDefinition("Speed", ViewModelPropertyKind.Number));
             var layer = new MachineLayer("Base Layer");
             int entry = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
             int idle = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, activeClipIndex));
@@ -11332,6 +11432,12 @@ namespace Kerf.UI
                 var selected = kindBox.SelectedItem as ComboBoxItem;
                 var kind = selected != null ? (ViewModelPropertyKind)selected.Tag : ViewModelPropertyKind.Boolean;
                 sm.Definition.AddViewModelProperty(new ViewModelPropertyDefinition(propertyName, kind));
+                InputKind ik = (kind == ViewModelPropertyKind.Boolean) ? InputKind.Bool : ((kind == ViewModelPropertyKind.Number) ? InputKind.Number : InputKind.Trigger);
+                if (sm.Definition.Inputs == null) sm.Definition.Inputs = new List<MachineInput>();
+                if (!sm.Definition.Inputs.Any(inp => inp != null && string.Equals(inp.Name, propertyName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    sm.Definition.AddInput(new MachineInput(propertyName, ik, 0.0));
+                }
                 sm.RebuildViewModel();
                 History.MarkDirty();
                 BuildStateMachineInputsControls();
@@ -12453,25 +12559,48 @@ namespace Kerf.UI
             }
         }
 
-        private void ToggleTimelineMode()
+        private void SwitchAnimationSubMode(bool stateMachineMode)
         {
             if (_timelineController == null) EnsureTimelineControllerInitialized();
-            _isStateMachineMode = !_isStateMachineMode;
-            _timelineController.UseStateMachine = _isStateMachineMode;
-            if (_isStateMachineMode)
+            _isStateMachineMode = stateMachineMode;
+            if (_timelineController != null) _timelineController.UseStateMachine = stateMachineMode;
+            if (stateMachineMode)
             {
-                _timelineTracksContainer.Visibility = Visibility.Collapsed;
-                _stateMachineScrollContainer.Visibility = Visibility.Visible;
+                if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
+                if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Visible;
                 BuildStateMachineInputsControls();
+                BuildStateMachineListeners();
                 BuildStateMachineStatesGraph();
             }
             else
             {
-                _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
-                _timelineTracksContainer.Visibility = Visibility.Visible;
+                if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
+                if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Visible;
                 RefreshTimelineUI();
             }
-            _timelineController.Seek(_timelineController.CurrentTime);
+            UpdateTimelineModeTabs();
+            if (_timelineController != null) _timelineController.Seek(_timelineController.CurrentTime);
+        }
+
+        private void UpdateTimelineModeTabs()
+        {
+            if (_tabStateMachineBtn != null)
+            {
+                _tabStateMachineBtn.Background = _isStateMachineMode ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : Brushes.Transparent;
+                var tb = _tabStateMachineBtn.Child as TextBlock;
+                if (tb != null) tb.Foreground = _isStateMachineMode ? Brushes.White : new SolidColorBrush(Color.FromRgb(160, 175, 205));
+            }
+            if (_tabTimelineClipsBtn != null)
+            {
+                _tabTimelineClipsBtn.Background = !_isStateMachineMode ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : Brushes.Transparent;
+                var tb = _tabTimelineClipsBtn.Child as TextBlock;
+                if (tb != null) tb.Foreground = !_isStateMachineMode ? Brushes.White : new SolidColorBrush(Color.FromRgb(160, 175, 205));
+            }
+        }
+
+        private void ToggleTimelineMode()
+        {
+            SwitchAnimationSubMode(!_isStateMachineMode);
         }
 
         private void CycleTimelineLoopMode()
