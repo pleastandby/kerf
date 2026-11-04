@@ -69,6 +69,7 @@ namespace Kerf.Tests
             RunTest("Persistent Recent Projects, Save Anywhere, Safe Auto Layout Undo & Animation Tab Integration", TestMilestone23Features);
             RunTest("Component File Persistence Across Save/Open & Real Vector State Machine (Milestone 24)", TestMilestone24Features);
             RunTest("Nested Auto Layout Frames, Instant Single-Pass Stabilization, and Auto Align Undo/Redo", TestNestedAutoLayoutAndSinglePassStabilization);
+            RunTest("Figma Auto Layout Parity: Smart Mode Detection, Full Bounding Enclosure, and Alt-Drag Duplication Isolation", TestFigmaAutoLayoutParityAndAltDragDuplication);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -2845,6 +2846,131 @@ namespace Kerf.Tests
             Assert(midFrame.Width == 480.0, string.Format("Mid frame fills root width (expected 480, got {0})", midFrame.Width));
             Assert(leaf.Width == 460.0, string.Format("Leaf fills mid frame width in single pass (expected 460, got {0})", leaf.Width));
             Assert(midFrame.Height == 80.0, string.Format("Mid frame hugs leaf height in single pass (expected 80, got {0})", midFrame.Height));
+        }
+
+        private static void TestFigmaAutoLayoutParityAndAltDragDuplication()
+        {
+            // 1. Smart Mode Detection: Vertically stacked wide cards
+            // Two 400x100 cards stacked vertically with a 20px gap
+            var card1 = new LayerNode { Id = "c1", Name = "Card 1", Type = ElementType.Frame, X = 100, Y = 100, Width = 400, Height = 100 };
+            var card2 = new LayerNode { Id = "c2", Name = "Card 2", Type = ElementType.Frame, X = 100, Y = 220, Width = 400, Height = 100 };
+            var cards = new List<LayerNode> { card1, card2 };
+
+            var detectedMode = AutoLayoutEngine.DetectSmartLayoutMode(cards);
+            Assert(detectedMode == AutoLayoutMode.Vertical, string.Format("Vertically stacked wide cards detected as Vertical mode, got {0}", detectedMode));
+
+            var page = new Page();
+            page.Layers.Add(card1);
+            page.Layers.Add(card2);
+
+            var autoFramed = AutoLayoutEngine.AutoAlignSelection(page, cards);
+            Assert(autoFramed != null, "AutoAlignSelection successfully auto-framed two cards");
+            Assert(autoFramed.AutoLayout != null && autoFramed.AutoLayout.Mode == AutoLayoutMode.Vertical, "Enclosing frame is in Vertical mode");
+            Assert(autoFramed.Width == 400.0, string.Format("Enclosing frame preserves full shape bounding width (expected 400, got {0})", autoFramed.Width));
+            Assert(autoFramed.Height == 220.0, string.Format("Enclosing frame preserves full shape bounding height (expected 220, got {0})", autoFramed.Height));
+            Assert(autoFramed.AutoLayout.Gap == 20.0, string.Format("Gap between cards accurately measured as 20, got {0}", autoFramed.AutoLayout.Gap));
+
+            // Verify children positions match exact bounding box
+            Assert(card1.X == 100.0 && card1.Y == 100.0, "Card 1 at (100, 100)");
+            Assert(card2.X == 100.0 && card2.Y == 220.0, "Card 2 at (100, 220)");
+
+            // 2. Smart Mode Detection: Horizontally placed tall side-by-side cards
+            var tall1 = new LayerNode { Id = "t1", Name = "Tall 1", Type = ElementType.Frame, X = 50, Y = 50, Width = 100, Height = 350 };
+            var tall2 = new LayerNode { Id = "t2", Name = "Tall 2", Type = ElementType.Frame, X = 170, Y = 50, Width = 100, Height = 350 };
+            var tallMode = AutoLayoutEngine.DetectSmartLayoutMode(new List<LayerNode> { tall1, tall2 });
+            Assert(tallMode == AutoLayoutMode.Horizontal, string.Format("Horizontally placed tall cards detected as Horizontal mode, got {0}", tallMode));
+
+            // 3. Smart Mode Detection: 2D Flow / Grid arrangement detected as Wrap
+            var g1 = new LayerNode { Id = "g1", X = 0, Y = 0, Width = 80, Height = 60 };
+            var g2 = new LayerNode { Id = "g2", X = 100, Y = 0, Width = 80, Height = 60 };
+            var g3 = new LayerNode { Id = "g3", X = 0, Y = 80, Width = 80, Height = 60 };
+            var g4 = new LayerNode { Id = "g4", X = 100, Y = 80, Width = 80, Height = 60 };
+            var gridMode = AutoLayoutEngine.DetectSmartLayoutMode(new List<LayerNode> { g1, g2, g3, g4 });
+            Assert(gridMode == AutoLayoutMode.Wrap, string.Format("2x2 grid layout detected as Wrap flow mode, got {0}", gridMode));
+
+            // 4. Alt-Drag Duplication Isolation: Duplicating an Auto Layout frame on canvas
+            // Cloned top-level frame remains top-level on canvas and is never dropped inside the original frame
+            var canvasFrame = new LayerNode
+            {
+                Id = "canvas_al",
+                Name = "Canvas AutoLayout",
+                Type = ElementType.Frame,
+                X = 200,
+                Y = 200,
+                Width = 300,
+                Height = 150,
+                AutoLayout = new AutoLayoutData { Mode = AutoLayoutMode.Vertical, Gap = 8, SizingH = SizingMode.Hug, SizingV = SizingMode.Hug },
+                Children = new List<LayerNode>
+                {
+                    new LayerNode { Id = "child_1", Type = ElementType.Rectangle, Width = 100, Height = 40, ParentId = "canvas_al" }
+                }
+            };
+            page.Layers.Add(canvasFrame);
+
+            var cloneFrame = canvasFrame.Clone();
+            cloneFrame.Id = "canvas_al_clone";
+            cloneFrame.X = 250;
+            cloneFrame.Y = 250;
+            cloneFrame.ParentId = null; // Top-level duplication
+            page.Layers.Add(cloneFrame);
+
+            // Verify clone is at root level and NOT inside canvasFrame
+            Assert(cloneFrame.ParentId == null, "Cloned Auto Layout frame parent remains null (canvas root)");
+            Assert(!canvasFrame.Children.Contains(cloneFrame), "Original frame does NOT contain the cloned frame as a child");
+            Assert(page.Layers.Contains(cloneFrame), "Page layers contains the clone at canvas level");
+
+            // 5. Alignment Pad spatial mappings in Horizontal mode with Fixed size
+            var alignFrame = new LayerNode
+            {
+                Id = "align_f",
+                Type = ElementType.Frame,
+                X = 0,
+                Y = 0,
+                Width = 400,
+                Height = 200,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Horizontal,
+                    Gap = 10,
+                    PaddingLeft = 0,
+                    PaddingRight = 0,
+                    PaddingTop = 0,
+                    PaddingBottom = 0,
+                    SizingH = SizingMode.Fixed,
+                    SizingV = SizingMode.Fixed,
+                    JustifyContent = JustifyContent.Start,
+                    AlignItems = AlignItems.Start
+                },
+                Children = new List<LayerNode>
+                {
+                    new LayerNode { Id = "a1", Type = ElementType.Rectangle, Width = 50, Height = 40 },
+                    new LayerNode { Id = "a2", Type = ElementType.Rectangle, Width = 50, Height = 40 }
+                }
+            };
+            AutoLayoutEngine.Reflow(alignFrame);
+            Assert(alignFrame.Children[0].X == 0.0, "Start justification: item 1 at X=0");
+
+            // Test Center alignment on 3x3 grid
+            alignFrame.AutoLayout.JustifyContent = JustifyContent.Center;
+            alignFrame.AutoLayout.AlignItems = AlignItems.Center;
+            AutoLayoutEngine.Reflow(alignFrame);
+            // Available width = 400, used = 50 + 10 + 50 = 110, extra = 290. Centered cursor = 145.
+            Assert(alignFrame.Children[0].X == 145.0, string.Format("Center justification: item 1 at X=145, got {0}", alignFrame.Children[0].X));
+            // Available height = 200, item height = 40, free = 160. Centered cross = 80.
+            Assert(alignFrame.Children[0].Y == 80.0, string.Format("Center cross-alignment: item 1 at Y=80, got {0}", alignFrame.Children[0].Y));
+
+            // Test End alignment on 3x3 grid
+            alignFrame.AutoLayout.JustifyContent = JustifyContent.End;
+            alignFrame.AutoLayout.AlignItems = AlignItems.End;
+            AutoLayoutEngine.Reflow(alignFrame);
+            Assert(alignFrame.Children[0].X == 290.0, string.Format("End justification: item 1 at X=290, got {0}", alignFrame.Children[0].X));
+            Assert(alignFrame.Children[0].Y == 160.0, string.Format("End cross-alignment: item 1 at Y=160, got {0}", alignFrame.Children[0].Y));
+
+            // Test SpaceBetween distribution
+            alignFrame.AutoLayout.JustifyContent = JustifyContent.SpaceBetween;
+            AutoLayoutEngine.Reflow(alignFrame);
+            Assert(alignFrame.Children[0].X == 0.0, "Space between: first item at X=0");
+            Assert(alignFrame.Children[1].X == 350.0, string.Format("Space between: last item at X=350, got {0}", alignFrame.Children[1].X));
         }
     }
 }

@@ -961,6 +961,86 @@ namespace Kerf.Tools
             }
         }
 
+        public static AutoLayoutMode DetectSmartLayoutMode(List<LayerNode> layers)
+        {
+            if (layers == null || layers.Count < 2) return AutoLayoutMode.Horizontal;
+
+            // 1. Calculate centers and spreads
+            var centers = layers.Select(l => new System.Windows.Point(l.X + l.Width / 2.0, l.Y + l.Height / 2.0)).ToList();
+            double minCenterX = centers.Min(p => p.X);
+            double maxCenterX = centers.Max(p => p.X);
+            double minCenterY = centers.Min(p => p.Y);
+            double maxCenterY = centers.Max(p => p.Y);
+            double deltaCenterX = maxCenterX - minCenterX;
+            double deltaCenterY = maxCenterY - minCenterY;
+
+            // 2. Check 2D grid/flow pattern (for 3+ items):
+            // If items form distinct rows AND distinct columns, it's a Wrap flow!
+            if (layers.Count >= 3)
+            {
+                double avgH = layers.Average(l => l.Height);
+                double avgW = layers.Average(l => l.Width);
+                double rowTol = Math.Max(8.0, avgH * 0.45);
+                double colTol = Math.Max(8.0, avgW * 0.45);
+
+                var rowGroups = new List<List<LayerNode>>();
+                foreach (var l in layers.OrderBy(l => l.Y))
+                {
+                    var match = rowGroups.FirstOrDefault(rg => Math.Abs((rg[0].Y + rg[0].Height / 2.0) - (l.Y + l.Height / 2.0)) <= rowTol);
+                    if (match != null) match.Add(l);
+                    else rowGroups.Add(new List<LayerNode> { l });
+                }
+
+                var colGroups = new List<List<LayerNode>>();
+                foreach (var l in layers.OrderBy(l => l.X))
+                {
+                    var match = colGroups.FirstOrDefault(cg => Math.Abs((cg[0].X + cg[0].Width / 2.0) - (l.X + l.Width / 2.0)) <= colTol);
+                    if (match != null) match.Add(l);
+                    else colGroups.Add(new List<LayerNode> { l });
+                }
+
+                if (rowGroups.Count >= 2 && colGroups.Count >= 2 &&
+                    rowGroups.Any(rg => rg.Count >= 2) && colGroups.Any(cg => cg.Count >= 2))
+                {
+                    return AutoLayoutMode.Wrap;
+                }
+            }
+
+            // 3. For 2 items or linear arrangements:
+            // Calculate spatial overlap along X and Y axes
+            double totalXOverlap = 0.0;
+            double totalYOverlap = 0.0;
+            int pairCount = 0;
+
+            for (int i = 0; i < layers.Count; i++)
+            {
+                for (int j = i + 1; j < layers.Count; j++)
+                {
+                    var a = layers[i];
+                    var b = layers[j];
+
+                    double xOverlap = Math.Max(0.0, Math.Min(a.X + a.Width, b.X + b.Width) - Math.Max(a.X, b.X));
+                    double yOverlap = Math.Max(0.0, Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y));
+
+                    totalXOverlap += xOverlap;
+                    totalYOverlap += yOverlap;
+                    pairCount++;
+                }
+            }
+
+            if (pairCount > 0)
+            {
+                if (totalXOverlap > 0 && totalYOverlap == 0) return AutoLayoutMode.Vertical;
+                if (totalYOverlap > 0 && totalXOverlap == 0) return AutoLayoutMode.Horizontal;
+
+                if (totalXOverlap > totalYOverlap * 1.5) return AutoLayoutMode.Vertical;
+                if (totalYOverlap > totalXOverlap * 1.5) return AutoLayoutMode.Horizontal;
+            }
+
+            // 4. Fallback to center delta spread
+            return (deltaCenterX >= deltaCenterY) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
+        }
+
         public static LayerNode AutoAlignSelection(Page page, List<LayerNode> selectedLayers)
         {
             if (page == null || selectedLayers == null || selectedLayers.Count == 0) return null;
@@ -977,7 +1057,10 @@ namespace Kerf.Tools
 
                 if (singleFrame.AutoLayout.Mode == AutoLayoutMode.None)
                 {
-                    singleFrame.AutoLayout.Mode = AutoLayoutMode.Horizontal;
+                    var smartMode = (singleFrame.Children != null && singleFrame.Children.Count >= 2)
+                        ? DetectSmartLayoutMode(singleFrame.Children)
+                        : ((singleFrame.Height > singleFrame.Width * 1.2) ? AutoLayoutMode.Vertical : AutoLayoutMode.Horizontal);
+                    singleFrame.AutoLayout.Mode = smartMode;
                     singleFrame.AutoLayout.SizingH = SizingMode.Hug;
                     singleFrame.AutoLayout.SizingV = SizingMode.Hug;
                     singleFrame.AutoLayout.JustifyContent = JustifyContent.Start;
@@ -1053,45 +1136,55 @@ namespace Kerf.Tools
                 return singleWrapFrame;
             }
 
-            // If multiple layers selected: wrap full bounding envelope into Auto Layout Frame
-            double minX = double.MaxValue, minY = double.MaxValue;
-            double maxX = double.MinValue, maxY = double.MinValue;
-
-            foreach (var l in topLayers)
-            {
-                minX = Math.Min(minX, l.X);
-                minY = Math.Min(minY, l.Y);
-                maxX = Math.Max(maxX, l.X + Math.Max(1.0, l.Width));
-                maxY = Math.Max(maxY, l.Y + Math.Max(1.0, l.Height));
-            }
-
+            // If multiple layers selected: smartly detect layout mode and wrap full bounding envelope into Auto Layout Frame
+            double minX = topLayers.Min(l => l.X);
+            double minY = topLayers.Min(l => l.Y);
+            double maxX = topLayers.Max(l => l.X + Math.Max(1.0, l.Width));
+            double maxY = topLayers.Max(l => l.Y + Math.Max(1.0, l.Height));
             double totalW = Math.Max(1.0, maxX - minX);
             double totalH = Math.Max(1.0, maxY - minY);
-            var mode = (totalW >= totalH) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
 
-            var ordered = (mode == AutoLayoutMode.Horizontal)
-                ? topLayers.OrderBy(l => l.X).ToList()
-                : topLayers.OrderBy(l => l.Y).ToList();
+            var mode = DetectSmartLayoutMode(topLayers);
 
+            List<LayerNode> ordered;
             double measuredGap = 0.0;
-            if (ordered.Count > 1)
+            double padLeft = 0.0, padTop = 0.0, padRight = 0.0, padBottom = 0.0;
+
+            if (mode == AutoLayoutMode.Horizontal)
             {
-                if (mode == AutoLayoutMode.Horizontal)
+                ordered = topLayers.OrderBy(l => l.X).ThenBy(l => l.Y).ToList();
+                if (ordered.Count > 1)
                 {
                     double sumW = ordered.Sum(l => l.Width);
                     measuredGap = Math.Max(0.0, (totalW - sumW) / (ordered.Count - 1));
                 }
-                else
+                padLeft = Math.Max(0.0, ordered.First().X - minX);
+                padRight = Math.Max(0.0, maxX - (ordered.Last().X + ordered.Last().Width));
+                padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
+                padBottom = Math.Max(0.0, maxY - ordered.Max(l => l.Y + l.Height));
+            }
+            else if (mode == AutoLayoutMode.Vertical)
+            {
+                ordered = topLayers.OrderBy(l => l.Y).ThenBy(l => l.X).ToList();
+                if (ordered.Count > 1)
                 {
                     double sumH = ordered.Sum(l => l.Height);
                     measuredGap = Math.Max(0.0, (totalH - sumH) / (ordered.Count - 1));
                 }
+                padTop = Math.Max(0.0, ordered.First().Y - minY);
+                padBottom = Math.Max(0.0, maxY - (ordered.Last().Y + ordered.Last().Height));
+                padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
+                padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
             }
-
-            double padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
-            double padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
-            double padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
-            double padBottom = Math.Max(0.0, maxY - ordered.Max(l => l.Y + l.Height));
+            else // Wrap
+            {
+                ordered = topLayers.OrderBy(l => l.Y).ThenBy(l => l.X).ToList();
+                measuredGap = MeasureWrapGap(ordered);
+                padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
+                padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
+                padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
+                padBottom = Math.Max(0.0, maxY - ordered.Max(l => l.Y + l.Height));
+            }
 
             var frame = new LayerNode
             {
@@ -1165,7 +1258,10 @@ namespace Kerf.Tools
 
                 if (oldLayout.Mode == AutoLayoutMode.None)
                 {
-                    newLayout.Mode = AutoLayoutMode.Horizontal;
+                    var smartMode = (singleFrame.Children != null && singleFrame.Children.Count >= 2)
+                        ? DetectSmartLayoutMode(singleFrame.Children)
+                        : ((singleFrame.Height > singleFrame.Width * 1.2) ? AutoLayoutMode.Vertical : AutoLayoutMode.Horizontal);
+                    newLayout.Mode = smartMode;
                     newLayout.SizingH = SizingMode.Hug;
                     newLayout.SizingV = SizingMode.Hug;
                     newLayout.JustifyContent = JustifyContent.Start;
@@ -1244,44 +1340,55 @@ namespace Kerf.Tools
                 return new AutoLayoutSelectionCommand(page, singleWrapFrame, records, pId, insIdx, onRender);
             }
 
-            // Multiple layers
-            double minX = double.MaxValue, minY = double.MaxValue;
-            double maxX = double.MinValue, maxY = double.MinValue;
-
-            foreach (var l in topLayers)
-            {
-                minX = Math.Min(minX, l.X);
-                minY = Math.Min(minY, l.Y);
-                maxX = Math.Max(maxX, l.X + Math.Max(1.0, l.Width));
-                maxY = Math.Max(maxY, l.Y + Math.Max(1.0, l.Height));
-            }
-
+            // Multiple layers: smartly detect layout mode and wrap
+            double minX = topLayers.Min(l => l.X);
+            double minY = topLayers.Min(l => l.Y);
+            double maxX = topLayers.Max(l => l.X + Math.Max(1.0, l.Width));
+            double maxY = topLayers.Max(l => l.Y + Math.Max(1.0, l.Height));
             double totalW = Math.Max(1.0, maxX - minX);
             double totalH = Math.Max(1.0, maxY - minY);
-            var mode = (totalW >= totalH) ? AutoLayoutMode.Horizontal : AutoLayoutMode.Vertical;
-            var ordered = (mode == AutoLayoutMode.Horizontal)
-                ? topLayers.OrderBy(l => l.X).ToList()
-                : topLayers.OrderBy(l => l.Y).ToList();
 
+            var mode = DetectSmartLayoutMode(topLayers);
+
+            List<LayerNode> ordered;
             double measuredGap = 0.0;
-            if (ordered.Count > 1)
+            double padLeft = 0.0, padTop = 0.0, padRight = 0.0, padBottom = 0.0;
+
+            if (mode == AutoLayoutMode.Horizontal)
             {
-                if (mode == AutoLayoutMode.Horizontal)
+                ordered = topLayers.OrderBy(l => l.X).ThenBy(l => l.Y).ToList();
+                if (ordered.Count > 1)
                 {
                     double sumW = ordered.Sum(l => l.Width);
                     measuredGap = Math.Max(0.0, (totalW - sumW) / (ordered.Count - 1));
                 }
-                else
+                padLeft = Math.Max(0.0, ordered.First().X - minX);
+                padRight = Math.Max(0.0, maxX - (ordered.Last().X + ordered.Last().Width));
+                padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
+                padBottom = Math.Max(0.0, maxY - ordered.Max(l => l.Y + l.Height));
+            }
+            else if (mode == AutoLayoutMode.Vertical)
+            {
+                ordered = topLayers.OrderBy(l => l.Y).ThenBy(l => l.X).ToList();
+                if (ordered.Count > 1)
                 {
                     double sumH = ordered.Sum(l => l.Height);
                     measuredGap = Math.Max(0.0, (totalH - sumH) / (ordered.Count - 1));
                 }
+                padTop = Math.Max(0.0, ordered.First().Y - minY);
+                padBottom = Math.Max(0.0, maxY - (ordered.Last().Y + ordered.Last().Height));
+                padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
+                padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
             }
-
-            double padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
-            double padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
-            double padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
-            double padBottom = Math.Max(0.0, maxY - ordered.Max(l => l.Y + l.Height));
+            else // Wrap
+            {
+                ordered = topLayers.OrderBy(l => l.Y).ThenBy(l => l.X).ToList();
+                measuredGap = MeasureWrapGap(ordered);
+                padLeft = Math.Max(0.0, ordered.Min(l => l.X) - minX);
+                padTop = Math.Max(0.0, ordered.Min(l => l.Y) - minY);
+                padRight = Math.Max(0.0, maxX - ordered.Max(l => l.X + l.Width));
+                padBottom = Math.Max(0.0, maxY - ordered.Max(l => l.Y + l.Height));
+            }
 
             var frame = new LayerNode
             {

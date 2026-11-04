@@ -284,6 +284,7 @@ namespace Kerf.UI
         private VectorGeometry _startVectorGeometry = null;
         private bool _hasAltDuplicated = false;
         private List<LayerNode> _altClonedLayers = new List<LayerNode>();
+        private List<LayerNode> _altOriginalLayers = new List<LayerNode>();
         private Point _lastTransformDelta = new Point(24, 24);
 
         // Rectangle / Marquee Selection State
@@ -3343,22 +3344,32 @@ namespace Kerf.UI
             gapPanel.Children.Add(new TextBlock { Text = "Gap", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(145, 160, 184)), Margin = new Thickness(0, 0, 0, 3) });
             var gapGrid = new Grid();
             gapGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            gapGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+            gapGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
             var gapField = CreateNumberField("↔", layout.Gap, val => { layout.Gap = Math.Max(0.0, val); applyLayoutChange(false); });
             Grid.SetColumn(gapField, 0);
             gapGrid.Children.Add(gapField);
-            var justifyCombo = CreateModernComboBox(26);
-            justifyCombo.Items.Add(CreateModernComboBoxItem("Packed"));
-            justifyCombo.Items.Add(CreateModernComboBoxItem("Center"));
-            justifyCombo.Items.Add(CreateModernComboBoxItem("End"));
-            justifyCombo.Items.Add(CreateModernComboBoxItem("Between"));
-            justifyCombo.Items.Add(CreateModernComboBoxItem("Around"));
-            justifyCombo.Items.Add(CreateModernComboBoxItem("Evenly"));
-            justifyCombo.SelectedIndex = (int)layout.JustifyContent;
-            justifyCombo.ToolTip = "Space distribution along the flow";
-            justifyCombo.SelectionChanged += (s, e) => { layout.JustifyContent = (JustifyContent)justifyCombo.SelectedIndex; applyLayoutChange(false); };
-            Grid.SetColumn(justifyCombo, 1);
-            gapGrid.Children.Add(justifyCombo);
+            var distCombo = CreateModernComboBox(26);
+            distCombo.Items.Add(CreateModernComboBoxItem("Packed"));
+            distCombo.Items.Add(CreateModernComboBoxItem("Space between"));
+            distCombo.SelectedIndex = layout.JustifyContent == JustifyContent.SpaceBetween ? 1 : 0;
+            distCombo.ToolTip = "Distribution of items: Packed or Space between";
+            distCombo.SelectionChanged += (s, e) =>
+            {
+                if (distCombo.SelectedIndex == 1)
+                {
+                    layout.JustifyContent = JustifyContent.SpaceBetween;
+                }
+                else
+                {
+                    if (layout.JustifyContent == JustifyContent.SpaceBetween)
+                    {
+                        layout.JustifyContent = JustifyContent.Start;
+                    }
+                }
+                applyLayoutChange(true);
+            };
+            Grid.SetColumn(distCombo, 1);
+            gapGrid.Children.Add(distCombo);
             gapPanel.Children.Add(gapGrid);
             Grid.SetColumn(gapPanel, 2);
             alignmentAndGap.Children.Add(gapPanel);
@@ -3415,51 +3426,137 @@ namespace Kerf.UI
 
         private FrameworkElement CreateAutoLayoutAlignmentGrid(LayerNode frame, AutoLayoutData layout, Action<bool> applyChange)
         {
-            var grid = new Grid { Width = 82, Height = 70 };
+            var container = new Border
+            {
+                Width = 84,
+                Height = 72,
+                Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(46, 54, 74)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(4)
+            };
+
+            var grid = new Grid();
             for (int i = 0; i < 3; i++)
             {
                 grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             }
-            var horizontal = layout.Mode == AutoLayoutMode.Horizontal || layout.Mode == AutoLayoutMode.Wrap;
-            int activeMain = layout.JustifyContent == JustifyContent.Center || layout.JustifyContent == JustifyContent.SpaceAround || layout.JustifyContent == JustifyContent.SpaceEvenly ? 1
-                : layout.JustifyContent == JustifyContent.End ? 2 : 0;
-            int activeCross = layout.AlignItems == AlignItems.Center ? 1 : layout.AlignItems == AlignItems.End ? 2 : 0;
 
-            for (int row = 0; row < 3; row++)
+            var horizontal = layout.Mode == AutoLayoutMode.Horizontal || layout.Mode == AutoLayoutMode.Wrap || layout.Mode == AutoLayoutMode.Grid;
+            bool isSpaceBetween = layout.JustifyContent == JustifyContent.SpaceBetween;
+
+            // In horizontal mode: col represents Main axis (Left=0, Center=1, Right=2), row represents Cross axis (Top=0, Center=1, Bottom=2)
+            // In vertical mode: row represents Main axis (Top=0, Center=1, Bottom=2), col represents Cross axis (Left=0, Center=1, Right=2)
+            int activeMain = (layout.JustifyContent == JustifyContent.Center || layout.JustifyContent == JustifyContent.SpaceAround || layout.JustifyContent == JustifyContent.SpaceEvenly) ? 1
+                : (layout.JustifyContent == JustifyContent.End ? 2 : 0);
+            int activeCross = layout.AlignItems == AlignItems.Center ? 1 : (layout.AlignItems == AlignItems.End ? 2 : 0);
+
+            for (int r = 0; r < 3; r++)
             {
-                for (int col = 0; col < 3; col++)
+                for (int c = 0; c < 3; c++)
                 {
-                    int localRow = row;
-                    int localCol = col;
-                    bool active = horizontal ? col == activeMain && row == activeCross : row == activeMain && col == activeCross;
-                    var button = new Button
+                    int localRow = r;
+                    int localCol = c;
+
+                    bool isActive;
+                    if (isSpaceBetween)
                     {
-                        Padding = new Thickness(0),
-                        Margin = new Thickness(1),
-                        Background = active ? new SolidColorBrush(Color.FromRgb(54, 66, 92)) : new SolidColorBrush(Color.FromRgb(35, 40, 55)),
-                        BorderBrush = active ? new SolidColorBrush(Color.FromRgb(119, 137, 172)) : new SolidColorBrush(Color.FromRgb(50, 58, 75)),
-                        BorderThickness = new Thickness(1),
+                        isActive = horizontal ? (r == activeCross) : (c == activeCross);
+                    }
+                    else
+                    {
+                        isActive = horizontal ? (c == activeMain && r == activeCross) : (r == activeMain && c == activeCross);
+                    }
+
+                    var cell = new Border
+                    {
+                        Background = isActive ? new SolidColorBrush(Color.FromArgb(36, 56, 189, 248)) : Brushes.Transparent,
+                        CornerRadius = new CornerRadius(4),
                         Cursor = Cursors.Hand,
-                        ToolTip = string.Format("{0} / {1}", new[] { "Start", "Center", "End" }[horizontal ? col : row], new[] { "Top", "Center", "Bottom" }[horizontal ? row : col]),
-                        Template = CreateRoundedButtonTemplate(3)
+                        Margin = new Thickness(1)
                     };
-                    var dot = new Ellipse { Width = 4, Height = 4, Fill = active ? new SolidColorBrush(Color.FromRgb(236, 72, 153)) : new SolidColorBrush(Color.FromRgb(143, 157, 178)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                    button.Content = dot;
-                    button.Click += (s, e) =>
+
+                    string colName = (c == 0) ? "Left" : (c == 1) ? "Center" : "Right";
+                    string rowName = (r == 0) ? "Top" : (r == 1) ? "Center" : "Bottom";
+                    cell.ToolTip = string.Format("{0} / {1}", rowName, colName);
+
+                    FrameworkElement indicator;
+                    if (isActive)
                     {
-                        int main = horizontal ? localCol : localRow;
-                        int cross = horizontal ? localRow : localCol;
-                        layout.JustifyContent = main == 0 ? JustifyContent.Start : main == 1 ? JustifyContent.Center : JustifyContent.End;
-                        layout.AlignItems = cross == 0 ? AlignItems.Start : cross == 1 ? AlignItems.Center : AlignItems.End;
+                        var activePill = new Border
+                        {
+                            Width = 10,
+                            Height = 7,
+                            CornerRadius = new CornerRadius(2),
+                            Background = new SolidColorBrush(Color.FromRgb(24, 160, 251)),
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        indicator = activePill;
+                    }
+                    else
+                    {
+                        var dot = new Ellipse
+                        {
+                            Width = 4,
+                            Height = 4,
+                            Fill = new SolidColorBrush(Color.FromRgb(90, 103, 130)),
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        indicator = dot;
+                    }
+                    cell.Child = indicator;
+
+                    var cellRef = cell;
+                    var indRef = indicator;
+                    bool activeRef = isActive;
+
+                    cell.MouseEnter += (s, e) =>
+                    {
+                        if (!activeRef)
+                        {
+                            cellRef.Background = new SolidColorBrush(Color.FromArgb(28, 255, 255, 255));
+                            var d = indRef as Ellipse;
+                            if (d != null) d.Fill = new SolidColorBrush(Color.FromRgb(160, 175, 205));
+                        }
+                    };
+                    cell.MouseLeave += (s, e) =>
+                    {
+                        if (!activeRef)
+                        {
+                            cellRef.Background = Brushes.Transparent;
+                            var d = indRef as Ellipse;
+                            if (d != null) d.Fill = new SolidColorBrush(Color.FromRgb(90, 103, 130));
+                        }
+                    };
+
+                    cell.MouseLeftButtonDown += (s, e) =>
+                    {
+                        e.Handled = true;
+                        if (horizontal)
+                        {
+                            layout.JustifyContent = (localCol == 0) ? JustifyContent.Start : (localCol == 1 ? JustifyContent.Center : JustifyContent.End);
+                            layout.AlignItems = (localRow == 0) ? AlignItems.Start : (localRow == 1 ? AlignItems.Center : AlignItems.End);
+                        }
+                        else
+                        {
+                            layout.JustifyContent = (localRow == 0) ? JustifyContent.Start : (localRow == 1 ? JustifyContent.Center : JustifyContent.End);
+                            layout.AlignItems = (localCol == 0) ? AlignItems.Start : (localCol == 1 ? AlignItems.Center : AlignItems.End);
+                        }
                         applyChange(true);
                     };
-                    Grid.SetRow(button, row);
-                    Grid.SetColumn(button, col);
-                    grid.Children.Add(button);
+
+                    Grid.SetRow(cell, r);
+                    Grid.SetColumn(cell, c);
+                    grid.Children.Add(cell);
                 }
             }
-            return grid;
+
+            container.Child = grid;
+            return container;
         }
 
         private FrameworkElement CreateAutoLayoutChildCard(LayerNode child, LayerNode parent)
@@ -5873,6 +5970,17 @@ namespace Kerf.UI
             }
 
             LayerNode target = _autoLayoutDropTarget;
+            if (_hasAltDuplicated && _altOriginalLayers.Count > 0)
+            {
+                if (_altOriginalLayers.All(orig => string.IsNullOrEmpty(orig.ParentId)))
+                {
+                    target = null;
+                }
+                else if (target != null && _altOriginalLayers.Any(orig => orig == target || Kerf.Model.Page.IsDescendant(orig, target)))
+                {
+                    target = null;
+                }
+            }
             bool shouldCommitDrop = target != null || _autoLayoutDetachPreview || _autoLayoutDropSource != null;
             if (!shouldCommitDrop) return affectedLayouts.ToList();
             if (target != null && moving.Any(layer => layer == target || Kerf.Model.Page.IsDescendant(layer, target)))
@@ -6190,7 +6298,8 @@ namespace Kerf.UI
             LayerNode target = null;
             bool detach = false;
             var frames = page.GetAllLayersFlat().Where(f => f.Type == ElementType.Frame &&
-                !moving.Any(m => m == f || Kerf.Model.Page.IsDescendant(m, f))).ToList();
+                !moving.Any(m => m == f || Kerf.Model.Page.IsDescendant(m, f)) &&
+                !_altOriginalLayers.Any(orig => orig == f || Kerf.Model.Page.IsDescendant(orig, f))).ToList();
             for (int i = frames.Count - 1; i >= 0; i--)
             {
                 if (frames[i].GetBounds().Contains(canvasPoint))
@@ -6198,6 +6307,10 @@ namespace Kerf.UI
                     target = frames[i];
                     break;
                 }
+            }
+            if (_hasAltDuplicated && _altOriginalLayers.Count > 0 && _altOriginalLayers.All(orig => string.IsNullOrEmpty(orig.ParentId)))
+            {
+                target = null;
             }
             if (target == null && source != null)
             {
@@ -6765,6 +6878,7 @@ namespace Kerf.UI
                         ClearAutoLayoutDropPreview();
                         _hasAltDuplicated = false;
                         _altClonedLayers.Clear();
+                        _altOriginalLayers.Clear();
                         OnSelectionChanged();
                     }
                     else
@@ -7301,6 +7415,7 @@ namespace Kerf.UI
 
                     if (isAlt && !_hasAltDuplicated && (Math.Abs(dx) > 1 || Math.Abs(dy) > 1))
                     {
+                        _altOriginalLayers = new List<LayerNode>(_selectedLayers);
                         // Restore original layers to starting positions
                         foreach (var kvp in _dragInitialPositions)
                         {
@@ -7808,6 +7923,8 @@ namespace Kerf.UI
                 _dragInitialRotations.Clear();
                 _dragInitialGeometries.Clear();
                 _hasAltDuplicated = false;
+                _altClonedLayers.Clear();
+                _altOriginalLayers.Clear();
                 ClearAutoLayoutDropPreview(restoreLivePreview: !didAutoLayoutDrop);
             }
         }
@@ -9388,6 +9505,7 @@ namespace Kerf.UI
 
             var cmd = AutoLayoutEngine.CreateAutoLayoutCommand(page, _selectedLayers, () =>
             {
+                _sceneGraph.InvalidateAll();
                 _sceneGraph.Synchronize(page);
                 RefreshCanvas();
                 RefreshLayersList();
@@ -9400,10 +9518,12 @@ namespace Kerf.UI
                 var alCmd = cmd as AutoLayoutSelectionCommand;
                 if (alCmd != null && alCmd.CreatedFrame != null)
                 {
+                    InvalidateLayoutFrameVisuals(alCmd.CreatedFrame);
                     _selectedLayers.Clear();
                     _selectedLayers.Add(alCmd.CreatedFrame);
                     OnSelectionChanged();
                 }
+                _sceneGraph.InvalidateAll();
                 _sceneGraph.Synchronize(page);
                 RefreshCanvas();
                 RefreshLayersList();

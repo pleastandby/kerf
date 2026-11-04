@@ -980,3 +980,52 @@ esetTrigger (.20\text{s}$)
   - GpuRenderer.BuildGeometry validity for ComponentInstance.
   - Multi-state state machine transitions across Idle, Hover, Pressed, and Active.
   - NodeListener pointer event dispatch to state machine inputs.
+
+---
+
+## Milestone 25: Figma Auto Layout Parity, Smart Layout Detection, Full Bounding Enclosure & Alt-Drag Duplication Isolation
+
+### 1. Smart Layout Arrangement Detection (`DetectSmartLayoutMode`)
+- **Intelligent Flow, Row, and Column Inference:**
+  - Evaluates 2D grid/flow patterns for selections of 3 or more layers by clustering along X and Y axes within adaptive tolerance ($45\%$ of average dimensions). When distinct rows and columns are formed, automatically selects `AutoLayoutMode.Wrap`.
+  - Calculates axis-aligned projection overlaps ($	ext{Overlap}_X$ vs $	ext{Overlap}_Y$).
+    - When $X$ overlap dominates ($	ext{Overlap}_X > 1.5 	imes 	ext{Overlap}_Y$): arranges smartly into `AutoLayoutMode.Vertical` (Column).
+    - When $Y$ overlap dominates ($	ext{Overlap}_Y > 1.5 	imes 	ext{Overlap}_X$): arranges smartly into `AutoLayoutMode.Horizontal` (Row).
+    - Falls back to center-delta spread ($\Delta CX \ge \Delta CY$).
+- **Elimination of the "Weird Array-Like Shape":**
+  - Resolved the flaw where two wide horizontal Auto Layout cards stacked vertically (e.g. $400 	imes 100$) were forced into a horizontal row because `totalW >= totalH`, exploding the container into an $800	ext{px}$ wide array.
+  - Automatically wraps them into a `Vertical` container frame preserving the exact $400 	imes 220$ bounding envelope with measured gap ($20	ext{px}$) and zero padding drift.
+
+### 2. Alt+Drag Duplication Isolation
+- **Canvas Root Preservation:**
+  - Tracked original layers being duplicated via `_altOriginalLayers`.
+  - In `UpdateAutoLayoutDropPreview`, excluded `_altOriginalLayers` and their descendants from drop candidates.
+  - When Alt-duplicating top-level layers (`orig.ParentId == null`), guaranteed `target = null` so top-level frames stay independent canvas-level elements instead of dropping into themselves.
+  - In `CommitDuplicateDrop`, added guards ensuring that duplicates of top-level frames are never inserted into the frame being cloned.
+
+### 3. Redesigned 9-Point Alignment Pad & Simplified Distribution
+- **Figma-Style Unified Alignment Widget:**
+  - Replaced the 9 clunky buttons with a unified dark container (`Border` with background `#181c28`, border `#2e364a`, corner radius $6$) housing an interactive $3 	imes 3$ grid.
+  - Interactive cells with hover feedback, smooth cursor cues, and a prominent Figma-blue pill indicator (`#18a0fb`) denoting the active alignment anchor.
+  - Full bidirectional spatial mapping across all layout modes:
+    - **Horizontal / Wrap / Grid:** Col $ightarrow$ `JustifyContent` (Left = Start, Center = Center, Right = End); Row $ightarrow$ `AlignItems` (Top = Start, Center = Center, Bottom = End).
+    - **Vertical:** Row $ightarrow$ `JustifyContent` (Top = Start, Center = Center, Bottom = End); Col $ightarrow$ `AlignItems` (Left = Start, Center = Center, Right = End).
+- **Non-Redundant Distribution Controls:**
+  - Removed confusing redundant items ("Center", "End", "Between", "Around", "Evenly") that clashed with the 3x3 alignment pad.
+  - Simplified the distribution dropdown to Figma's two canonical options: **"Packed"** and **"Space between"**.
+  - Clicking any anchor on the 3x3 pad syncs cleanly with distribution and immediately triggers animated reflow.
+
+### 4. Scene Graph Cache Invalidation & Single-Pass Stabilization
+- In `RetainedSceneGraph.SyncLayerHierarchy`, marked reused `SceneVisualNode.IsDirty = true` upon synchronization, ensuring all moved, resized, or reparented layers re-render without requiring the user to touch or click them again.
+- In `AutoAlignSelectedLayers`, triggered `_sceneGraph.InvalidateAll()` and `InvalidateLayoutFrameVisuals` on newly created frames.
+
+### 5. Automated Verification Suite
+- **Total Tests:** 42
+- **Passing:** 42 (100%)
+- **Failing:** 0
+- Added `TestFigmaAutoLayoutParityAndAltDragDuplication`:
+  - Verified smart layout detection on vertically stacked wide cards ($400 	imes 100 ightarrow$ `Vertical`, envelope $400 	imes 220$).
+  - Verified smart layout detection on horizontally placed tall cards ($100 	imes 350 ightarrow$ `Horizontal`).
+  - Verified 2D grid/flow patterns detection as `Wrap`.
+  - Verified Alt-drag duplication leaves cloned frames as canvas-level roots (`ParentId == null`) and not children of the original frame.
+  - Verified 3x3 alignment pad spatial math for Start, Center, End, and SpaceBetween.

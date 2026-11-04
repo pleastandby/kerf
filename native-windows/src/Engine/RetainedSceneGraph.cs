@@ -266,6 +266,7 @@ namespace Kerf.Engine
             else
             {
                 vNode.ModelNode = layer;
+                vNode.IsDirty = true;
             }
 
             vNode.Parent = parent;
