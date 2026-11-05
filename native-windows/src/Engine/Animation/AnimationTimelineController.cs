@@ -8,7 +8,16 @@ namespace Kerf.Engine.Animation
         public double CurrentTime { get; private set; }
         public double Duration { get; set; }
         public double Fps { get; set; }
-        public double Speed { get; set; }
+        private double _speed = 1.0;
+        public double Speed
+        {
+            get { return _speed; }
+            set
+            {
+                if (double.IsNaN(value) || double.IsInfinity(value)) _speed = 1.0;
+                else _speed = Math.Max(0.01, Math.Min(100.0, value));
+            }
+        }
         public bool IsPlaying { get; private set; }
         public LoopMode LoopMode { get; set; }
         public bool UseStateMachine { get; set; }
@@ -31,6 +40,7 @@ namespace Kerf.Engine.Animation
         public StateMachineRuntime ActiveStateMachine { get; set; }
 
         public event EventHandler<Dictionary<uint, Dictionary<ushort, double>>> FrameUpdated;
+        public event EventHandler PlaybackStopped;
 
         private readonly Dictionary<uint, Dictionary<ushort, double>> _currentPose;
 
@@ -61,6 +71,8 @@ namespace Kerf.Engine.Animation
             IsPlaying = false;
             if (ActiveStateMachine != null) ActiveStateMachine.Reset();
             Seek(0.0);
+            var handler = PlaybackStopped;
+            if (handler != null) handler(this, EventArgs.Empty);
         }
 
         public void Seek(double time)
@@ -68,6 +80,12 @@ namespace Kerf.Engine.Animation
             if (double.IsNaN(time) || double.IsInfinity(time)) time = 0.0;
             CurrentTime = Math.Max(0.0, Math.Min(Duration, time));
             EvaluateAndNotify(0.0);
+        }
+
+        public void StepFrame(int deltaFrames)
+        {
+            double frameDuration = 1.0 / Math.Max(1.0, Fps);
+            Seek(CurrentTime + deltaFrames * frameDuration);
         }
 
         public void Step(double dt)

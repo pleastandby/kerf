@@ -65,6 +65,8 @@ namespace Kerf.Engine
                 visual.Transform = null;
             }
 
+            visual.Opacity = Math.Max(0.0, Math.Min(1.0, node.Opacity));
+
             using (var dc = visual.RenderOpen())
             {
                 if (!node.IsVisible || node.Opacity <= 0.0)

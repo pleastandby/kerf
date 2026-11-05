@@ -52,6 +52,11 @@ namespace Kerf.Engine.Animation
             {
                 layer.RenderTransform.ScaleX = val;
             }
+            else if (props.TryGetValue((ushort)PropKey.VisualWidth, out val))
+            {
+                layer.RenderTransform.VisualWidth = val;
+                layer.RenderTransform.ScaleX = val / Math.Max(0.001, layer.Width);
+            }
             else if (props.TryGetValue((ushort)PropKey.Width, out val))
             {
                 layer.RenderTransform.ScaleX = val / Math.Max(0.001, layer.Width);
@@ -61,12 +66,27 @@ namespace Kerf.Engine.Animation
             {
                 layer.RenderTransform.ScaleY = val;
             }
+            else if (props.TryGetValue((ushort)PropKey.VisualHeight, out val))
+            {
+                layer.RenderTransform.VisualHeight = val;
+                layer.RenderTransform.ScaleY = val / Math.Max(0.001, layer.Height);
+            }
             else if (props.TryGetValue((ushort)PropKey.Height, out val))
             {
                 layer.RenderTransform.ScaleY = val / Math.Max(0.001, layer.Height);
             }
 
-            // 3. Non-destructive Rotation
+            // 3. Non-destructive Anchor / Pivot (normalized [0, 1])
+            if (props.TryGetValue((ushort)PropKey.AnchorX, out val))
+            {
+                layer.RenderTransform.AnchorX = val;
+            }
+            if (props.TryGetValue((ushort)PropKey.AnchorY, out val))
+            {
+                layer.RenderTransform.AnchorY = val;
+            }
+
+            // 4. Non-destructive Rotation
             if (props.TryGetValue((ushort)PropKey.Rotation, out val))
             {
                 layer.RenderTransform.Rotation = val - layer.Rotation;

@@ -13791,6 +13791,12 @@ namespace Kerf.UI
                     RefreshCanvas();
                 }
             };
+            _timelineController.PlaybackStopped += (s, e) =>
+            {
+                RestoreAnimationRestPose();
+                _sceneGraph.InvalidateAll();
+                RefreshCanvas();
+            };
 
             if (Document.Animation == null) Document.Animation = new AnimationProjectData();
             if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();

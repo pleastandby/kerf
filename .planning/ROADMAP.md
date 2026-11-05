@@ -7,8 +7,7 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 ## Phases
 
 - [x] **Phase 1: Independent Transform Pipeline & Render Separation** - Introduce decoupled render transforms so animation never destructively mutates layer dimensions or Auto Layout bounds.
-- [ ] **Phase 2: Independent Transform Architecture and Animation Evaluator** - Eliminate destructive animation transformations and establish a reliable evaluation pipeline with hierarchical matrix composition, centralized clock, and renderer integration.
-- [ ] **Phase 3: Core Animation Data Model & JSON Persistence** - Implement GUID-backed stable track targets, typed property binders, keyframe schema, and lossless persistence.
+- [x] **Phase 2: Independent Transform Architecture and Animation Evaluator** - Eliminate destructive animation transformations and establish a reliable evaluation pipeline with hierarchical matrix composition, centralized clock, and renderer integration.
 - [ ] **Phase 3: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
 - [ ] **Phase 4: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [ ] **Phase 5: Decoupled Animation Runtime Playback & Transport** - Deterministic timeline playback with isolated evaluation buffers, zero design-state corruption, and instant rest pose recovery.
@@ -51,8 +50,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Implement hierarchical transform composition for Frames & Groups, independent 8-channel property model, and renderer integration.
-- [ ] 02-02: Build deterministic animation evaluator, centralized animation clock, and automated verification tests.
+- [x] 02-01: Implement hierarchical transform composition for Frames & Groups, independent 8-channel property model, and renderer integration.
+- [x] 02-02: Build deterministic animation evaluator, centralized animation clock, and automated verification tests.
 
 ---
 

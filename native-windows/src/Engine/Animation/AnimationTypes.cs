@@ -18,6 +18,10 @@ namespace Kerf.Engine.Animation
         ColorA = 11,
         ScaleX = 12,
         ScaleY = 13,
+        AnchorX = 14,
+        AnchorY = 15,
+        VisualWidth = 16,
+        VisualHeight = 17,
         Custom = 100
     }
 
@@ -210,6 +214,13 @@ namespace Kerf.Engine.Animation
                 }
                 nodeProps[tr.Prop] = val;
             }
+        }
+
+        public Dictionary<uint, Dictionary<ushort, double>> EvaluateAt(double t)
+        {
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            SampleToPose(t, pose);
+            return pose;
         }
     }
 

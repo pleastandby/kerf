@@ -95,3 +95,4 @@ Eliminate destructive animation transformations and establish a reliable, non-de
 - `StudioView.ApplyAnimationPose`: Drives per-frame visual update from clock pose output.
 - `TestRunner.cs`: Verifies all capabilities with zero regressions.
 </code_context>
+

@@ -447,13 +447,11 @@ namespace Kerf.Engine
             return null;
         }
 
-        public static Point CanvasToLocalPoint(LayerNode layer, Point canvasPt)
+        public static Point CanvasToLocalPoint(LayerNode layer, Point canvasPt, Page page = null)
         {
-            if (layer == null || layer.RenderTransform == null || layer.RenderTransform.IsIdentity)
-            {
-                return canvasPt;
-            }
-            var mat = layer.GetRenderTransformMatrix();
+            if (layer == null) return canvasPt;
+            var mat = (page != null) ? layer.GetWorldRenderTransformMatrix(page) : layer.GetRenderTransformMatrix();
+            if (mat.IsIdentity) return canvasPt;
             if (mat.HasInverse)
             {
                 mat.Invert();
@@ -462,13 +460,11 @@ namespace Kerf.Engine
             return canvasPt;
         }
 
-        public static Point LocalToCanvasPoint(LayerNode layer, Point localPt)
+        public static Point LocalToCanvasPoint(LayerNode layer, Point localPt, Page page = null)
         {
-            if (layer == null || layer.RenderTransform == null || layer.RenderTransform.IsIdentity)
-            {
-                return localPt;
-            }
-            var mat = layer.GetRenderTransformMatrix();
+            if (layer == null) return localPt;
+            var mat = (page != null) ? layer.GetWorldRenderTransformMatrix(page) : layer.GetRenderTransformMatrix();
+            if (mat.IsIdentity) return localPt;
             return mat.Transform(localPt);
         }
 

@@ -639,6 +639,21 @@ namespace Kerf.Model
         public double OriginX { get; set; }
         public double OriginY { get; set; }
 
+        public double AnchorX
+        {
+            get { return OriginX; }
+            set { OriginX = value; }
+        }
+
+        public double AnchorY
+        {
+            get { return OriginY; }
+            set { OriginY = value; }
+        }
+
+        public double VisualWidth { get; set; }
+        public double VisualHeight { get; set; }
+
         public RenderTransform()
         {
             Reset();
@@ -655,6 +670,8 @@ namespace Kerf.Model
             SkewY = 0.0;
             OriginX = 0.5;
             OriginY = 0.5;
+            VisualWidth = 0.0;
+            VisualHeight = 0.0;
         }
 
         public bool IsIdentity
@@ -667,7 +684,9 @@ namespace Kerf.Model
                        Math.Abs(ScaleY - 1.0) < 1e-6 &&
                        Math.Abs(Rotation) < 1e-6 &&
                        Math.Abs(SkewX) < 1e-6 &&
-                       Math.Abs(SkewY) < 1e-6;
+                       Math.Abs(SkewY) < 1e-6 &&
+                       Math.Abs(VisualWidth) < 1e-6 &&
+                       Math.Abs(VisualHeight) < 1e-6;
             }
         }
 
@@ -683,7 +702,9 @@ namespace Kerf.Model
                 SkewX = this.SkewX,
                 SkewY = this.SkewY,
                 OriginX = this.OriginX,
-                OriginY = this.OriginY
+                OriginY = this.OriginY,
+                VisualWidth = this.VisualWidth,
+                VisualHeight = this.VisualHeight
             };
         }
 
@@ -863,6 +884,33 @@ namespace Kerf.Model
                 return Matrix.Identity;
             }
             return RenderTransform.ToMatrix(X, Y, Width, Height);
+        }
+
+        public Matrix GetWorldRenderTransformMatrix(Page page = null)
+        {
+            var mat = GetRenderTransformMatrix();
+            if (string.IsNullOrEmpty(ParentId) || page == null)
+            {
+                return mat;
+            }
+
+            var visited = new HashSet<string>();
+            visited.Add(Id);
+
+            var curr = page.FindLayerById(ParentId);
+            while (curr != null && visited.Add(curr.Id))
+            {
+                var parentMat = curr.GetRenderTransformMatrix();
+                if (!parentMat.IsIdentity)
+                {
+                    // Child matrix transforms first, then ancestor matrix
+                    mat.Append(parentMat);
+                }
+                if (string.IsNullOrEmpty(curr.ParentId)) break;
+                curr = page.FindLayerById(curr.ParentId);
+            }
+
+            return mat;
         }
 
         public Matrix GetTransformMatrix()

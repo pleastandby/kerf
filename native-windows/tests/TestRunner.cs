@@ -78,6 +78,7 @@ namespace Kerf.Tests
             RunTest("Hierarchical Hit-Testing & Centralized Selection/Drag Pipeline", TestHierarchicalHitTestingAndCentralizedInteractionPipeline);
             RunTest("Hierarchical Object Insertion & Container Target Resolution", TestHierarchicalObjectInsertionAndContainerTargetResolution);
             RunTest("Non-Destructive Render Transforms & Auto Layout Preservation", TestNonDestructiveRenderTransformsAndAutoLayoutPreservation);
+            RunTest("Independent Transform Architecture & Deterministic Animation Evaluator", TestIndependentTransformArchitectureAndAnimationEvaluator);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -4064,6 +4065,221 @@ namespace Kerf.Tests
             Assert(frame.GetRenderTransformMatrix().IsIdentity, "Render transform matrix is identity after Reset");
             Assert(frame.Width == 240 && frame.Height == 120, "Frame bounds 100% restored with zero drift");
             Assert(frame.X == 100 && frame.Y == 100, "Frame position 100% restored with zero drift");
+        }
+
+        private static void TestIndependentTransformArchitectureAndAnimationEvaluator()
+        {
+            var page = new Page();
+
+            // 1. Build nested scene hierarchy: Canvas -> Parent Frame (Auto Layout) -> Child Group -> Leaf Rect & Path
+            var frame = new LayerNode
+            {
+                Id = "frame-root",
+                Name = "Parent Frame",
+                Type = ElementType.Frame,
+                X = 100,
+                Y = 100,
+                Width = 400,
+                Height = 300,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Vertical,
+                    Gap = 10,
+                    PaddingTop = 20,
+                    PaddingBottom = 20,
+                    PaddingLeft = 20,
+                    PaddingRight = 20
+                },
+                Children = new List<LayerNode>()
+            };
+            page.Layers.Add(frame);
+
+            var group = new LayerNode
+            {
+                Id = "group-mid",
+                Name = "Nested Group",
+                Type = ElementType.Group,
+                ParentId = frame.Id,
+                X = 120,
+                Y = 120,
+                Width = 360,
+                Height = 100,
+                Children = new List<LayerNode>()
+            };
+            frame.Children.Add(group);
+
+            var childRect = new LayerNode
+            {
+                Id = "child-rect",
+                Name = "ActionButton",
+                Type = ElementType.Rectangle,
+                ParentId = group.Id,
+                X = 120,
+                Y = 120,
+                Width = 150,
+                Height = 60
+            };
+            group.Children.Add(childRect);
+
+            var childPath = new LayerNode
+            {
+                Id = "child-path",
+                Name = "IconPath",
+                Type = ElementType.Path,
+                ParentId = group.Id,
+                X = 290,
+                Y = 120,
+                Width = 60,
+                Height = 60,
+                Geometry = new VectorGeometry()
+            };
+            childPath.Geometry.Nodes.Add(new BezierNode(0, 0));
+            childPath.Geometry.Nodes.Add(new BezierNode(60, 60));
+            group.Children.Add(childPath);
+
+            // 2. Build 8-Channel Animation Clip
+            uint frameId = PropertyBinder.GetNumericNodeId(frame.Id);
+            uint rectId = PropertyBinder.GetNumericNodeId(childRect.Id);
+
+            var clip = new Clip(200, "MultiChannelTestClip", 2.0, 60.0, LoopMode.Loop);
+
+            // Frame tracks: ScaleX, ScaleY, Rotation, AnchorX, AnchorY, Opacity
+            var trackScaleX = new Track(frameId, (ushort)PropKey.ScaleX);
+            trackScaleX.AddKeyframe(Keyframe.Linear(0.0, 1.0));
+            trackScaleX.AddKeyframe(Keyframe.Linear(1.0, 2.5));
+            clip.AddTrack(trackScaleX);
+
+            var trackScaleY = new Track(frameId, (ushort)PropKey.ScaleY);
+            trackScaleY.AddKeyframe(Keyframe.Linear(0.0, 1.0));
+            trackScaleY.AddKeyframe(Keyframe.Linear(1.0, 2.0));
+            clip.AddTrack(trackScaleY);
+
+            var trackRot = new Track(frameId, (ushort)PropKey.Rotation);
+            trackRot.AddKeyframe(Keyframe.Linear(0.0, 0.0));
+            trackRot.AddKeyframe(Keyframe.Linear(1.0, 45.0));
+            clip.AddTrack(trackRot);
+
+            var trackAnchorX = new Track(frameId, (ushort)PropKey.AnchorX);
+            trackAnchorX.AddKeyframe(Keyframe.Linear(0.0, 0.5));
+            trackAnchorX.AddKeyframe(Keyframe.Linear(1.0, 0.0)); // Shift pivot to left
+            clip.AddTrack(trackAnchorX);
+
+            var trackAnchorY = new Track(frameId, (ushort)PropKey.AnchorY);
+            trackAnchorY.AddKeyframe(Keyframe.Linear(0.0, 0.5));
+            trackAnchorY.AddKeyframe(Keyframe.Linear(1.0, 0.0)); // Shift pivot to top
+            clip.AddTrack(trackAnchorY);
+
+            var trackOpacity = new Track(frameId, (ushort)PropKey.Opacity);
+            trackOpacity.AddKeyframe(Keyframe.Linear(0.0, 1.0));
+            trackOpacity.AddKeyframe(Keyframe.Linear(1.0, 0.75));
+            clip.AddTrack(trackOpacity);
+
+            // ChildRect tracks: TranslationX, VisualWidth, Opacity
+            var trackRectX = new Track(rectId, (ushort)PropKey.X);
+            trackRectX.AddKeyframe(Keyframe.Linear(0.0, 120.0));
+            trackRectX.AddKeyframe(Keyframe.Linear(1.0, 180.0)); // Delta = +60
+            clip.AddTrack(trackRectX);
+
+            var trackRectW = new Track(rectId, (ushort)PropKey.VisualWidth);
+            trackRectW.AddKeyframe(Keyframe.Linear(0.0, 150.0));
+            trackRectW.AddKeyframe(Keyframe.Linear(1.0, 300.0)); // 2.0x scale
+            clip.AddTrack(trackRectW);
+
+            var trackRectOp = new Track(rectId, (ushort)PropKey.Opacity);
+            trackRectOp.AddKeyframe(Keyframe.Linear(0.0, 1.0));
+            trackRectOp.AddKeyframe(Keyframe.Linear(1.0, 0.5));
+            clip.AddTrack(trackRectOp);
+
+            // 3. Test Deterministic Evaluator at arbitrary timestamps without side effects
+            var pose0 = clip.EvaluateAt(0.0);
+            Assert(Math.Abs(pose0[frameId][(ushort)PropKey.ScaleX] - 1.0) < 1e-4, "Evaluator at t=0: Frame ScaleX = 1.0");
+            Assert(Math.Abs(pose0[frameId][(ushort)PropKey.Rotation] - 0.0) < 1e-4, "Evaluator at t=0: Frame Rotation = 0");
+            Assert(Math.Abs(pose0[frameId][(ushort)PropKey.AnchorX] - 0.5) < 1e-4, "Evaluator at t=0: Frame AnchorX = 0.5");
+
+            var pose1 = clip.EvaluateAt(1.0);
+            Assert(Math.Abs(pose1[frameId][(ushort)PropKey.ScaleX] - 2.5) < 1e-4, "Evaluator at t=1: Frame ScaleX = 2.5");
+            Assert(Math.Abs(pose1[frameId][(ushort)PropKey.Rotation] - 45.0) < 1e-4, "Evaluator at t=1: Frame Rotation = 45");
+            Assert(Math.Abs(pose1[frameId][(ushort)PropKey.AnchorX] - 0.0) < 1e-4, "Evaluator at t=1: Frame AnchorX = 0.0");
+            Assert(Math.Abs(pose1[rectId][(ushort)PropKey.X] - 180.0) < 1e-4, "Evaluator at t=1: ChildRect X = 180");
+            Assert(Math.Abs(pose1[rectId][(ushort)PropKey.VisualWidth] - 300.0) < 1e-4, "Evaluator at t=1: ChildRect VisualWidth = 300");
+
+            // 4. Apply pose1 to layers and verify model immutability
+            PropertyBinder.ApplyPoseToLayer(frame, frameId, pose1);
+            PropertyBinder.ApplyPoseToLayer(childRect, rectId, pose1);
+
+            Assert(frame.Width == 400 && frame.Height == 300, "Frame model dimensions 100% immutable (400x300)");
+            Assert(frame.X == 100 && frame.Y == 100, "Frame model coordinates 100% immutable (100, 100)");
+            Assert(childRect.Width == 150 && childRect.Height == 60, "Child rect model dimensions 100% immutable (150x60)");
+            Assert(childRect.X == 120 && childRect.Y == 120, "Child rect model coordinates 100% immutable (120, 120)");
+            Assert(childPath.Geometry.Nodes[0].Anchor.X == 0.0, "Child path vector geometry 100% untouched by parent transform");
+
+            // 5. Verify RenderTransform captured all independent properties
+            Assert(Math.Abs(frame.RenderTransform.ScaleX - 2.5) < 1e-4, "Frame RenderTransform ScaleX is 2.5");
+            Assert(Math.Abs(frame.RenderTransform.ScaleY - 2.0) < 1e-4, "Frame RenderTransform ScaleY is 2.0");
+            Assert(Math.Abs(frame.RenderTransform.Rotation - 45.0) < 1e-4, "Frame RenderTransform Rotation is 45 deg");
+            Assert(Math.Abs(frame.RenderTransform.AnchorX - 0.0) < 1e-4, "Frame RenderTransform AnchorX shifted to 0.0 (top-left pivot)");
+            Assert(Math.Abs(frame.Opacity - 0.75) < 1e-4, "Frame Opacity is 0.75");
+            Assert(Math.Abs(childRect.RenderTransform.TranslationX - 60.0) < 1e-4, "ChildRect TranslationX is 60.0");
+            Assert(Math.Abs(childRect.RenderTransform.ScaleX - 2.0) < 1e-4, "ChildRect ScaleX is 2.0 via VisualWidth 300");
+            Assert(Math.Abs(childRect.Opacity - 0.5) < 1e-4, "ChildRect Opacity is 0.5");
+
+            // 6. Verify Hierarchical Matrix Composition
+            var frameLocalMat = frame.GetRenderTransformMatrix();
+            var rectLocalMat = childRect.GetRenderTransformMatrix();
+            var rectWorldMat = childRect.GetWorldRenderTransformMatrix(page);
+
+            Assert(!frameLocalMat.IsIdentity, "Frame local matrix is non-identity");
+            Assert(!rectLocalMat.IsIdentity, "ChildRect local matrix is non-identity");
+            Assert(!rectWorldMat.IsIdentity, "ChildRect world matrix is non-identity");
+
+            // World matrix must match childLocal.Append(frameLocal)
+            var expectedWorldMat = rectLocalMat;
+            expectedWorldMat.Append(frameLocalMat);
+            Assert(Math.Abs(rectWorldMat.M11 - expectedWorldMat.M11) < 1e-4 &&
+                   Math.Abs(rectWorldMat.M12 - expectedWorldMat.M12) < 1e-4 &&
+                   Math.Abs(rectWorldMat.OffsetX - expectedWorldMat.OffsetX) < 1e-4 &&
+                   Math.Abs(rectWorldMat.OffsetY - expectedWorldMat.OffsetY) < 1e-4,
+                   "Child world matrix matches composed ancestor matrix multiplication");
+
+            // 7. Verify Inverted Hit-Testing with composed world matrix
+            Point rectCanvasPoint = new Point(120, 120);
+            Point transformedPoint = rectWorldMat.Transform(rectCanvasPoint);
+            Point inverseLocal = RetainedSceneGraph.CanvasToLocalPoint(childRect, transformedPoint, page);
+            Assert(Math.Abs(inverseLocal.X - rectCanvasPoint.X) < 1e-2 && Math.Abs(inverseLocal.Y - rectCanvasPoint.Y) < 1e-2,
+                "CanvasToLocalPoint correctly maps canvas point to local layer space via inverted world matrix");
+
+            // 8. Test Centralized Animation Clock (Playback, Step, Speed, Loop, Frame Nav)
+            var clock = new AnimationTimelineController(2.0, 60.0);
+            clock.ActiveClip = clip;
+            Assert(clock.Duration == 2.0, "Clock Duration equals active clip duration (2.0s)");
+
+            // Play / Step
+            clock.Play();
+            Assert(clock.IsPlaying, "Clock IsPlaying is true");
+            clock.Step(0.25);
+            Assert(Math.Abs(clock.CurrentTime - 0.25) < 1e-4, "Clock stepped by 0.25s");
+
+            // Variable Speed
+            clock.Speed = 2.0;
+            clock.Step(0.25); // At 2.0x, advances by 0.5s -> CurrentTime = 0.75s
+            Assert(Math.Abs(clock.CurrentTime - 0.75) < 1e-4, "Clock stepped with 2.0x speed multiplier to 0.75s");
+
+            // StepFrame navigation
+            clock.StepFrame(15); // 15 frames at 60fps = +0.25s -> CurrentTime = 1.0s
+            Assert(Math.Abs(clock.CurrentTime - 1.0) < 1e-4, "StepFrame(15) navigated to 1.0s");
+
+            clock.Pause();
+            Assert(!clock.IsPlaying, "Clock IsPlaying is false after Pause");
+
+            // Stop and instant rest pose recovery
+            clock.Stop();
+            Assert(!clock.IsPlaying && clock.CurrentTime == 0.0, "Clock Stopped: time reset to 0.0");
+            frame.RenderTransform.Reset();
+            childRect.RenderTransform.Reset();
+            Assert(frame.RenderTransform.IsIdentity, "Frame RenderTransform identity after Stop");
+            Assert(childRect.RenderTransform.IsIdentity, "ChildRect RenderTransform identity after Stop");
+            Assert(frame.Width == 400 && frame.Height == 300, "Frame rest bounds 100% intact with zero drift");
+            Assert(childRect.Width == 150 && childRect.Height == 60, "ChildRect rest bounds 100% intact with zero drift");
         }
     }
 }
