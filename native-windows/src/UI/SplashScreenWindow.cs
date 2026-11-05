@@ -7,27 +7,32 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
-using System.Windows.Shapes;
 using System.Windows.Threading;
 using Kerf.Engine;
-using Kerf.IO;
+using IOPath = System.IO.Path;
 
 namespace Kerf.UI
 {
     /// <summary>
-    /// Premium Adobe After Effects-inspired cinematic splash & loading screen.
-    /// Displays the Kerf folded-ribbon brand mark, hardware acceleration telemetry,
-    /// dynamic subsystem loading sequence, and smooth handoff to MainWindow.
+    /// Kerf Studio official launch & loading modal.
+    /// Perfectly matches the official brand loading mockup (rebrand/Loading screen Mockup.png):
+    /// - Outer rounded card (CornerRadius 22, #17181F background, deep ambient shadow)
+    /// - Inner image card bordered in glowing #46EFB1 (Electric Mint)
+    /// - Background cinematic artwork (Kerf-loading-image.png)
+    /// - Glowing #46EFB1 Kerf Icon mark at top right
+    /// - "Kerf Studio v3.0" with "IMAGINE / DESIGN / CREATE" subtitle at bottom left
+    /// - "Loading Workspace ....." status label
+    /// - Clean Electric Mint progress bar with percentage readout and copyright footer.
     /// </summary>
     public class SplashScreenWindow : Window
     {
         private readonly string _initialLaunchFile;
         private DispatcherTimer _timer;
         private double _progress = 0.0;
+        private Border _trackBorder;
         private Border _progressBarFill;
         private TextBlock _statusText;
         private TextBlock _percentText;
-        private TextBlock _simdText;
         private bool _isClosing = false;
         private MainWindow _preparedMainWindow;
 
@@ -43,8 +48,8 @@ namespace Kerf.UI
         private void InitializeSplashWindow()
         {
             Title = "Kerf Studio - Starting";
-            Width = 740;
-            Height = 440;
+            Width = 840;
+            Height = 570;
             WindowStyle = WindowStyle.None;
             AllowsTransparency = true;
             Background = Brushes.Transparent;
@@ -53,10 +58,42 @@ namespace Kerf.UI
             ShowInTaskbar = true;
             Icon = KerfLogo.GetLogoImageSource();
 
-            // Allow clicking anywhere to skip immediately into the workspace
+            // Allow clicking or pressing any key to skip immediately into the workspace
             MouseLeftButtonDown += (s, e) => SkipAndLaunch();
             KeyDown += (s, e) => SkipAndLaunch();
             Cursor = Cursors.AppStarting;
+        }
+
+        private ImageSource LoadBackgroundImage()
+        {
+            string[] candidatePaths = new string[]
+            {
+                IOPath.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "Kerf-loading-image.png"),
+                IOPath.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "assets", "Kerf-loading-image.png"),
+                IOPath.Combine(AppDomain.CurrentDomain.BaseDirectory, "Kerf-loading-image.png"),
+                IOPath.Combine(Directory.GetCurrentDirectory(), "assets", "Kerf-loading-image.png"),
+                IOPath.Combine(Directory.GetCurrentDirectory(), "rebrand", "Kerf-loading-image.png"),
+                IOPath.Combine(Directory.GetCurrentDirectory(), "native-windows", "assets", "Kerf-loading-image.png")
+            };
+
+            foreach (var path in candidatePaths)
+            {
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        var bmp = new BitmapImage();
+                        bmp.BeginInit();
+                        bmp.CacheOption = BitmapCacheOption.OnLoad;
+                        bmp.UriSource = new Uri(IOPath.GetFullPath(path));
+                        bmp.EndInit();
+                        bmp.Freeze();
+                        return bmp;
+                    }
+                }
+                catch { }
+            }
+            return null;
         }
 
         private void BuildUi()
@@ -66,299 +103,199 @@ namespace Kerf.UI
                 Margin = new Thickness(16)
             };
 
-            // Outer backdrop container with cinematic drop shadow
+            // Outer backdrop card with smooth drop shadow
             var outerCard = new Border
             {
-                CornerRadius = new CornerRadius(14),
+                CornerRadius = new CornerRadius(22),
                 BorderThickness = new Thickness(1.2),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(36, 42, 60)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(30, 33, 44)),
+                Background = new SolidColorBrush(Color.FromRgb(23, 24, 31)), // #17181F
                 Effect = new DropShadowEffect
                 {
                     Color = Colors.Black,
-                    BlurRadius = 32,
-                    ShadowDepth = 6,
-                    Opacity = 0.85
-                }
+                    BlurRadius = 36,
+                    ShadowDepth = 8,
+                    Opacity = 0.90
+                },
+                Padding = new Thickness(14)
             };
 
-            // Dark obsidian gradient background
-            var cardBg = new LinearGradientBrush
-            {
-                StartPoint = new Point(0, 0),
-                EndPoint = new Point(1, 1)
-            };
-            cardBg.GradientStops.Add(new GradientStop(Color.FromRgb(11, 13, 20), 0.0));
-            cardBg.GradientStops.Add(new GradientStop(Color.FromRgb(16, 19, 29), 0.5));
-            cardBg.GradientStops.Add(new GradientStop(Color.FromRgb(13, 15, 23), 1.0));
-            outerCard.Background = cardBg;
-
-            var contentGrid = new Grid();
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(280) }); // Left hero column
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });   // Divider
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Right loading column
+            var mainLayout = new Grid();
+            mainLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Top Artwork Card
+            mainLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(108) });                  // Bottom Loading Section
 
             // ==========================================
-            // LEFT COLUMN: Kerf Folded-Ribbon Hero Logo
+            // TOP SECTION: INNER ARTWORK CARD
             // ==========================================
-            var leftHeroPanel = new Grid();
-
-            // Ambient radial bloom behind the logo
-            var radialAura = new Ellipse
+            var artworkCard = new Border
             {
-                Width = 240,
-                Height = 240,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 0, 30)
-            };
-            var auraBrush = new RadialGradientBrush();
-            auraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(50, 56, 189, 248), 0.0));
-            auraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(25, 108, 84, 182), 0.5));
-            auraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0, 0, 0), 1.0));
-            radialAura.Fill = auraBrush;
-            leftHeroPanel.Children.Add(radialAura);
-
-            // Vector folded-ribbon mark
-            var logoStack = new StackPanel
-            {
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                CornerRadius = new CornerRadius(18),
+                BorderThickness = new Thickness(1.2),
+                BorderBrush = KerfBrand.MintBrush, // Glowing Electric Mint border matching mockup
+                ClipToBounds = true,
+                Background = new SolidColorBrush(Color.FromRgb(15, 17, 24))
             };
 
-            var logoElement = KerfLogo.CreateLogoElement(165, withGlow: true);
-            logoStack.Children.Add(logoElement);
+            var artworkGrid = new Grid();
 
-            leftHeroPanel.Children.Add(logoStack);
-            Grid.SetColumn(leftHeroPanel, 0);
-            contentGrid.Children.Add(leftHeroPanel);
-
-            // ==========================================
-            // VERTICAL DIVIDER
-            // ==========================================
-            var divider = new Rectangle
+            // Load and display Kerf-loading-image.png
+            var bgSource = LoadBackgroundImage();
+            if (bgSource != null)
             {
-                Width = 1,
-                Margin = new Thickness(0, 24, 0, 24)
+                var bgImage = new Image
+                {
+                    Source = bgSource,
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                artworkGrid.Children.Add(bgImage);
+            }
+            else
+            {
+                // Fallback rich brand gradient
+                var fallbackBrush = new LinearGradientBrush
+                {
+                    StartPoint = new Point(0, 0),
+                    EndPoint = new Point(1, 1)
+                };
+                fallbackBrush.GradientStops.Add(new GradientStop(Color.FromRgb(30, 8, 46), 0.0));
+                fallbackBrush.GradientStops.Add(new GradientStop(Color.FromRgb(12, 66, 71), 0.5));
+                fallbackBrush.GradientStops.Add(new GradientStop(Color.FromRgb(10, 113, 123), 1.0));
+                artworkGrid.Background = fallbackBrush;
+            }
+
+            // Top-Right: Official Brand Icon Mark in glowing Electric Mint
+            var iconMark = KerfLogo.CreateIconElement(34, 42, fillBrush: KerfBrand.MintBrush, withGlow: true);
+            iconMark.HorizontalAlignment = HorizontalAlignment.Right;
+            iconMark.VerticalAlignment = VerticalAlignment.Top;
+            iconMark.Margin = new Thickness(0, 24, 28, 0);
+            artworkGrid.Children.Add(iconMark);
+
+            // Bottom-Left: "Kerf Studio v3.0" and subtitle
+            var titleStack = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(32, 0, 0, 28)
             };
-            var divBrush = new LinearGradientBrush
-            {
-                StartPoint = new Point(0, 0),
-                EndPoint = new Point(0, 1)
-            };
-            divBrush.GradientStops.Add(new GradientStop(Colors.Transparent, 0.0));
-            divBrush.GradientStops.Add(new GradientStop(Color.FromRgb(42, 50, 75), 0.5));
-            divBrush.GradientStops.Add(new GradientStop(Colors.Transparent, 1.0));
-            divider.Fill = divBrush;
-            Grid.SetColumn(divider, 1);
-            contentGrid.Children.Add(divider);
 
-            // ==========================================
-            // RIGHT COLUMN: Artwork & Loading
-            // ==========================================
-            var rightCol = new Grid
+            var titleText = new TextBlock
             {
-                Margin = new Thickness(26, 22, 26, 20)
-            };
-            rightCol.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Header / Titles
-            rightCol.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Image Artwork
-            rightCol.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Progress & Status
-            rightCol.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Footer
-
-            // 1. Header (Brand, Version, Subtitle)
-            var headerStack = new StackPanel();
-
-            var titleRow = new StackPanel { Orientation = Orientation.Horizontal };
-            var titleKerf = new TextBlock
-            {
-                Text = "KERF",
+                Text = "Kerf Studio v3.0",
                 FontSize = 32,
                 FontWeight = FontWeights.Bold,
                 Foreground = Brushes.White,
-                VerticalAlignment = VerticalAlignment.Center
+                Margin = new Thickness(0, 0, 0, 6),
+                Effect = new DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 8,
+                    ShadowDepth = 2,
+                    Opacity = 0.6
+                }
             };
-            var titleStudio = new TextBlock
-            {
-                Text = " STUDIO",
-                FontSize = 21,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)),
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(4, 4, 0, 0)
-            };
-            var versionBadge = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(28, 35, 52)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(56, 189, 248)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(6, 2, 6, 2),
-                Margin = new Thickness(12, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            versionBadge.Child = new TextBlock
-            {
-                Text = "v3.0 PRO",
-                FontSize = 10,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(125, 211, 252))
-            };
-
-            titleRow.Children.Add(titleKerf);
-            titleRow.Children.Add(titleStudio);
-            titleRow.Children.Add(versionBadge);
-            headerStack.Children.Add(titleRow);
+            titleStack.Children.Add(titleText);
 
             var subtitleText = new TextBlock
             {
-                Text = "Vector Graphics & Procedural Design Suite",
-                FontSize = 11.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
-                Margin = new Thickness(0, 2, 0, 12)
+                Text = "IMAGINE   /   DESIGN   /   CREATE",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(203, 213, 225)), // #CBD5E1
+                Margin = new Thickness(2, 0, 0, 0),
+                Effect = new DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 6,
+                    ShadowDepth = 1,
+                    Opacity = 0.5
+                }
             };
-            headerStack.Children.Add(subtitleText);
+            titleStack.Children.Add(subtitleText);
 
-            Grid.SetRow(headerStack, 0);
-            rightCol.Children.Add(headerStack);
+            artworkGrid.Children.Add(titleStack);
+            artworkCard.Child = artworkGrid;
 
-            // 2. Artwork image (Loading screen.png)
-            var imageContainer = new Border
+            Grid.SetRow(artworkCard, 0);
+            mainLayout.Children.Add(artworkCard);
+
+            // ==========================================
+            // BOTTOM SECTION: LOADING WORKSPACE & PROGRESS
+            // ==========================================
+            var bottomPanel = new StackPanel
             {
-                Background = new SolidColorBrush(Color.FromRgb(18, 22, 34)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 50, 72)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(10),
-                ClipToBounds = true,
-                Margin = new Thickness(0, 0, 0, 14),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch
-            };
-
-            var artworkImage = new Image
-            {
-                Stretch = Stretch.UniformToFill,
-                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(22, 14, 22, 6),
                 VerticalAlignment = VerticalAlignment.Center
             };
 
-            string[] candidatePaths = new string[]
-            {
-                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "Loading screen.png"),
-                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "assets", "Loading screen.png"),
-                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "assets", "Loading screen.png"),
-                "assets/Loading screen.png"
-            };
-
-            foreach (var p in candidatePaths)
-            {
-                if (System.IO.File.Exists(p))
-                {
-                    try
-                    {
-                        var bmp = new BitmapImage();
-                        bmp.BeginInit();
-                        bmp.CacheOption = BitmapCacheOption.OnLoad;
-                        bmp.UriSource = new Uri(System.IO.Path.GetFullPath(p), UriKind.Absolute);
-                        bmp.EndInit();
-                        bmp.Freeze();
-                        artworkImage.Source = bmp;
-                        break;
-                    }
-                    catch { }
-                }
-            }
-
-            imageContainer.Child = artworkImage;
-            Grid.SetRow(imageContainer, 1);
-            rightCol.Children.Add(imageContainer);
-
-            // 3. Progress Bar & Real-Time Status Text
-            var progressStack = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
-
-            var statusRow = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 6) };
             _statusText = new TextBlock
             {
-                Text = "Starting Kerf Studio...",
-                FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(186, 200, 222))
+                Text = "Loading Workspace .....",
+                FontSize = 16,
+                FontWeight = FontWeights.Regular,
+                Foreground = new SolidColorBrush(Color.FromRgb(162, 175, 190)),
+                Margin = new Thickness(0, 0, 0, 10)
             };
-            DockPanel.SetDock(_statusText, Dock.Left);
-            statusRow.Children.Add(_statusText);
+            bottomPanel.Children.Add(_statusText);
 
-            _percentText = new TextBlock
-            {
-                Text = "0%",
-                FontSize = 11,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248))
-            };
-            DockPanel.SetDock(_percentText, Dock.Right);
-            statusRow.Children.Add(_percentText);
-            progressStack.Children.Add(statusRow);
+            // Progress bar and percentage row
+            var progressRow = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
 
-            // Progress bar track
-            var trackBorder = new Border
+            _trackBorder = new Border
             {
                 Height = 6,
                 CornerRadius = new CornerRadius(3),
-                Background = new SolidColorBrush(Color.FromRgb(22, 27, 40)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
-                BorderThickness = new Thickness(0.8),
-                ClipToBounds = true
+                Background = new SolidColorBrush(Color.FromRgb(36, 40, 52)), // Dark track
+                ClipToBounds = true,
+                VerticalAlignment = VerticalAlignment.Center
             };
 
-            var trackGrid = new Grid();
+            var trackCanvas = new Grid();
             _progressBarFill = new Border
             {
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Width = 0,
-                CornerRadius = new CornerRadius(3)
+                Height = 6,
+                CornerRadius = new CornerRadius(3),
+                Background = KerfBrand.MintBrush // Solid glowing Electric Mint fill (#46EFB1)
             };
+            trackCanvas.Children.Add(_progressBarFill);
+            _trackBorder.Child = trackCanvas;
 
-            // Glowing rainbow/accent gradient for the progress bar
-            var barGrad = new LinearGradientBrush
+            Grid.SetColumn(_trackBorder, 0);
+            progressRow.Children.Add(_trackBorder);
+
+            _percentText = new TextBlock
             {
-                StartPoint = new Point(0, 0),
-                EndPoint = new Point(1, 0)
+                Text = "0%",
+                FontSize = 14,
+                FontWeight = FontWeights.Medium,
+                Foreground = new SolidColorBrush(Color.FromRgb(156, 163, 175)),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center
             };
-            barGrad.GradientStops.Add(new GradientStop(Color.FromRgb(56, 189, 248), 0.0));
-            barGrad.GradientStops.Add(new GradientStop(Color.FromRgb(99, 102, 241), 0.5));
-            barGrad.GradientStops.Add(new GradientStop(Color.FromRgb(236, 72, 153), 1.0));
-            _progressBarFill.Background = barGrad;
+            Grid.SetColumn(_percentText, 1);
+            progressRow.Children.Add(_percentText);
 
-            trackGrid.Children.Add(_progressBarFill);
-            trackBorder.Child = trackGrid;
-            progressStack.Children.Add(trackBorder);
+            bottomPanel.Children.Add(progressRow);
 
-            Grid.SetRow(progressStack, 2);
-            rightCol.Children.Add(progressStack);
-
-            // 4. Footer
-            var footerDock = new DockPanel { LastChildFill = false };
-            _simdText = new TextBlock
+            // Copyright footer
+            var copyrightText = new TextBlock
             {
-                Text = "Kerf Studio © 2026. All rights reserved.",
-                FontSize = 9.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(100, 115, 145))
+                Text = "Kerf Studio © All rights reserved",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(85, 95, 115)),
+                Margin = new Thickness(0, 0, 0, 0)
             };
-            DockPanel.SetDock(_simdText, Dock.Left);
-            footerDock.Children.Add(_simdText);
+            bottomPanel.Children.Add(copyrightText);
 
-            var hintText = new TextBlock
-            {
-                Text = "Click anywhere to continue",
-                FontSize = 9.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(115, 130, 160))
-            };
-            DockPanel.SetDock(hintText, Dock.Right);
-            footerDock.Children.Add(hintText);
+            Grid.SetRow(bottomPanel, 1);
+            mainLayout.Children.Add(bottomPanel);
 
-            Grid.SetRow(footerDock, 3);
-            rightCol.Children.Add(footerDock);
-
-            Grid.SetColumn(rightCol, 2);
-            contentGrid.Children.Add(rightCol);
-
-            outerCard.Child = contentGrid;
+            outerCard.Child = mainLayout;
             rootGrid.Children.Add(outerCard);
             Content = rootGrid;
         }
@@ -367,12 +304,12 @@ namespace Kerf.UI
         {
             _timer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromMilliseconds(28)
+                Interval = TimeSpan.FromMilliseconds(24)
             };
             _timer.Tick += OnLoadingTick;
             _timer.Start();
 
-            // Asynchronously prepare the MainWindow during the splash
+            // Pre-initialize MainWindow in background
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
                 try
@@ -390,37 +327,28 @@ namespace Kerf.UI
         {
             _progress += 1.8;
 
-            double maxTrackW = 390.0;
-            double currentW = Math.Min(maxTrackW, maxTrackW * (_progress / 100.0));
+            double trackW = _trackBorder != null && _trackBorder.ActualWidth > 0 ? _trackBorder.ActualWidth : 680.0;
+            double currentW = Math.Min(trackW, trackW * (_progress / 100.0));
             _progressBarFill.Width = currentW;
 
             int intPct = Math.Min(100, (int)_progress);
             _percentText.Text = string.Format("{0}%", intPct);
 
-            // Update real-time status messages according to progressive milestone
-            if (_progress < 20)
+            if (_progress < 25)
             {
-                _statusText.Text = "Starting Kerf Studio...";
+                _statusText.Text = "Loading Workspace .....";
             }
-            else if (_progress < 40)
+            else if (_progress < 55)
             {
-                _statusText.Text = "Loading workspace & tools...";
+                _statusText.Text = "Initializing Direct3D Scene Graph .....";
             }
-            else if (_progress < 60)
+            else if (_progress < 85)
             {
-                _statusText.Text = "Preparing infinite vector canvas...";
-            }
-            else if (_progress < 80)
-            {
-                _statusText.Text = "Loading design presets & fonts...";
-            }
-            else if (_progress < 95)
-            {
-                _statusText.Text = "Finalizing studio environment...";
+                _statusText.Text = "Loading Vector Animation Engine .....";
             }
             else
             {
-                _statusText.Text = "Ready";
+                _statusText.Text = "Launching Kerf Studio .....";
             }
 
             if (_progress >= 100.0)

@@ -36,7 +36,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo [*] Compiling Installer: KerfInstaller.cs -^> %OUT_SETUP% ...
-"%CSC%" /target:winexe /platform:x64 /optimize+ /win32icon:kerf.ico /out:"%OUT_SETUP%" /lib:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF /r:System.dll,System.Core.dll,System.Xaml.dll,PresentationCore.dll,PresentationFramework.dll,WindowsBase.dll KerfInstaller.cs src\UI\KerfLogo.cs
+"%CSC%" /target:winexe /platform:x64 /optimize+ /win32icon:kerf.ico /out:"%OUT_SETUP%" /lib:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF /r:System.dll,System.Core.dll,System.Xaml.dll,PresentationCore.dll,PresentationFramework.dll,WindowsBase.dll KerfInstaller.cs src\UI\KerfLogo.cs src\UI\KerfBrand.cs
 
 if %ERRORLEVEL% NEQ 0 (
     echo [FAILED] Compilation of KerfStudioSetup.exe failed!

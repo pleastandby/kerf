@@ -33,7 +33,7 @@ namespace Kerf.Installer
             Width = 560;
             Height = 440;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            Background = new SolidColorBrush(Color.FromRgb(0x12, 0x12, 0x14));
+            Background = new SolidColorBrush(Color.FromRgb(0x1E, 0x08, 0x2E));
             Foreground = Brushes.White;
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
@@ -237,9 +237,9 @@ namespace Kerf.Installer
             btnInstall = new Button
             {
                 Content = "Install Kerf Studio",
-                Background = new SolidColorBrush(Color.FromRgb(0x0D, 0x99, 0xFF)),
-                Foreground = Brushes.White,
-                FontWeight = FontWeights.SemiBold,
+                Background = new SolidColorBrush(Color.FromRgb(0x46, 0xEF, 0xB1)),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x0C, 0x42, 0x47)),
+                FontWeight = FontWeights.Bold,
                 FontSize = 12,
                 Padding = new Thickness(16, 8, 16, 8),
                 BorderThickness = new Thickness(0),

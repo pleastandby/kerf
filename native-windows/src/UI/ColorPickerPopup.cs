@@ -57,13 +57,13 @@ namespace Kerf.UI
         public ColorPickerControl()
         {
             BuildUi();
-            SetColor(Color.FromRgb(56, 189, 248)); // Default Sky Blue
+            SetColor(KerfBrand.Mint); // Default Official Brand Mint (#46EFB1)
         }
 
         private void BuildUi()
         {
             Width = 240;
-            Background = new SolidColorBrush(Color.FromRgb(20, 23, 34));
+            Background = KerfBrand.DarkSlateBrush; // #0C4247
 
             var mainStack = new StackPanel { Margin = new Thickness(12) };
 
@@ -74,7 +74,7 @@ namespace Kerf.UI
                 Text = "COLOR PICKER",
                 FontSize = 10,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 180)),
+                Foreground = KerfBrand.TextMutedBrush,
                 VerticalAlignment = VerticalAlignment.Center
             };
             DockPanel.SetDock(title, Dock.Left);
@@ -88,12 +88,12 @@ namespace Kerf.UI
                 Width = 20,
                 Height = 20,
                 Background = Brushes.Transparent,
-                Foreground = new SolidColorBrush(Color.FromRgb(160, 175, 205)),
+                Foreground = KerfBrand.TextMutedBrush,
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
                 HorizontalAlignment = HorizontalAlignment.Right,
                 ToolTip = "Close (Esc)",
-                Template = StudioView.CreateRoundedButtonTemplate(10)
+                Template = KerfBrand.CreateRoundedButtonTemplate(10)
             };
             closeBtn.Click += (s, e) =>
             {
@@ -205,7 +205,7 @@ namespace Kerf.UI
                 EndPoint = new Point(1, 0.5)
             };
             _alphaBrush.GradientStops.Add(new GradientStop(Colors.Transparent, 0.0));
-            _alphaBrush.GradientStops.Add(new GradientStop(Color.FromRgb(56, 189, 248), 1.0));
+            _alphaBrush.GradientStops.Add(new GradientStop(KerfBrand.Mint, 1.0));
             alphaTrack.Background = _alphaBrush;
 
             _alphaCanvas = new Canvas { Width = 216, Height = 14 };
@@ -264,13 +264,13 @@ namespace Kerf.UI
 
             mainStack.Children.Add(inputRow);
 
-            // 5. Curated Figma Swatch Palette
+            // 5. Official Brand & Designer Swatch Palette
             var swatchesLabel = new TextBlock
             {
-                Text = "PRESETS",
+                Text = "BRAND & PRESETS",
                 FontSize = 9.5,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(120, 130, 155)),
+                Foreground = KerfBrand.TextMutedBrush,
                 Margin = new Thickness(0, 10, 0, 6)
             };
             mainStack.Children.Add(swatchesLabel);
@@ -278,9 +278,8 @@ namespace Kerf.UI
             var swatchesWrap = new WrapPanel { Width = 216 };
             string[] presets = new string[]
             {
-                "#FFFFFF", "#000000", "#64748B", "#EF4444", "#F97316",
-                "#F59E0B", "#10B981", "#06B6D4", "#3B82F6", "#6366F1",
-                "#8B5CF6", "#EC4899", "#1E293B", "#0F172A"
+                "#46EFB1", "#0A717B", "#0C4247", "#1E082E", "#F6B322",
+                "#FFFFFF", "#000000", "#A2C0C3"
             };
 
             foreach (var hex in presets)

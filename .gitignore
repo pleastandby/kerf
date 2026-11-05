@@ -26,3 +26,5 @@ obj/
 *.user
 *.sw?
 .DS_Store
+rebrand
+testdata

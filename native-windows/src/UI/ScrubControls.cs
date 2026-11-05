@@ -13,6 +13,7 @@ namespace Kerf.UI
     /// Tactile, Figma-style scrubbable numeric fields and smooth sliders.
     /// Supports horizontal label scrubbing with Shift (10x) and Alt (0.1x) modifiers,
     /// direct keyboard input, and 60 FPS live canvas updates.
+    /// Styled strictly in accordance with Kerf Brand Identity.
     /// </summary>
     public static class ScrubControls
     {
@@ -33,8 +34,8 @@ namespace Kerf.UI
 
             var container = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(40, 48, 70)),
+                Background = KerfBrand.DarkSlateBrush,
+                BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5),
                 Height = 28,
@@ -51,7 +52,7 @@ namespace Kerf.UI
                 Text = label,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(125, 140, 175)),
+                Foreground = KerfBrand.TextMutedBrush,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor = Cursors.SizeWE,
@@ -65,7 +66,7 @@ namespace Kerf.UI
             {
                 Text = Math.Round(initialValue, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix,
                 FontSize = 11.5,
-                Foreground = Brushes.White,
+                Foreground = KerfBrand.TextWhiteBrush,
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 VerticalContentAlignment = VerticalAlignment.Center,
@@ -89,7 +90,7 @@ namespace Kerf.UI
                 startMouse = e.GetPosition(lbl);
                 startVal = currentValue;
                 isScrubbing = true;
-                container.BorderBrush = new SolidColorBrush(Color.FromRgb(56, 189, 248));
+                container.BorderBrush = KerfBrand.MintBrush;
             };
 
             lbl.MouseMove += (s, e) =>
@@ -120,7 +121,7 @@ namespace Kerf.UI
                 {
                     lbl.ReleaseMouseCapture();
                     isScrubbing = false;
-                    container.BorderBrush = new SolidColorBrush(Color.FromRgb(40, 48, 70));
+                    container.BorderBrush = KerfBrand.TealBrush;
                 }
             };
 
@@ -131,7 +132,7 @@ namespace Kerf.UI
                     lbl.ReleaseMouseCapture();
                 }
                 isScrubbing = false;
-                container.BorderBrush = new SolidColorBrush(Color.FromRgb(40, 48, 70));
+                container.BorderBrush = KerfBrand.TealBrush;
             };
 
             Action commitText = () =>
@@ -139,7 +140,7 @@ namespace Kerf.UI
                 string raw = tb.Text.Replace(suffix, "").Trim();
                 double parsed;
                 if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) ||
-                    double.TryParse(raw, out parsed))
+                    double.TryParse(raw, NumberStyles.Float, CultureInfo.CurrentCulture, out parsed))
                 {
                     parsed = Math.Max(min, Math.Min(max, parsed));
                     currentValue = parsed;
@@ -181,13 +182,13 @@ namespace Kerf.UI
         <Setter.Value>
             <ControlTemplate TargetType=""Slider"">
                 <Grid VerticalAlignment=""Center"">
-                    <Border Height=""5"" CornerRadius=""2.5"" Background=""#202636"" BorderBrush=""#303A50"" BorderThickness=""1"" VerticalAlignment=""Center""/>
+                    <Border Height=""5"" CornerRadius=""2.5"" Background=""#0C4247"" BorderBrush=""#0A717B"" BorderThickness=""1"" VerticalAlignment=""Center""/>
                     <Track x:Name=""PART_Track"">
                         <Track.Thumb>
                             <Thumb Cursor=""Hand"">
                                 <Thumb.Template>
                                     <ControlTemplate TargetType=""Thumb"">
-                                        <Border Width=""14"" Height=""14"" CornerRadius=""7"" Background=""#F8FAFC"" BorderBrush=""#38BDF8"" BorderThickness=""2"">
+                                        <Border Width=""14"" Height=""14"" CornerRadius=""7"" Background=""#FFFFFF"" BorderBrush=""#46EFB1"" BorderThickness=""2"">
                                             <Border.Effect>
                                                 <DropShadowEffect Color=""#000000"" BlurRadius=""4"" ShadowDepth=""1"" Opacity=""0.5""/>
                                             </Border.Effect>
@@ -237,7 +238,7 @@ namespace Kerf.UI
             {
                 Text = label,
                 FontSize = isShort ? 12 : 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(130, 140, 165)),
+                Foreground = KerfBrand.TextMutedBrush,
                 Width = isShort ? 24 : 54,
                 TextAlignment = isShort ? TextAlignment.Center : TextAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -252,7 +253,7 @@ namespace Kerf.UI
                 Text = Math.Round(initialValue, 0) + suffix,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)),
+                Foreground = KerfBrand.MintBrush,
                 Width = 38,
                 TextAlignment = TextAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center,

@@ -8,164 +8,138 @@ using System.Windows.Media.Imaging;
 namespace Kerf.UI
 {
     /// <summary>
-    /// Kerf vector logo generator and visual factory.
-    /// Implements the official iridescent folded-ribbon brand mark (peach, coral, indigo, sky blue, mint & teal gradients).
+    /// Kerf Studio official vector logo and icon visual factory.
+    /// Implements the brand mark geometry from Kerf-Logo.svg and kerf-icon.svg:
+    /// - Logo Badge: 205x205 rounded squircle (rx=43) filled with #46EFB1 (Electric Mint)
+    ///   containing the stylized geometric cutouts filled with #1E082E (Obsidian Plum).
+    /// - Standalone Icon: 108x134 geometric mark rendered with customizable fill (#46EFB1 default).
     /// </summary>
     public static class KerfLogo
     {
-        private static DrawingGroup _cachedDrawingGroup;
-        private static DrawingImage _cachedDrawingImage;
+        private static readonly Color BrandMint = Color.FromRgb(0x46, 0xEF, 0xB1);
+        private static readonly Color BrandObsidian = Color.FromRgb(0x1E, 0x08, 0x2E);
+        private static readonly SolidColorBrush MintBrush = FreezeBrush(new SolidColorBrush(BrandMint));
+        private static readonly SolidColorBrush ObsidianBrush = FreezeBrush(new SolidColorBrush(BrandObsidian));
 
+        private static SolidColorBrush FreezeBrush(SolidColorBrush b)
+        {
+            if (b != null && b.CanFreeze) b.Freeze();
+            return b;
+        }
+
+        private static DrawingGroup _cachedLogoDrawingGroup;
+        private static DrawingImage _cachedLogoImage;
+        private static DrawingGroup _cachedIconDrawingGroup;
+        private static DrawingImage _cachedIconImage;
+
+        // Path geometries from official vector SVG definitions
+        public const string PathCutout1 = "M54.4821 56.685C51.283 53.6375 51.1601 48.5737 54.2075 45.3746L71.2518 27.4821C74.2992 24.283 79.3631 24.1601 82.5622 27.2075L100.455 44.2518C103.654 47.2992 103.777 52.3631 100.729 55.5622L83.685 73.4546C80.6375 76.6537 75.5737 76.7767 72.3746 73.7292L54.4821 56.685Z";
+        public const string PathCutout2 = "M114.372 51.4542L57.8722 107.516C57.1154 108.267 56.6896 109.289 56.6896 110.356V154.138C56.6896 157.687 60.9671 159.478 63.4959 156.989L117.907 103.422C120.007 101.354 121.19 98.53 121.19 95.5829V54.2936C121.19 50.7375 116.897 48.9494 114.372 51.4542Z";
+        public const string PathCutout3 = "M119.21 108.561L103.48 124.291C101.321 126.45 101.127 129.885 103.03 132.273L122.279 156.429C123.418 157.857 125.145 158.69 126.972 158.69H153.627C158.583 158.69 161.402 153.022 158.412 149.07L128.237 109.184C126.04 106.28 121.784 105.986 119.21 108.561Z";
+
+        // Standalone Icon paths from kerf-icon.svg (viewBox 0 0 108 134)
+        public const string IconPath1 = "M2.48212 31.685C-0.716979 28.6375 -0.839915 23.5737 2.20753 20.3746L19.2518 2.48212C22.2992 -0.71698 27.3631 -0.839915 30.5622 2.20753L48.4546 19.2518C51.6537 22.2992 51.7767 27.3631 48.7292 30.5622L31.685 48.4546C28.6375 51.6537 23.5737 51.7767 20.3746 48.7292L2.48212 31.685Z";
+        public const string IconPath2 = "M62.3722 26.4542L5.87224 82.5162C5.11535 83.2672 4.68964 84.2894 4.68964 85.3556V129.138C4.68964 132.687 8.96714 134.478 11.4959 131.989L65.9068 78.4216C68.007 76.354 69.1896 73.53 69.1896 70.5829V29.2936C69.1896 25.7375 64.8966 23.9494 62.3722 26.4542Z";
+        public const string IconPath3 = "M67.2096 83.5609L51.4797 99.2909C49.321 101.45 49.1274 104.885 51.03 107.273L70.2794 131.429C71.4178 132.857 73.145 133.69 74.9717 133.69H101.627C106.583 133.69 109.402 128.022 106.412 124.07L76.2373 84.1836C74.0404 81.2798 69.7844 80.9862 67.2096 83.5609Z";
+
+        /// <summary>
+        /// Returns the official Kerf Logo badge DrawingGroup (Electric Mint rounded badge with Obsidian Plum geometry).
+        /// </summary>
         public static DrawingGroup GetLogoDrawingGroup()
         {
-            if (_cachedDrawingGroup != null) return _cachedDrawingGroup;
+            if (_cachedLogoDrawingGroup != null) return _cachedLogoDrawingGroup;
 
             var group = new DrawingGroup();
-            group.ClipGeometry = new RectangleGeometry(new Rect(0, 0, 512, 512));
+            group.ClipGeometry = new RectangleGeometry(new Rect(0, 0, 205, 205));
 
-            // 1. peachCoral gradient & path
-            var peachCoral = new LinearGradientBrush
-            {
-                StartPoint = new Point(116, 72),
-                EndPoint = new Point(232, 286),
-                MappingMode = BrushMappingMode.Absolute
-            };
-            peachCoral.GradientStops.Add(new GradientStop(Color.FromRgb(255, 232, 199), 0.00));
-            peachCoral.GradientStops.Add(new GradientStop(Color.FromRgb(255, 199, 168), 0.38));
-            peachCoral.GradientStops.Add(new GradientStop(Color.FromRgb(255, 146, 127), 0.72));
-            peachCoral.GradientStops.Add(new GradientStop(Color.FromRgb(245, 109, 136), 1.00));
-            peachCoral.Freeze();
+            // Background squircle (rx=43, ry=43)
+            var badgeGeo = new RectangleGeometry(new Rect(0, 0, 205, 205), 43, 43);
+            badgeGeo.Freeze();
+            group.Children.Add(new GeometryDrawing(MintBrush, null, badgeGeo));
 
-            var geo1 = Geometry.Parse("M113 169C113 115 151 73 205 73H242V211C242 235 229 254 208 268L113 326V169Z");
-            geo1.Freeze();
-            group.Children.Add(new GeometryDrawing(peachCoral, null, geo1));
+            // Obsidian plum cuts
+            var darkBrush = ObsidianBrush;
 
-            // 2. indigoBlue gradient & path
-            var indigoBlue = new LinearGradientBrush
-            {
-                StartPoint = new Point(122, 282),
-                EndPoint = new Point(237, 420),
-                MappingMode = BrushMappingMode.Absolute
-            };
-            indigoBlue.GradientStops.Add(new GradientStop(Color.FromRgb(108, 84, 182), 0.00));
-            indigoBlue.GradientStops.Add(new GradientStop(Color.FromRgb(53, 79, 142), 0.48));
-            indigoBlue.GradientStops.Add(new GradientStop(Color.FromRgb(23, 69, 104), 1.00));
-            indigoBlue.Freeze();
+            var g1 = Geometry.Parse(PathCutout1);
+            g1.Freeze();
+            group.Children.Add(new GeometryDrawing(darkBrush, null, g1));
 
-            var geo2 = Geometry.Parse("M113 326L208 268C226 257 242 268 242 289V420H170C138 420 113 395 113 363V326Z");
-            geo2.Freeze();
-            group.Children.Add(new GeometryDrawing(indigoBlue, null, geo2));
+            var g2 = Geometry.Parse(PathCutout2);
+            g2.Freeze();
+            group.Children.Add(new GeometryDrawing(darkBrush, null, g2));
 
-            // 3. skyBlue gradient & upper wing
-            var skyBlue = new LinearGradientBrush
-            {
-                StartPoint = new Point(265, 100),
-                EndPoint = new Point(380, 228),
-                MappingMode = BrushMappingMode.Absolute
-            };
-            skyBlue.GradientStops.Add(new GradientStop(Color.FromRgb(184, 228, 255), 0.00));
-            skyBlue.GradientStops.Add(new GradientStop(Color.FromRgb(119, 185, 245), 0.55));
-            skyBlue.GradientStops.Add(new GradientStop(Color.FromRgb(52, 118, 216), 1.00));
-            skyBlue.Freeze();
-
-            var geo3 = Geometry.Parse("M242 179L303 118C326 95 346 92 369 92H410V143C410 164 401 181 385 196L315 255L242 210V179Z");
-            geo3.Freeze();
-            group.Children.Add(new GeometryDrawing(skyBlue, null, geo3));
-
-            // 4. mintTeal gradient & lower wing
-            var mintTeal = new LinearGradientBrush
-            {
-                StartPoint = new Point(270, 264),
-                EndPoint = new Point(390, 405),
-                MappingMode = BrushMappingMode.Absolute
-            };
-            mintTeal.GradientStops.Add(new GradientStop(Color.FromRgb(216, 242, 189), 0.00));
-            mintTeal.GradientStops.Add(new GradientStop(Color.FromRgb(118, 214, 183), 0.38));
-            mintTeal.GradientStops.Add(new GradientStop(Color.FromRgb(39, 184, 169), 0.75));
-            mintTeal.GradientStops.Add(new GradientStop(Color.FromRgb(0, 156, 152), 1.00));
-            mintTeal.Freeze();
-
-            var geo4 = Geometry.Parse("M242 235L315 255L382 324C400 342 410 358 410 379C410 402 392 420 369 420C350 420 337 412 322 397L242 315V235Z");
-            geo4.Freeze();
-            group.Children.Add(new GeometryDrawing(mintTeal, null, geo4));
-
-            // 5. warmFold (opacity 0.96)
-            var warmFold = new LinearGradientBrush
-            {
-                StartPoint = new Point(160, 180),
-                EndPoint = new Point(254, 285),
-                MappingMode = BrushMappingMode.Absolute,
-                Opacity = 0.96
-            };
-            warmFold.GradientStops.Add(new GradientStop(Color.FromRgb(255, 178, 157), 0.00));
-            warmFold.GradientStops.Add(new GradientStop(Color.FromRgb(246, 185, 199), 0.50));
-            warmFold.GradientStops.Add(new GradientStop(Color.FromRgb(213, 182, 240), 1.00));
-            warmFold.Freeze();
-
-            var geo5 = Geometry.Parse("M113 326L208 268C226 257 242 241 242 211V289C242 305 232 317 216 326L168 354C145 367 124 355 113 340V326Z");
-            geo5.Freeze();
-            group.Children.Add(new GeometryDrawing(warmFold, null, geo5));
-
-            // 6. centerFold (opacity 0.98)
-            var centerFold = new LinearGradientBrush
-            {
-                StartPoint = new Point(232, 210),
-                EndPoint = new Point(314, 280),
-                MappingMode = BrushMappingMode.Absolute,
-                Opacity = 0.98
-            };
-            centerFold.GradientStops.Add(new GradientStop(Color.FromRgb(178, 196, 241), 0.00));
-            centerFold.GradientStops.Add(new GradientStop(Color.FromRgb(138, 207, 203), 0.50));
-            centerFold.GradientStops.Add(new GradientStop(Color.FromRgb(212, 232, 182), 1.00));
-            centerFold.Freeze();
-
-            var geo6 = Geometry.Parse("M242 211L315 255L270 285L242 315V211Z");
-            geo6.Freeze();
-            group.Children.Add(new GeometryDrawing(centerFold, null, geo6));
-
-            // 7. centerHighlight (solid with opacity 0.32)
-            var centerHighlight = new SolidColorBrush(Color.FromArgb(82, 185, 216, 216));
-            centerHighlight.Freeze();
-            group.Children.Add(new GeometryDrawing(centerHighlight, null, geo6));
-
-            // 8. blueFold (opacity 0.82)
-            var blueFold = new LinearGradientBrush
-            {
-                StartPoint = new Point(160, 280),
-                EndPoint = new Point(244, 355),
-                MappingMode = BrushMappingMode.Absolute,
-                Opacity = 0.82
-            };
-            blueFold.GradientStops.Add(new GradientStop(Color.FromRgb(115, 89, 181), 0.00));
-            blueFold.GradientStops.Add(new GradientStop(Color.FromRgb(38, 78, 135), 1.00));
-            blueFold.Freeze();
-
-            var geo8 = Geometry.Parse("M113 326C128 302 151 294 174 300L216 311C231 315 242 329 242 347V420H170C138 420 113 395 113 363V326Z");
-            geo8.Freeze();
-            group.Children.Add(new GeometryDrawing(blueFold, null, geo8));
-
-            // 9. tealAccent (opacity 0.24)
-            var tealAccent = new SolidColorBrush(Color.FromArgb(61, 53, 190, 178));
-            tealAccent.Freeze();
-            var geo9 = Geometry.Parse("M242 315L270 285L322 334L282 365L242 326V315Z");
-            geo9.Freeze();
-            group.Children.Add(new GeometryDrawing(tealAccent, null, geo9));
+            var g3 = Geometry.Parse(PathCutout3);
+            g3.Freeze();
+            group.Children.Add(new GeometryDrawing(darkBrush, null, g3));
 
             group.Freeze();
-            _cachedDrawingGroup = group;
-            return _cachedDrawingGroup;
+            _cachedLogoDrawingGroup = group;
+            return _cachedLogoDrawingGroup;
         }
 
         public static ImageSource GetLogoImageSource()
         {
-            if (_cachedDrawingImage != null) return _cachedDrawingImage;
-            _cachedDrawingImage = new DrawingImage(GetLogoDrawingGroup());
-            _cachedDrawingImage.Freeze();
-            return _cachedDrawingImage;
+            if (_cachedLogoImage != null) return _cachedLogoImage;
+            _cachedLogoImage = new DrawingImage(GetLogoDrawingGroup());
+            _cachedLogoImage.Freeze();
+            return _cachedLogoImage;
         }
 
         /// <summary>
-        /// Creates a high-fidelity vector element representing the Kerf logo at any specified width & height.
+        /// Returns the official standalone Kerf Icon mark DrawingGroup (viewBox 0 0 108 134).
+        /// </summary>
+        public static DrawingGroup GetIconDrawingGroup(Brush fillBrush = null)
+        {
+            var brush = fillBrush ?? MintBrush;
+            if (brush == MintBrush && _cachedIconDrawingGroup != null)
+            {
+                return _cachedIconDrawingGroup;
+            }
+
+            var group = new DrawingGroup();
+            group.ClipGeometry = new RectangleGeometry(new Rect(0, 0, 108, 134));
+
+            var g1 = Geometry.Parse(IconPath1);
+            g1.Freeze();
+            group.Children.Add(new GeometryDrawing(brush, null, g1));
+
+            var g2 = Geometry.Parse(IconPath2);
+            g2.Freeze();
+            group.Children.Add(new GeometryDrawing(brush, null, g2));
+
+            var g3 = Geometry.Parse(IconPath3);
+            g3.Freeze();
+            group.Children.Add(new GeometryDrawing(brush, null, g3));
+
+            group.Freeze();
+
+            if (brush == MintBrush)
+            {
+                _cachedIconDrawingGroup = group;
+            }
+            return group;
+        }
+
+        public static ImageSource GetIconImageSource(Brush fillBrush = null)
+        {
+            var brush = fillBrush ?? MintBrush;
+            if (brush == MintBrush && _cachedIconImage != null)
+            {
+                return _cachedIconImage;
+            }
+
+            var img = new DrawingImage(GetIconDrawingGroup(brush));
+            img.Freeze();
+
+            if (brush == MintBrush)
+            {
+                _cachedIconImage = img;
+            }
+            return img;
+        }
+
+        /// <summary>
+        /// Creates a high-fidelity vector element representing the Kerf logo badge.
         /// </summary>
         public static FrameworkElement CreateLogoElement(double size = 32, bool withGlow = false)
         {
@@ -183,10 +157,39 @@ namespace Kerf.UI
             {
                 img.Effect = new DropShadowEffect
                 {
-                    Color = Color.FromRgb(56, 189, 248),
-                    BlurRadius = Math.Max(8, size * 0.4),
+                    Color = BrandMint,
+                    BlurRadius = Math.Max(8, size * 0.35),
                     ShadowDepth = 0,
-                    Opacity = 0.55
+                    Opacity = 0.65
+                };
+            }
+
+            return img;
+        }
+
+        /// <summary>
+        /// Creates a high-fidelity vector element representing the standalone Kerf Icon mark.
+        /// </summary>
+        public static FrameworkElement CreateIconElement(double width = 28, double height = 34, Brush fillBrush = null, bool withGlow = false)
+        {
+            var img = new Image
+            {
+                Source = GetIconImageSource(fillBrush),
+                Width = width,
+                Height = height,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            if (withGlow)
+            {
+                img.Effect = new DropShadowEffect
+                {
+                    Color = BrandMint,
+                    BlurRadius = Math.Max(10, width * 0.4),
+                    ShadowDepth = 0,
+                    Opacity = 0.75
                 };
             }
 

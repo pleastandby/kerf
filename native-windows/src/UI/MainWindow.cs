@@ -86,8 +86,8 @@ namespace Kerf.UI
             Left = Math.Max(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Left + (workW - Width) / 2);
             Top = Math.Max(SystemParameters.WorkArea.Top, SystemParameters.WorkArea.Top + Math.Max(10, (workH - Height) / 4));
 
-            Background = new SolidColorBrush(Color.FromRgb(30, 34, 48)); // #1E2230
-            Foreground = Brushes.White;
+            Background = KerfBrand.ObsidianBrush; // #1E082E
+            Foreground = KerfBrand.TextWhiteBrush;
             Icon = KerfLogo.GetLogoImageSource();
 
             // Frameless modern window with Aero Snap & resizing support
@@ -167,8 +167,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(35, 39, 56)), // #232738
-                BorderBrush = new SolidColorBrush(Color.FromRgb(55, 63, 87)),
+                Background = KerfBrand.ObsidianBrush, // #1E082E
+                BorderBrush = KerfBrand.DarkSlateBrush, // #0C4247
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(12, 0, 0, 0)
             };
@@ -189,7 +189,7 @@ namespace Kerf.UI
 
             // Left: App name
             var leftStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            var logo = KerfLogo.CreateLogoElement(18, withGlow: true);
+            var logo = KerfLogo.CreateIconElement(18, 22, fillBrush: KerfBrand.MintBrush, withGlow: true);
             logo.Margin = new Thickness(0, 0, 8, 0);
             leftStack.Children.Add(logo);
 
@@ -197,7 +197,8 @@ namespace Kerf.UI
             {
                 Text = "Kerf Studio",
                 FontSize = 12,
-                Foreground = new SolidColorBrush(Color.FromRgb(160, 175, 200)),
+                FontWeight = FontWeights.Medium,
+                Foreground = KerfBrand.TextWhiteBrush,
                 VerticalAlignment = VerticalAlignment.Center
             };
             leftStack.Children.Add(_windowTitleBlock);
@@ -232,20 +233,20 @@ namespace Kerf.UI
                 Content = text,
                 FontSize = 12,
                 Background = Brushes.Transparent,
-                Foreground = new SolidColorBrush(Color.FromRgb(180, 190, 210)),
+                Foreground = KerfBrand.TextMutedBrush,
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand
             };
 
             btn.MouseEnter += (s, e) =>
             {
-                btn.Background = isClose ? new SolidColorBrush(Color.FromRgb(220, 38, 38)) : new SolidColorBrush(Color.FromRgb(35, 42, 60));
-                btn.Foreground = Brushes.White;
+                btn.Background = isClose ? new SolidColorBrush(Color.FromRgb(220, 38, 38)) : KerfBrand.TealBrush;
+                btn.Foreground = KerfBrand.TextWhiteBrush;
             };
             btn.MouseLeave += (s, e) =>
             {
                 btn.Background = Brushes.Transparent;
-                btn.Foreground = new SolidColorBrush(Color.FromRgb(180, 190, 210));
+                btn.Foreground = KerfBrand.TextMutedBrush;
             };
             btn.Click += (s, e) => onClick();
 

@@ -73,12 +73,12 @@ namespace Kerf.UI
 
             if (_paint.GradientStops.Count == 0)
             {
-                _paint.GradientStops.Add(new GradientStopData(0.0, _paint.ColorHex ?? "#38BDF8", 1.0));
-                _paint.GradientStops.Add(new GradientStopData(1.0, "#6366F1", 1.0));
+                _paint.GradientStops.Add(new GradientStopData(0.0, _paint.ColorHex ?? "#46EFB1", 1.0));
+                _paint.GradientStops.Add(new GradientStopData(1.0, "#0A717B", 1.0));
             }
             else if (_paint.GradientStops.Count == 1)
             {
-                _paint.GradientStops.Add(new GradientStopData(1.0, "#6366F1", 1.0));
+                _paint.GradientStops.Add(new GradientStopData(1.0, "#0A717B", 1.0));
             }
 
             if (_selectedStopIndex < 0 || _selectedStopIndex >= _paint.GradientStops.Count)
@@ -146,7 +146,7 @@ namespace Kerf.UI
             {
                 Height = 16,
                 CornerRadius = new CornerRadius(8),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(55, 65, 88)),
+                BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor = Cursors.Hand,
@@ -251,7 +251,7 @@ namespace Kerf.UI
                     Width = size,
                     Height = size,
                     Fill = new SolidColorBrush(GpuRenderer.ParseHexColor(stop.ColorHex, stop.Opacity)),
-                    Stroke = isSelected ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : Brushes.White,
+                    Stroke = isSelected ? KerfBrand.MintBrush : Brushes.White,
                     StrokeThickness = isSelected ? 2.5 : 1.8,
                     Cursor = Cursors.Hand,
                     ToolTip = string.Format("Stop {0}: {1} ({2:P0}, Opacity: {3:P0})\nDrag to reposition, double-click for color picker, drag down to delete",
@@ -374,7 +374,7 @@ namespace Kerf.UI
                 Width = 24,
                 Height = 24,
                 CornerRadius = new CornerRadius(5),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(60, 72, 100)),
+                BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand,
                 Margin = new Thickness(0, 0, 6, 0),
@@ -401,8 +401,8 @@ namespace Kerf.UI
             {
                 Width = 80,
                 Height = 24,
-                Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 76)),
+                Background = KerfBrand.DarkSlateBrush,
+                BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5),
                 Margin = new Thickness(0, 0, 6, 0)
@@ -434,8 +434,8 @@ namespace Kerf.UI
             var posBorder = new Border
             {
                 Height = 24,
-                Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 76)),
+                Background = KerfBrand.DarkSlateBrush,
+                BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5)
             };
@@ -468,7 +468,7 @@ namespace Kerf.UI
             {
                 Text = "Opacity",
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175)),
+                Foreground = KerfBrand.TextMutedBrush,
                 Width = 46,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -740,9 +740,9 @@ namespace Kerf.UI
                 Padding = new Thickness(6, 1, 6, 1),
                 Height = 22,
                 Margin = new Thickness(2, 0, 0, 0),
-                Background = Math.Abs(_paint.GradientAngle - angle) < 1.0 ? new SolidColorBrush(Color.FromRgb(45, 54, 80)) : new SolidColorBrush(Color.FromRgb(24, 28, 40)),
-                Foreground = Math.Abs(_paint.GradientAngle - angle) < 1.0 ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(140, 150, 175)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66)),
+                Background = Math.Abs(_paint.GradientAngle - angle) < 1.0 ? KerfBrand.TealBrush : KerfBrand.DarkSlateBrush,
+                Foreground = Math.Abs(_paint.GradientAngle - angle) < 1.0 ? KerfBrand.MintBrush : KerfBrand.TextMutedBrush,
+                BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand,
                 Template = CreateRoundedButtonTemplate(5)
@@ -769,9 +769,9 @@ namespace Kerf.UI
                 Height = 24,
                 Padding = new Thickness(10, 2, 10, 2),
                 Margin = new Thickness(0, 0, 4, 0),
-                Background = isActive ? new SolidColorBrush(Color.FromRgb(67, 56, 202)) : new SolidColorBrush(Color.FromRgb(26, 30, 44)),
-                Foreground = isActive ? Brushes.White : new SolidColorBrush(Color.FromRgb(140, 150, 175)),
-                BorderBrush = isActive ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : new SolidColorBrush(Color.FromRgb(40, 48, 70)),
+                Background = isActive ? KerfBrand.MintBrush : KerfBrand.DarkSlateBrush,
+                Foreground = isActive ? KerfBrand.DarkSlateBrush : KerfBrand.TextMutedBrush,
+                BorderBrush = isActive ? KerfBrand.MintBrush : KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand,
                 Template = CreateRoundedButtonTemplate(6)
@@ -789,9 +789,9 @@ namespace Kerf.UI
                 FontWeight = FontWeights.Bold,
                 Width = 24,
                 Height = 24,
-                Background = new SolidColorBrush(Color.FromRgb(26, 32, 48)),
-                Foreground = new SolidColorBrush(Color.FromRgb(180, 195, 220)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(45, 54, 78)),
+                Background = KerfBrand.DarkSlateBrush,
+                Foreground = KerfBrand.TextWhiteBrush,
+                BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand,
                 ToolTip = tooltip,
@@ -805,15 +805,15 @@ namespace Kerf.UI
         {
             var group = new DrawingGroup();
             var rect1 = new GeometryDrawing(
-                new SolidColorBrush(Color.FromRgb(32, 38, 54)),
+                new SolidColorBrush(Color.FromRgb(0x0C, 0x42, 0x47)),
                 null,
                 new RectangleGeometry(new Rect(0, 0, 8, 8)));
             var rect2 = new GeometryDrawing(
-                new SolidColorBrush(Color.FromRgb(22, 26, 38)),
+                new SolidColorBrush(Color.FromRgb(0x1E, 0x08, 0x2E)),
                 null,
                 new RectangleGeometry(new Rect(0, 0, 4, 4)));
             var rect3 = new GeometryDrawing(
-                new SolidColorBrush(Color.FromRgb(22, 26, 38)),
+                new SolidColorBrush(Color.FromRgb(0x1E, 0x08, 0x2E)),
                 null,
                 new RectangleGeometry(new Rect(4, 4, 4, 4)));
 
