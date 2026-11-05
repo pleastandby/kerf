@@ -16,14 +16,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-11-05)
 
 **Core value:** An industrial-grade animation engine that operates with non-destructive independent transforms, stable keyframes, visual graph curve editing, transactional undo/redo, and interactive state machines without destabilizing or corrupting the design canvas.
-**Current focus:** Phase 2 — Core Animation Data Model
+**Current focus:** Phase 2 — Independent Transform Architecture and Animation Evaluator
 
 ## Current Position
 
-Phase: 2 of 7 (Core Animation Data Model)
+Phase: 2 of 7 (Independent Transform Architecture and Animation Evaluator)
 Plan: 0 of 2 in current phase
-Status: Phase 1 verified; Ready to plan Phase 2
-Last activity: 2026-11-05 — Phase 1 completed and verified (50/50 tests passing)
+Status: Ready to execute Plan 02-01
+Last activity: 2026-11-05 — Phase 2 plans created (02-01 and 02-02)
 
 Progress: [█░░░░░░░░░] 13%
 
@@ -39,7 +39,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase | Plans | Total | Avg/Plan |
 |---|---|---|---|
 | 1. Independent Transform Pipeline & Render Separation | 2/2 | 30m | 15m |
-| 2. Core Animation Data Model | 0/2 | - | - |
+| 2. Independent Transform Architecture and Animation Evaluator | 0/2 | - | - |
 | 3. Easing Engine & Interactive Graph Curve Editor | 0/2 | - | - |
 | 4. Animation Command History & Full Undo/Redo | 0/2 | - | - |
 | 5. Decoupled Animation Runtime Playback & Transport | 0/2 | - | - |

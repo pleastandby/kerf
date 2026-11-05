@@ -24,3 +24,4 @@
 
 - Clean compilation with C# 5 (`csc.exe`).
 - Executed `cd native-windows; .\build.bat --test`: All 49 existing test suites passed with 0 failures and 0 regressions.
+

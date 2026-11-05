@@ -35,3 +35,4 @@
 - `cd native-windows; .\build.bat --test`:
   - **All 50 tests passed!** (49 existing suites + 1 new suite, 0 failures, 0 regressions).
 - C# 5 compatibility maintained.
+

@@ -7,7 +7,8 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 ## Phases
 
 - [x] **Phase 1: Independent Transform Pipeline & Render Separation** - Introduce decoupled render transforms so animation never destructively mutates layer dimensions or Auto Layout bounds.
-- [ ] **Phase 2: Core Animation Data Model** - Implement GUID-backed stable track targets, typed property binders, and keyframe schema.
+- [ ] **Phase 2: Independent Transform Architecture and Animation Evaluator** - Eliminate destructive animation transformations and establish a reliable evaluation pipeline with hierarchical matrix composition, centralized clock, and renderer integration.
+- [ ] **Phase 3: Core Animation Data Model & JSON Persistence** - Implement GUID-backed stable track targets, typed property binders, keyframe schema, and lossless persistence.
 - [ ] **Phase 3: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
 - [ ] **Phase 4: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [ ] **Phase 5: Decoupled Animation Runtime Playback & Transport** - Deterministic timeline playback with isolated evaluation buffers, zero design-state corruption, and instant rest pose recovery.
@@ -33,20 +34,25 @@ Plans:
 
 ---
 
-### Phase 2: Core Animation Data Model
-**Goal**: Establish a robust, GUID-backed, type-safe animation document schema that reliably binds property tracks to scene graph layers without ID collision risks.
+### Phase 2: Independent Transform Architecture and Animation Evaluator
+**Goal**: Eliminate destructive animation transformations and establish a reliable animation evaluation pipeline with hierarchical matrix composition, centralized clock, and renderer integration.
 **Depends on**: Phase 1
-**Requirements**: MODEL-01, MODEL-02, MODEL-03, MODEL-04
+**Requirements**: TRANS-EVAL-01, TRANS-EVAL-02, TRANS-EVAL-03, TRANS-EVAL-04, TRANS-EVAL-05, TRANS-EVAL-06, TRANS-EVAL-07, TRANS-EVAL-08, TRANS-EVAL-09
 **Success Criteria** (what must be TRUE):
-  1. Keyframe property tracks bind to layer instances via stable GUID/unique ID references, maintaining bindings when layers are renamed or moved inside containers.
-  2. Animatable properties (Transform.X, Transform.Y, ScaleX, ScaleY, Rotation, Opacity, FillColor, CornerRadius) evaluate with strongly typed interpolators.
-  3. Keyframes support unique identifiers, timestamps, values, and interpolation modes (Linear, Step, Bézier).
-  4. Animation clips, tracks, and keyframes serialize and deserialize losslessly to and from project JSON.
+  1. Original object geometry (`layer.X`, `Y`, `Width`, `Height`, Bézier anchors) remains strictly separated and unmutated by static transforms and animated transforms.
+  2. Independent animation properties supported: Position X/Y, Scale X/Y, Rotation, Anchor X/Y, Opacity, Width, Height.
+  3. Scaling a Frame transforms its entire visual content rather than modifying underlying child geometry.
+  4. Groups and nested Frames compose transforms correctly via hierarchical matrix multiplication ($\mathbf{M}_{\text{world}} = \mathbf{M}_{\text{parent}} \times \mathbf{M}_{\text{local}}$).
+  5. Auto Layout behavior is preserved with layout dimensions strictly distinguished from visual transforms.
+  6. A deterministic animation evaluator calculates property values at any timestamp without coupling to UI/React render cycles.
+  7. A centralized animation clock supports Play, Pause, Stop, Looping (OneShot, Loop, PingPong), Speed, and frame navigation.
+  8. Evaluated transforms integrate cleanly with the canvas renderer (`GpuRenderer` and `RetainedSceneGraph`) without mutating persistent document models.
+  9. Automated verification tests pass covering transform composition, scaling, rotation, anchors, nested objects, and playback evaluation.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Create strong typing for `AnimProperty`, `Keyframe<T>`, `AnimationTrack`, and `AnimationClip` with GUID layer referencing.
-- [ ] 02-02: Implement property evaluators and JSON serialization/deserialization for the new animation schema.
+- [ ] 02-01: Implement hierarchical transform composition for Frames & Groups, independent 8-channel property model, and renderer integration.
+- [ ] 02-02: Build deterministic animation evaluator, centralized animation clock, and automated verification tests.
 
 ---
 
