@@ -623,6 +623,109 @@ namespace Kerf.Model
         }
     }
 
+    /// <summary>
+    /// Decoupled Render Transform for motion graphics, scale, rotation, translation, and skew.
+    /// Operates independently of LayerNode.Width and LayerNode.Height, preserving layout geometry.
+    /// </summary>
+    public class RenderTransform
+    {
+        public double TranslationX { get; set; }
+        public double TranslationY { get; set; }
+        public double ScaleX { get; set; }
+        public double ScaleY { get; set; }
+        public double Rotation { get; set; }
+        public double SkewX { get; set; }
+        public double SkewY { get; set; }
+        public double OriginX { get; set; }
+        public double OriginY { get; set; }
+
+        public RenderTransform()
+        {
+            Reset();
+        }
+
+        public void Reset()
+        {
+            TranslationX = 0.0;
+            TranslationY = 0.0;
+            ScaleX = 1.0;
+            ScaleY = 1.0;
+            Rotation = 0.0;
+            SkewX = 0.0;
+            SkewY = 0.0;
+            OriginX = 0.5;
+            OriginY = 0.5;
+        }
+
+        public bool IsIdentity
+        {
+            get
+            {
+                return Math.Abs(TranslationX) < 1e-6 &&
+                       Math.Abs(TranslationY) < 1e-6 &&
+                       Math.Abs(ScaleX - 1.0) < 1e-6 &&
+                       Math.Abs(ScaleY - 1.0) < 1e-6 &&
+                       Math.Abs(Rotation) < 1e-6 &&
+                       Math.Abs(SkewX) < 1e-6 &&
+                       Math.Abs(SkewY) < 1e-6;
+            }
+        }
+
+        public RenderTransform Clone()
+        {
+            return new RenderTransform
+            {
+                TranslationX = this.TranslationX,
+                TranslationY = this.TranslationY,
+                ScaleX = this.ScaleX,
+                ScaleY = this.ScaleY,
+                Rotation = this.Rotation,
+                SkewX = this.SkewX,
+                SkewY = this.SkewY,
+                OriginX = this.OriginX,
+                OriginY = this.OriginY
+            };
+        }
+
+        public Matrix ToMatrix(double layerX, double layerY, double layerWidth, double layerHeight)
+        {
+            if (IsIdentity) return Matrix.Identity;
+
+            double w = Math.Max(1.0, layerWidth);
+            double h = Math.Max(1.0, layerHeight);
+            double ox = Math.Max(0.0, Math.Min(1.0, OriginX));
+            double oy = Math.Max(0.0, Math.Min(1.0, OriginY));
+            double pivotX = layerX + ox * w;
+            double pivotY = layerY + oy * h;
+
+            var mat = Matrix.Identity;
+            mat.Translate(-pivotX, -pivotY);
+
+            if (Math.Abs(SkewX) > 1e-6 || Math.Abs(SkewY) > 1e-6)
+            {
+                mat.Skew(SkewX, SkewY);
+            }
+
+            double sx = (double.IsNaN(ScaleX) || double.IsInfinity(ScaleX)) ? 1.0 : ScaleX;
+            double sy = (double.IsNaN(ScaleY) || double.IsInfinity(ScaleY)) ? 1.0 : ScaleY;
+            if (Math.Abs(sx - 1.0) > 1e-6 || Math.Abs(sy - 1.0) > 1e-6)
+            {
+                mat.Scale(sx, sy);
+            }
+
+            if (Math.Abs(Rotation) > 1e-6)
+            {
+                mat.Rotate(Rotation);
+            }
+
+            double tx = (double.IsNaN(TranslationX) || double.IsInfinity(TranslationX)) ? 0.0 : TranslationX;
+            double ty = (double.IsNaN(TranslationY) || double.IsInfinity(TranslationY)) ? 0.0 : TranslationY;
+            mat.Translate(pivotX + tx, pivotY + ty);
+
+            return mat;
+        }
+    }
+
     public class LayerNode
     {
         public string Id { get; set; }
@@ -639,6 +742,9 @@ namespace Kerf.Model
         public double ScaleY { get; set; }
         public bool FlipH { get; set; }
         public bool FlipV { get; set; }
+
+        // Non-destructive Render Transform for motion graphics & animations
+        public RenderTransform RenderTransform { get; set; }
 
         // Corner Radius
         public double CornerRadius { get; set; }
@@ -740,6 +846,7 @@ namespace Kerf.Model
             IsLocked = false;
             IsCollapsed = false;
             LockAspectRatio = false;
+            RenderTransform = new RenderTransform();
             ParentId = null;
             Children = new List<LayerNode>();
         }
@@ -747,6 +854,15 @@ namespace Kerf.Model
         public Rect GetBounds()
         {
             return new Rect(X, Y, Math.Max(1, Width), Math.Max(1, Height));
+        }
+
+        public Matrix GetRenderTransformMatrix()
+        {
+            if (RenderTransform == null || RenderTransform.IsIdentity)
+            {
+                return Matrix.Identity;
+            }
+            return RenderTransform.ToMatrix(X, Y, Width, Height);
         }
 
         public Matrix GetTransformMatrix()
@@ -759,6 +875,11 @@ namespace Kerf.Model
             if (ScaleX != 1.0 || ScaleY != 1.0)
             {
                 mat.ScaleAt(ScaleX, ScaleY, X + Width / 2.0, Y + Height / 2.0);
+            }
+            if (RenderTransform != null && !RenderTransform.IsIdentity)
+            {
+                var rtMat = RenderTransform.ToMatrix(X, Y, Width, Height);
+                mat.Append(rtMat);
             }
             return mat;
         }
@@ -779,6 +900,7 @@ namespace Kerf.Model
                 ScaleY = this.ScaleY,
                 FlipH = this.FlipH,
                 FlipV = this.FlipV,
+                RenderTransform = this.RenderTransform != null ? this.RenderTransform.Clone() : new RenderTransform(),
                 CornerRadius = this.CornerRadius,
                 CornerRadiusTopLeft = this.CornerRadiusTopLeft,
                 CornerRadiusTopRight = this.CornerRadiusTopRight,

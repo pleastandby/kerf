@@ -488,10 +488,10 @@ namespace Kerf.UI
                 BorderThickness = new Thickness(0),
                 VerticalAlignment = VerticalAlignment.Center
             };
-            menu.Resources[SystemColors.MenuBrushKey] = KerfBrand.DarkSlateBrush;
-            menu.Resources[SystemColors.MenuTextBrushKey] = KerfBrand.TextWhiteBrush;
-            menu.Resources[SystemColors.HighlightBrushKey] = KerfBrand.TealBrush;
-            menu.Resources[SystemColors.HighlightTextBrushKey] = KerfBrand.MintBrush;
+            menu.Resources[SystemColors.MenuBrushKey] = Brushes.White;
+            menu.Resources[SystemColors.MenuTextBrushKey] = Brushes.Black;
+            menu.Resources[SystemColors.HighlightBrushKey] = KerfBrand.MintBrush;
+            menu.Resources[SystemColors.HighlightTextBrushKey] = Brushes.Black;
 
             // 1. File Menu
             var fileMenu = CreateTopMenuItem("_File");
@@ -499,15 +499,30 @@ namespace Kerf.UI
             fileMenu.Items.Add(CreateSubMenuItem("_Open Project...", "Ctrl+O", () => OpenProjectFileDialog()));
             fileMenu.Items.Add(CreateSubMenuItem("_Save", "Ctrl+S", () => SaveCurrentDocument()));
             fileMenu.Items.Add(CreateSubMenuItem("Save _As Anywhere...", "Ctrl+Shift+S", () => SaveAsCurrentDocument()));
-            fileMenu.Items.Add(new Separator { Background = KerfBrand.TealBrush, Margin = new Thickness(4, 2, 4, 2) });
+            fileMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             fileMenu.Items.Add(CreateSubMenuItem("_Export Document...", "Ctrl+E", () => ShowExportDialog()));
-            fileMenu.Items.Add(new Separator { Background = KerfBrand.TealBrush, Margin = new Thickness(4, 2, 4, 2) });
+            fileMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
 
-            var recentMenu = CreateTopMenuItem("_Recent Projects");
+            var recentMenu = new MenuItem
+            {
+                Header = "_Recent Projects",
+                Foreground = Brushes.Black,
+                Background = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(8, 6, 16, 6),
+                Cursor = Cursors.Hand,
+                FontSize = 12.0
+            };
+            recentMenu.Resources[SystemColors.MenuBrushKey] = Brushes.White;
+            recentMenu.Resources[SystemColors.MenuTextBrushKey] = Brushes.Black;
+            recentMenu.Resources[SystemColors.HighlightBrushKey] = KerfBrand.MintBrush;
+            recentMenu.Resources[SystemColors.HighlightTextBrushKey] = Brushes.Black;
+            recentMenu.MouseEnter += (s, e) => { recentMenu.Background = KerfBrand.MintBrush; recentMenu.Foreground = Brushes.Black; };
+            recentMenu.MouseLeave += (s, e) => { recentMenu.Background = Brushes.White; recentMenu.Foreground = Brushes.Black; };
             recentMenu.SubmenuOpened += (s, e) => PopulateRecentProjectsMenu(recentMenu);
             fileMenu.Items.Add(recentMenu);
 
-            fileMenu.Items.Add(new Separator { Background = KerfBrand.TealBrush, Margin = new Thickness(4, 2, 4, 2) });
+            fileMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             fileMenu.Items.Add(CreateSubMenuItem("_Home (Back to Projects)", null, () => { if (RequestHomeNavigation != null) RequestHomeNavigation(); }));
             fileMenu.Items.Add(CreateSubMenuItem("E_xit", "Alt+F4", () =>
             {
@@ -520,13 +535,13 @@ namespace Kerf.UI
             var editMenu = CreateTopMenuItem("_Edit");
             editMenu.Items.Add(CreateSubMenuItem("_Undo", "Ctrl+Z", () => Undo()));
             editMenu.Items.Add(CreateSubMenuItem("_Redo", "Ctrl+Y", () => Redo()));
-            editMenu.Items.Add(new Separator { Background = KerfBrand.TealBrush, Margin = new Thickness(4, 2, 4, 2) });
+            editMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             editMenu.Items.Add(CreateSubMenuItem("Cu_t", "Ctrl+X", () => CutSelectedLayers()));
             editMenu.Items.Add(CreateSubMenuItem("_Copy", "Ctrl+C", () => CopySelectedLayers()));
             editMenu.Items.Add(CreateSubMenuItem("_Paste", "Ctrl+V", () => PasteLayers()));
             editMenu.Items.Add(CreateSubMenuItem("_Duplicate", "Ctrl+D", () => DuplicateSelectedLayers()));
             editMenu.Items.Add(CreateSubMenuItem("_Delete", "Del", () => DeleteSelectedLayers()));
-            editMenu.Items.Add(new Separator { Background = KerfBrand.TealBrush, Margin = new Thickness(4, 2, 4, 2) });
+            editMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             editMenu.Items.Add(CreateSubMenuItem("Select _All", "Ctrl+A", () => SelectAllLayers()));
             editMenu.Items.Add(CreateSubMenuItem("Desel_ect All", "Esc", () => DeselectAllLayers()));
             menu.Items.Add(editMenu);
@@ -537,7 +552,7 @@ namespace Kerf.UI
             viewMenu.Items.Add(CreateSubMenuItem("Zoom _Out", "Ctrl+-", () => SetZoom(_zoomScale * 0.8)));
             viewMenu.Items.Add(CreateSubMenuItem("_100% Zoom", "Ctrl+0", () => ResetZoom()));
             viewMenu.Items.Add(CreateSubMenuItem("Zoom to _Fit", "Shift+1", () => ZoomToFit()));
-            viewMenu.Items.Add(new Separator { Background = KerfBrand.TealBrush, Margin = new Thickness(4, 2, 4, 2) });
+            viewMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             viewMenu.Items.Add(CreateSubMenuItem("Toggle _Grid", "Ctrl+'", () =>
             {
                 var page = Document != null ? Document.GetActivePage() : null;
@@ -553,7 +568,7 @@ namespace Kerf.UI
             var windowMenu = CreateTopMenuItem("_Window");
             windowMenu.Items.Add(CreateSubMenuItem("_Design Workspace", "Alt+1", () => SwitchStudioMode(StudioMode.Design)));
             windowMenu.Items.Add(CreateSubMenuItem("_Animate Workspace", "Alt+2", () => SwitchStudioMode(StudioMode.Animate)));
-            windowMenu.Items.Add(new Separator { Background = KerfBrand.TealBrush, Margin = new Thickness(4, 2, 4, 2) });
+            windowMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             windowMenu.Items.Add(CreateSubMenuItem("_Layers Panel", null, () => SwitchLeftSidebarTab(false)));
             windowMenu.Items.Add(CreateSubMenuItem("_Assets Panel", null, () => SwitchLeftSidebarTab(true)));
             menu.Items.Add(windowMenu);
@@ -569,10 +584,10 @@ namespace Kerf.UI
 
         private MenuItem CreateTopMenuItem(string header)
         {
-            return new MenuItem
+            var item = new MenuItem
             {
                 Header = header,
-                Foreground = KerfBrand.TextWhiteBrush,
+                Foreground = Brushes.White,
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(8, 5, 8, 5),
@@ -580,6 +595,11 @@ namespace Kerf.UI
                 FontWeight = FontWeights.Medium,
                 FontSize = 12.0
             };
+            item.Resources[SystemColors.MenuBrushKey] = Brushes.White;
+            item.Resources[SystemColors.MenuTextBrushKey] = Brushes.Black;
+            item.Resources[SystemColors.HighlightBrushKey] = KerfBrand.MintBrush;
+            item.Resources[SystemColors.HighlightTextBrushKey] = Brushes.Black;
+            return item;
         }
 
         private MenuItem CreateSubMenuItem(string header, string gesture, Action onClick)
@@ -588,12 +608,23 @@ namespace Kerf.UI
             {
                 Header = header,
                 InputGestureText = gesture,
-                Foreground = KerfBrand.TextWhiteBrush,
-                Background = KerfBrand.DarkSlateBrush,
+                Foreground = Brushes.Black, // Crisp black text for clear readability across all options
+                Background = Brushes.White,
                 BorderThickness = new Thickness(0),
-                Padding = new Thickness(8, 4, 16, 4),
+                Padding = new Thickness(8, 6, 16, 6),
                 Cursor = Cursors.Hand,
                 FontSize = 12.0
+            };
+            item.Resources[SystemColors.MenuTextBrushKey] = Brushes.Black;
+            item.MouseEnter += (s, e) =>
+            {
+                item.Background = KerfBrand.MintBrush;
+                item.Foreground = Brushes.Black;
+            };
+            item.MouseLeave += (s, e) =>
+            {
+                item.Background = Brushes.White;
+                item.Foreground = Brushes.Black;
             };
             if (onClick != null)
             {
@@ -612,8 +643,8 @@ namespace Kerf.UI
                 {
                     Header = "No Recent Projects",
                     IsEnabled = false,
-                    Foreground = KerfBrand.TextMutedBrush,
-                    Background = KerfBrand.DarkSlateBrush
+                    Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)),
+                    Background = Brushes.White
                 };
                 recentMenu.Items.Add(emptyItem);
                 return;
@@ -950,8 +981,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(245, 0x0C, 0x42, 0x47)), // Kerf Dark Slate
-                BorderBrush = KerfBrand.TealBrush,                                       // Kerf Deep Cyan Accent
+                Background = KerfBrand.FigmaPanelBrush,                                  // Authentic Figma #2C2C2C floating island
+                BorderBrush = KerfBrand.FigmaBorderBrush,                                // Authentic Figma #383838 subtle divider
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(6, 4, 6, 4),
@@ -1029,7 +1060,7 @@ namespace Kerf.UI
                 var path = btn.Content as System.Windows.Shapes.Path;
                 if (path != null)
                 {
-                    var brush = isActive ? (Brush)KerfBrand.DarkSlateBrush : (Brush)KerfBrand.TextWhiteBrush;
+                    var brush = isActive ? (Brush)KerfBrand.TextBlackBrush : (Brush)KerfBrand.TextWhiteBrush;
                     path.Stroke = brush;
                     if (kvp.Key == ToolType.Select)
                     {
@@ -1842,7 +1873,7 @@ namespace Kerf.UI
                 Text = "+ Insert",
                 FontSize = 10,
                 FontWeight = FontWeights.Bold,
-                Foreground = KerfBrand.DarkSlateBrush
+                Foreground = KerfBrand.TextBlackBrush
             };
             insertBtn.Child = btnText;
             insertBtn.MouseLeftButtonUp += (s, e) =>
@@ -1879,13 +1910,13 @@ namespace Kerf.UI
 
             card.MouseEnter += (s, e) =>
             {
-                card.Background = KerfBrand.TealBrush;
+                card.Background = KerfBrand.FigmaBorderBrush;
                 card.BorderBrush = KerfBrand.MintBrush;
             };
             card.MouseLeave += (s, e) =>
             {
-                card.Background = KerfBrand.DarkSlateBrush;
-                card.BorderBrush = KerfBrand.TealBrush;
+                card.Background = KerfBrand.FigmaPanelBrush;
+                card.BorderBrush = KerfBrand.FigmaBorderBrush;
             };
 
             card.MouseLeftButtonUp += (s, e) =>
@@ -2889,8 +2920,8 @@ namespace Kerf.UI
                 _propertyInspectorStack.Children.Add(CreateInspectorSection("Master Component"));
                 var compCard = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromArgb(40, 0x0A, 0x71, 0x7B)),
-                    BorderBrush = KerfBrand.TealBrush,
+                    Background = KerfBrand.FigmaCardBrush,
+                    BorderBrush = KerfBrand.FigmaBorderBrush,
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(10, 8, 10, 8),
@@ -2918,8 +2949,8 @@ namespace Kerf.UI
                 _propertyInspectorStack.Children.Add(CreateInspectorSection("Component Instance"));
                 var instCard = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromArgb(40, 0x0C, 0x42, 0x47)),
-                    BorderBrush = KerfBrand.TealBrush,
+                    Background = KerfBrand.FigmaCardBrush,
+                    BorderBrush = KerfBrand.FigmaBorderBrush,
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(10, 8, 10, 8),
@@ -7136,55 +7167,67 @@ namespace Kerf.UI
                     return;
                 }
 
-                // 7. Select tool hit test
+                // 7. Centralized Canvas Interaction Pipeline: Hit Testing -> Selection Resolution -> Drag Target Resolution
                 if (_activeTool == ToolType.Select)
                 {
-                    // Double-click on a path/text keeps the familiar direct-edit gesture. Further clicks
-                    // continue down the layer hierarchy so nested objects can be selected individually.
-                    if (clickCount == 2)
+                    var page = Document != null ? Document.GetActivePage() : null;
+                    var hitResult = CanvasInteractionController.HitTest(page, canvasPt);
+
+                    // Double-click on an already-selected leaf Path / Text enters direct edit gesture
+                    if (clickCount >= 2 && hitResult.HasHit)
                     {
-                        var doubleHit = _sceneGraph.HitTest(canvasPt);
-                        if (doubleHit != null && !HasAutoLayoutAncestor(doubleHit))
+                        var leaf = hitResult.DeepestNode;
+                        if (leaf != null && (_selectedLayers.Contains(leaf) || _selectedLayers.Count == 0))
                         {
-                            if (doubleHit.Type == ElementType.Path)
+                            if (leaf.Type == ElementType.Path)
                             {
-                                EnterVectorEditMode(doubleHit);
+                                EnterVectorEditMode(leaf);
                                 return;
                             }
-                            else if (doubleHit.Type == ElementType.Text)
+                            else if (leaf.Type == ElementType.Text)
                             {
-                                StartInPlaceTextEditing(doubleHit);
+                                StartInPlaceTextEditing(leaf);
                                 return;
                             }
                         }
                     }
 
-                    var hit = _sceneGraph.HitTest(canvasPt);
-                    if (hit != null)
+                    if (hitResult.HasHit)
                     {
                         bool control = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
                         bool shift = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
-                        var selectionHit = (_selectedLayers.Contains(hit) || control) ? hit : (clickCount >= 2
-                            ? ResolveDeepSelectionTarget(hit, clickCount)
-                            : ResolveAutoLayoutSelectionTarget(hit));
+
+                        // Selection Resolver:
+                        // Determines which object should become selected.
+                        // Supports progressive parent-to-child selection, maintains hierarchy context.
+                        var selectionHit = CanvasInteractionController.ResolveSelection(hitResult, _selectedLayers, clickCount, control, shift);
+
                         if (control)
                         {
                             _selectedLayers.Clear();
-                            _selectedLayers.Add(selectionHit);
+                            if (selectionHit != null) _selectedLayers.Add(selectionHit);
                         }
                         else if (shift)
                         {
-                            if (_selectedLayers.Contains(selectionHit)) _selectedLayers.Remove(selectionHit);
-                            else _selectedLayers.Add(selectionHit);
+                            if (selectionHit != null)
+                            {
+                                if (_selectedLayers.Contains(selectionHit)) _selectedLayers.Remove(selectionHit);
+                                else _selectedLayers.Add(selectionHit);
+                            }
                         }
                         else
                         {
-                            if (!_selectedLayers.Contains(selectionHit))
+                            if (selectionHit != null && !_selectedLayers.Contains(selectionHit))
                             {
                                 _selectedLayers.Clear();
                                 _selectedLayers.Add(selectionHit);
                             }
                         }
+
+                        // Drag Target Resolver:
+                        // Resolves the active transformation target.
+                        // Pointer-down over descendants of an already-selected parent maintains that parent as drag target!
+                        var dragTargets = CanvasInteractionController.ResolveDragTargets(hitResult, _selectedLayers, selectionHit, control, clickCount);
 
                         _activeHandle = HandleType.None;
                         _isTransforming = true;
@@ -7195,7 +7238,7 @@ namespace Kerf.UI
                         _dragInitialBounds.Clear();
                         _dragInitialRotations.Clear();
                         _dragInitialGeometries.Clear();
-                        foreach (var l in _selectedLayers)
+                        foreach (var l in dragTargets)
                         {
                             CollectDragInitialPositions(l, _dragInitialPositions);
                         }
@@ -7432,8 +7475,6 @@ namespace Kerf.UI
                     _drawingNode.Width = canvasPt.X - _dragStartPoint.X;
                     _drawingNode.Height = canvasPt.Y - _dragStartPoint.Y;
                 }
-
-                UpdateAutoLayoutDropPreview(canvasPt, new List<LayerNode> { _drawingNode });
 
                 _sceneGraph.InvalidateNode(_drawingNode.Id);
                 RefreshCanvas();
@@ -7861,17 +7902,20 @@ namespace Kerf.UI
                 if (_isDrawingNew) { _isDrawingNew = false; _drawingNode = null; }
                 Point canvasPt = ScreenToCanvas(screenPt);
                 _lastRightClickCanvasPoint = canvasPt;
-                var hit = _sceneGraph.HitTest(canvasPt);
-                if (hit != null)
+                var page = Document != null ? Document.GetActivePage() : null;
+                var hitResult = CanvasInteractionController.HitTest(page, canvasPt);
+                if (hitResult.HasHit)
                 {
-                    if (!_selectedLayers.Contains(hit))
+                    var selectedAncestor = CanvasInteractionController.FindSelectedAncestor(hitResult, _selectedLayers);
+                    var contextTarget = selectedAncestor ?? hitResult.OutermostNode ?? hitResult.DeepestNode;
+                    if (!_selectedLayers.Contains(contextTarget))
                     {
                         _selectedLayers.Clear();
-                        _selectedLayers.Add(hit);
+                        _selectedLayers.Add(contextTarget);
                         OnSelectionChanged();
                         RefreshCanvas();
                     }
-                    var cm = CreateLayerContextMenu(hit);
+                    var cm = CreateLayerContextMenu(contextTarget);
                     cm.PlacementTarget = _canvasHost;
                     cm.Placement = PlacementMode.MousePoint;
                     cm.IsOpen = true;
@@ -8025,14 +8069,37 @@ namespace Kerf.UI
             if (_isDrawingNew)
             {
                 _isDrawingNew = false;
-                bool didAutoLayoutDrop = false;
                 if (_drawingNode != null)
                 {
                     var page = Document.GetActivePage();
-                    History.Execute(new AddLayerCommand(page, _drawingNode));
-                    didAutoLayoutDrop = _autoLayoutDropTarget != null || _autoLayoutDetachPreview;
-                    if (_autoLayoutDropTarget != null || _autoLayoutDetachPreview)
-                        CheckAutoReparentLayersOnDrop(new List<LayerNode> { _drawingNode });
+                    LayerNode parent = null;
+                    if (!string.IsNullOrEmpty(_drawingNode.ParentId))
+                    {
+                        parent = page.FindLayerById(_drawingNode.ParentId);
+                    }
+                    int idx = (parent != null && parent.Children != null) ? parent.Children.IndexOf(_drawingNode) : page.Layers.IndexOf(_drawingNode);
+
+                    var parentToReflow = parent;
+                    var cmd = new AddLayerCommand(page, _drawingNode, parent != null ? parent.Id : null, idx, () =>
+                    {
+                        if (parentToReflow != null && parentToReflow.AutoLayout != null && parentToReflow.AutoLayout.Mode != AutoLayoutMode.None)
+                        {
+                            AutoLayoutEngine.ReflowRecursive(parentToReflow);
+                            InvalidateLayoutFrameVisuals(parentToReflow);
+                        }
+                        _sceneGraph.Synchronize(page);
+                        RefreshCanvas();
+                        RefreshLayersList();
+                    });
+                    History.Execute(cmd);
+
+                    if (parent != null && parent.AutoLayout != null && parent.AutoLayout.Mode != AutoLayoutMode.None)
+                    {
+                        AutoLayoutEngine.ReflowRecursive(parent);
+                        ReflowAutoLayoutAncestors(parent);
+                        InvalidateLayoutFrameVisuals(parent);
+                    }
+
                     _selectedLayers.Clear();
                     _selectedLayers.Add(_drawingNode);
                     var created = _drawingNode;
@@ -8043,8 +8110,10 @@ namespace Kerf.UI
                     {
                         StartInPlaceTextEditing(created);
                     }
+                    RefreshCanvas();
+                    RefreshLayersList();
                 }
-                ClearAutoLayoutDropPreview(restoreLivePreview: !didAutoLayoutDrop);
+                ClearAutoLayoutDropPreview(restoreLivePreview: false);
             }
 
             if (_isTransforming)
@@ -8360,7 +8429,8 @@ namespace Kerf.UI
             }
 
             var page = Document.GetActivePage();
-            page.Layers.Add(_drawingNode);
+            var target = InsertionTargetResolver.ResolveTarget(page, _selectedLayers);
+            InsertionTargetResolver.InsertObject(page, target, _drawingNode, reflowAutoLayout: false);
             _sceneGraph.Synchronize(page);
         }
 
@@ -8369,6 +8439,7 @@ namespace Kerf.UI
             var page = Document.GetActivePage();
             if (_activePenNode == null)
             {
+                var target = InsertionTargetResolver.ResolveTarget(page, _selectedLayers);
                 _activePenGeometry = new VectorGeometry { IsClosed = false };
                 _activePenNode = new LayerNode
                 {
@@ -8382,7 +8453,7 @@ namespace Kerf.UI
                     Fills = new List<Paint> { Paint.Solid("#D9D9D9", 0.25) },
                     Strokes = new List<StrokeData> { new StrokeData { Paint = Paint.Solid("#D9D9D9"), Width = 2.0 } }
                 };
-                page.Layers.Add(_activePenNode);
+                InsertionTargetResolver.InsertObject(page, target, _activePenNode, reflowAutoLayout: false);
                 _sceneGraph.Synchronize(page);
             }
 
@@ -8438,7 +8509,30 @@ namespace Kerf.UI
                 _activePenNode.Width = Math.Max(2, b.Width);
                 _activePenNode.Height = Math.Max(2, b.Height);
                 var page = Document.GetActivePage();
-                History.Execute(new AddLayerCommand(page, _activePenNode));
+                LayerNode penParent = null;
+                if (!string.IsNullOrEmpty(_activePenNode.ParentId))
+                {
+                    penParent = page.FindLayerById(_activePenNode.ParentId);
+                }
+                int penIdx = penParent != null && penParent.Children != null ? penParent.Children.IndexOf(_activePenNode) : page.Layers.IndexOf(_activePenNode);
+                var parentToReflow = penParent;
+                History.Execute(new AddLayerCommand(page, _activePenNode, penParent != null ? penParent.Id : null, penIdx, () =>
+                {
+                    if (parentToReflow != null && parentToReflow.AutoLayout != null && parentToReflow.AutoLayout.Mode != AutoLayoutMode.None)
+                    {
+                        AutoLayoutEngine.ReflowRecursive(parentToReflow);
+                        InvalidateLayoutFrameVisuals(parentToReflow);
+                    }
+                    _sceneGraph.Synchronize(page);
+                    RefreshCanvas();
+                    RefreshLayersList();
+                }));
+                if (penParent != null && penParent.AutoLayout != null && penParent.AutoLayout.Mode != AutoLayoutMode.None)
+                {
+                    AutoLayoutEngine.ReflowRecursive(penParent);
+                    ReflowAutoLayoutAncestors(penParent);
+                    InvalidateLayoutFrameVisuals(penParent);
+                }
                 _selectedLayers.Clear();
                 _selectedLayers.Add(_activePenNode);
                 _activePenNode = null;
@@ -9745,10 +9839,20 @@ namespace Kerf.UI
             {
                 BezierVectorEngine.OffsetGeometry(instance.Geometry, 40, 40);
             }
-            instance.ParentId = null;
-
-            page.Layers.Add(instance);
-            History.Execute(new AddLayerCommand(page, instance));
+            var target = InsertionTargetResolver.ResolveTarget(page, _selectedLayers);
+            InsertionTargetResolver.InsertObject(page, target, instance, reflowAutoLayout: true);
+            var parentToReflow = target.Container;
+            History.Execute(new AddLayerCommand(page, instance, parentToReflow != null ? parentToReflow.Id : null, target.InsertionIndex, () =>
+            {
+                if (parentToReflow != null && parentToReflow.AutoLayout != null && parentToReflow.AutoLayout.Mode != AutoLayoutMode.None)
+                {
+                    AutoLayoutEngine.ReflowRecursive(parentToReflow);
+                    InvalidateLayoutFrameVisuals(parentToReflow);
+                }
+                _sceneGraph.Synchronize(page);
+                RefreshCanvas();
+                RefreshLayersList();
+            }));
 
             _selectedLayers.Clear();
             _selectedLayers.Add(instance);
@@ -9876,7 +9980,10 @@ namespace Kerf.UI
             var page = Document.GetActivePage();
             if (page == null) return;
 
+            var target = InsertionTargetResolver.ResolveTarget(page, _selectedLayers);
             var pasted = new List<LayerNode>();
+            var idMap = new Dictionary<string, LayerNode>();
+
             foreach (var orig in _clipboardLayers)
             {
                 var clone = orig.Clone();
@@ -9886,14 +9993,45 @@ namespace Kerf.UI
                 {
                     BezierVectorEngine.OffsetGeometry(clone.Geometry, 24, 24);
                 }
-                clone.ParentId = null;
-                page.Layers.Add(clone);
+                idMap[orig.Id] = clone;
                 pasted.Add(clone);
             }
 
+            // Preserve internal parent-child relations among pasted layers
+            var topLevelPasted = new List<LayerNode>();
+            foreach (var orig in _clipboardLayers)
+            {
+                var clone = idMap[orig.Id];
+                if (!string.IsNullOrEmpty(orig.ParentId) && idMap.ContainsKey(orig.ParentId))
+                {
+                    var parentClone = idMap[orig.ParentId];
+                    clone.ParentId = parentClone.Id;
+                    if (parentClone.Children == null) parentClone.Children = new List<LayerNode>();
+                    if (!parentClone.Children.Contains(clone)) parentClone.Children.Add(clone);
+                }
+                else
+                {
+                    topLevelPasted.Add(clone);
+                }
+            }
+
+            InsertionTargetResolver.InsertMultipleObjects(page, target, topLevelPasted, reflowAutoLayout: true);
+
+            var targetContainer = target.Container;
+            History.Execute(new AddLayersCommand(page, pasted, () =>
+            {
+                if (targetContainer != null && targetContainer.AutoLayout != null && targetContainer.AutoLayout.Mode != AutoLayoutMode.None)
+                {
+                    AutoLayoutEngine.ReflowRecursive(targetContainer);
+                    InvalidateLayoutFrameVisuals(targetContainer);
+                }
+                _sceneGraph.Synchronize(page);
+                RefreshCanvas();
+                RefreshLayersList();
+            }));
+
             _selectedLayers.Clear();
-            _selectedLayers.AddRange(pasted);
-            History.Execute(new AddLayersCommand(page, pasted));
+            _selectedLayers.AddRange(topLevelPasted);
             _sceneGraph.Synchronize(page);
             OnSelectionChanged();
             RefreshCanvas();
@@ -9910,7 +10048,20 @@ namespace Kerf.UI
             double offsetX = canvasPt.X - bounds.X;
             double offsetY = canvasPt.Y - bounds.Y;
 
+            InsertionTargetResult target;
+            if (_selectedLayers.Count > 0)
+            {
+                target = InsertionTargetResolver.ResolveTarget(page, _selectedLayers);
+            }
+            else
+            {
+                var hit = CanvasInteractionController.HitTest(page, canvasPt);
+                target = InsertionTargetResolver.ResolveTarget(page, _selectedLayers, hit.OutermostNode);
+            }
+
             var pasted = new List<LayerNode>();
+            var idMap = new Dictionary<string, LayerNode>();
+
             foreach (var orig in _clipboardLayers)
             {
                 var clone = orig.Clone();
@@ -9920,14 +10071,44 @@ namespace Kerf.UI
                 {
                     BezierVectorEngine.OffsetGeometry(clone.Geometry, offsetX, offsetY);
                 }
-                clone.ParentId = null;
-                page.Layers.Add(clone);
+                idMap[orig.Id] = clone;
                 pasted.Add(clone);
             }
 
+            var topLevelPasted = new List<LayerNode>();
+            foreach (var orig in _clipboardLayers)
+            {
+                var clone = idMap[orig.Id];
+                if (!string.IsNullOrEmpty(orig.ParentId) && idMap.ContainsKey(orig.ParentId))
+                {
+                    var parentClone = idMap[orig.ParentId];
+                    clone.ParentId = parentClone.Id;
+                    if (parentClone.Children == null) parentClone.Children = new List<LayerNode>();
+                    if (!parentClone.Children.Contains(clone)) parentClone.Children.Add(clone);
+                }
+                else
+                {
+                    topLevelPasted.Add(clone);
+                }
+            }
+
+            InsertionTargetResolver.InsertMultipleObjects(page, target, topLevelPasted, reflowAutoLayout: true);
+
+            var targetContainer = target.Container;
+            History.Execute(new AddLayersCommand(page, pasted, () =>
+            {
+                if (targetContainer != null && targetContainer.AutoLayout != null && targetContainer.AutoLayout.Mode != AutoLayoutMode.None)
+                {
+                    AutoLayoutEngine.ReflowRecursive(targetContainer);
+                    InvalidateLayoutFrameVisuals(targetContainer);
+                }
+                _sceneGraph.Synchronize(page);
+                RefreshCanvas();
+                RefreshLayersList();
+            }));
+
             _selectedLayers.Clear();
-            _selectedLayers.AddRange(pasted);
-            History.Execute(new AddLayersCommand(page, pasted));
+            _selectedLayers.AddRange(topLevelPasted);
             _sceneGraph.Synchronize(page);
             OnSelectionChanged();
             RefreshCanvas();
@@ -10521,8 +10702,8 @@ namespace Kerf.UI
         {
             var pill = new Border
             {
-                Background = KerfBrand.DarkSlateBrush, // #0C4247
-                BorderBrush = KerfBrand.TealBrush,     // #0A717B
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(2),
@@ -10544,7 +10725,7 @@ namespace Kerf.UI
                 Text = "Design",
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = KerfBrand.DarkSlateBrush
+                Foreground = KerfBrand.TextBlackBrush // Crisp black text on light green pill
             };
             _designTabButton.Child = designText;
             _designTabButton.MouseLeftButtonUp += (s, e) => SwitchStudioMode(StudioMode.Design);
@@ -10561,7 +10742,7 @@ namespace Kerf.UI
                 Text = "Animate",
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = KerfBrand.TextWhiteBrush
+                Foreground = KerfBrand.TextMutedBrush
             };
             _animateTabButton.Child = animateText;
             _animateTabButton.MouseLeftButtonUp += (s, e) => SwitchStudioMode(StudioMode.Animate);
@@ -10585,13 +10766,13 @@ namespace Kerf.UI
                 {
                     _designTabButton.Background = Brushes.Transparent;
                     var dt = _designTabButton.Child as TextBlock;
-                    if (dt != null) dt.Foreground = KerfBrand.TextWhiteBrush;
+                    if (dt != null) dt.Foreground = KerfBrand.TextMutedBrush;
                 }
                 if (_animateTabButton != null)
                 {
                     _animateTabButton.Background = KerfBrand.MintBrush;
                     var at = _animateTabButton.Child as TextBlock;
-                    if (at != null) at.Foreground = KerfBrand.DarkSlateBrush;
+                    if (at != null) at.Foreground = KerfBrand.TextBlackBrush;
                 }
 
                 if (_timelinePanel != null)
@@ -10607,7 +10788,12 @@ namespace Kerf.UI
                 if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Visible;
                 _interactiveCanvasEnabled = true;
                 if (_canvasInteractText != null) _canvasInteractText.Text = "Preview: On";
-                if (_canvasInteractBtn != null) _canvasInteractBtn.Background = new SolidColorBrush(Color.FromArgb(34, 34, 197, 94));
+                if (_canvasInteractBtn != null)
+                {
+                    _canvasInteractBtn.Background = KerfBrand.MintBrush;
+                    _canvasInteractBtn.BorderBrush = KerfBrand.MintBrush;
+                    if (_canvasInteractText != null) _canvasInteractText.Foreground = KerfBrand.TextBlackBrush;
+                }
                 UpdateTimelineModeTabs();
                 _timelineController.Seek(_timelineController.CurrentTime);
                 BuildStateMachineInputsControls();
@@ -10627,13 +10813,13 @@ namespace Kerf.UI
                 {
                     _designTabButton.Background = KerfBrand.MintBrush;
                     var dt = _designTabButton.Child as TextBlock;
-                    if (dt != null) dt.Foreground = KerfBrand.DarkSlateBrush;
+                    if (dt != null) dt.Foreground = KerfBrand.TextBlackBrush;
                 }
                 if (_animateTabButton != null)
                 {
                     _animateTabButton.Background = Brushes.Transparent;
                     var at = _animateTabButton.Child as TextBlock;
-                    if (at != null) at.Foreground = KerfBrand.TextWhiteBrush;
+                    if (at != null) at.Foreground = KerfBrand.TextMutedBrush;
                 }
 
                 if (_timelinePanel != null)
@@ -10738,8 +10924,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(28, 32, 44)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(12, 0, 12, 0)
             };
@@ -10751,12 +10937,12 @@ namespace Kerf.UI
             // Left: Transport Buttons
             var leftStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
 
-            // Play / Pause Button
+            // Play / Pause Button (Primary Light Green Button with Black Text per Brand Mockup)
             var playBtn = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(34, 197, 94)), // Emerald Green
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(10, 4, 10, 4),
+                Background = KerfBrand.MintBrush,
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 4, 12, 4),
                 Margin = new Thickness(0, 0, 6, 0),
                 Cursor = Cursors.Hand
             };
@@ -10765,9 +10951,11 @@ namespace Kerf.UI
                 Text = "▶ Play",
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White
+                Foreground = KerfBrand.TextBlackBrush
             };
             playBtn.Child = _timelinePlayBtnText;
+            playBtn.MouseEnter += (s, e) => playBtn.Background = KerfBrand.FreezeBrush(new SolidColorBrush(Color.FromRgb(0x62, 0xF7, 0xC0)));
+            playBtn.MouseLeave += (s, e) => playBtn.Background = KerfBrand.MintBrush;
             playBtn.MouseLeftButtonUp += (s, e) => ToggleAnimationPlayback();
             leftStack.Children.Add(playBtn);
 
@@ -10778,8 +10966,10 @@ namespace Kerf.UI
             // Loop Toggle Button
             var loopBtn = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(38, 44, 62)),
-                CornerRadius = new CornerRadius(5),
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(8, 4, 8, 4),
                 Margin = new Thickness(6, 0, 6, 0),
                 Cursor = Cursors.Hand
@@ -10788,9 +10978,11 @@ namespace Kerf.UI
             {
                 Text = "🔁 Loop: All",
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(200, 210, 235))
+                Foreground = Brushes.White
             };
             loopBtn.Child = _timelineLoopText;
+            loopBtn.MouseEnter += (s, e) => loopBtn.Background = KerfBrand.FigmaBorderBrush;
+            loopBtn.MouseLeave += (s, e) => loopBtn.Background = KerfBrand.FigmaPanelBrush;
             loopBtn.MouseLeftButtonUp += (s, e) => CycleTimelineLoopMode();
             leftStack.Children.Add(loopBtn);
 
@@ -10801,7 +10993,7 @@ namespace Kerf.UI
                 FontFamily = new FontFamily("Consolas, Courier New"),
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)), // Cyan
+                Foreground = KerfBrand.MintBrush, // Light Green brand accent
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(8, 0, 12, 0)
             };
@@ -10837,8 +11029,10 @@ namespace Kerf.UI
             // Active Clip Badge
             var clipBadge = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(36, 42, 60)),
-                CornerRadius = new CornerRadius(5),
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(8, 4, 8, 4),
                 Margin = new Thickness(0, 0, 8, 0)
             };
@@ -10846,7 +11040,7 @@ namespace Kerf.UI
             {
                 Text = "Clip: Default Animation",
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(180, 195, 220))
+                Foreground = Brushes.White
             };
             clipBadge.Child = _timelineClipText;
             clipBadge.Cursor = Cursors.Hand;
@@ -10856,11 +11050,11 @@ namespace Kerf.UI
 
             rightStack.Children.Add(CreateSmallTimelineButton("+ Clip", () => AddAnimationClip()));
 
-            // Add Keyframe Button
+            // Add Keyframe Button (Primary Light Green Button with Black Text per Brand Mockup)
             var addKeyBtn = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(99, 102, 241)), // Indigo Accent
-                CornerRadius = new CornerRadius(5),
+                Background = KerfBrand.MintBrush,
+                CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(10, 4, 10, 4),
                 Margin = new Thickness(0, 0, 8, 0),
                 Cursor = Cursors.Hand
@@ -10870,17 +11064,21 @@ namespace Kerf.UI
                 Text = "◆ + Keyframe",
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White
+                Foreground = KerfBrand.TextBlackBrush
             };
             addKeyBtn.Child = addKeyText;
+            addKeyBtn.MouseEnter += (s, e) => addKeyBtn.Background = KerfBrand.FreezeBrush(new SolidColorBrush(Color.FromRgb(0x62, 0xF7, 0xC0)));
+            addKeyBtn.MouseLeave += (s, e) => addKeyBtn.Background = KerfBrand.MintBrush;
             addKeyBtn.MouseLeftButtonUp += (s, e) => AddKeyframeForSelectedLayer();
             rightStack.Children.Add(addKeyBtn);
 
             // Speed Selector Button
             var speedBtn = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(38, 44, 62)),
-                CornerRadius = new CornerRadius(5),
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(8, 4, 8, 4),
                 Margin = new Thickness(0, 0, 8, 0),
                 Cursor = Cursors.Hand
@@ -10889,17 +11087,19 @@ namespace Kerf.UI
             {
                 Text = "1.0x",
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(200, 210, 235))
+                Foreground = Brushes.White
             };
             speedBtn.Child = _timelineSpeedText;
+            speedBtn.MouseEnter += (s, e) => speedBtn.Background = KerfBrand.FigmaBorderBrush;
+            speedBtn.MouseLeave += (s, e) => speedBtn.Background = KerfBrand.FigmaPanelBrush;
             speedBtn.MouseLeftButtonUp += (s, e) => CycleTimelineSpeed();
             rightStack.Children.Add(speedBtn);
 
             // Mode Tabs: [ ⚙ State Machine ] vs [ ⏱ Timeline Clips ]
             var modePill = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(22, 26, 36)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(48, 56, 75)),
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(2),
@@ -10909,7 +11109,7 @@ namespace Kerf.UI
 
             _tabStateMachineBtn = new Border
             {
-                Background = _isStateMachineMode ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : Brushes.Transparent,
+                Background = _isStateMachineMode ? KerfBrand.MintBrush : Brushes.Transparent,
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(10, 4, 10, 4),
                 Cursor = Cursors.Hand
@@ -10919,14 +11119,14 @@ namespace Kerf.UI
                 Text = "⚙ State Machine",
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = _isStateMachineMode ? Brushes.White : new SolidColorBrush(Color.FromRgb(160, 175, 205))
+                Foreground = _isStateMachineMode ? KerfBrand.TextBlackBrush : KerfBrand.TextMutedBrush
             };
             _tabStateMachineBtn.Child = smText;
             _tabStateMachineBtn.MouseLeftButtonUp += (s, e) => SwitchAnimationSubMode(true);
 
             _tabTimelineClipsBtn = new Border
             {
-                Background = !_isStateMachineMode ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : Brushes.Transparent,
+                Background = !_isStateMachineMode ? KerfBrand.MintBrush : Brushes.Transparent,
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(10, 4, 10, 4),
                 Cursor = Cursors.Hand
@@ -10936,7 +11136,7 @@ namespace Kerf.UI
                 Text = "⏱ Timeline Clips",
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = !_isStateMachineMode ? Brushes.White : new SolidColorBrush(Color.FromRgb(160, 175, 205))
+                Foreground = !_isStateMachineMode ? KerfBrand.TextBlackBrush : KerfBrand.TextMutedBrush
             };
             _tabTimelineClipsBtn.Child = tcText;
             _tabTimelineClipsBtn.MouseLeftButtonUp += (s, e) => SwitchAnimationSubMode(false);
@@ -10957,8 +11157,10 @@ namespace Kerf.UI
         {
             var btn = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(38, 44, 62)),
-                CornerRadius = new CornerRadius(5),
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(8, 4, 8, 4),
                 Margin = new Thickness(0, 0, 6, 0),
                 Cursor = Cursors.Hand
@@ -10967,9 +11169,11 @@ namespace Kerf.UI
             {
                 Text = text,
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(200, 210, 235))
+                Foreground = Brushes.White
             };
             btn.Child = tb;
+            btn.MouseEnter += (s, e) => btn.Background = KerfBrand.FigmaBorderBrush;
+            btn.MouseLeave += (s, e) => btn.Background = KerfBrand.FigmaPanelBrush;
             btn.MouseLeftButtonUp += (s, e) => onClick();
             return btn;
         }
@@ -11244,8 +11448,8 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(36, 42, 60)),
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
                 BorderThickness = new Thickness(0, 1, 0, 0),
                 Padding = new Thickness(8, 6, 8, 8)
             };
@@ -11256,35 +11460,58 @@ namespace Kerf.UI
             var header = new DockPanel { LastChildFill = false, Margin = new Thickness(4, 0, 4, 6) };
             var title = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             title.Children.Add(new TextBlock { Text = "State Machine", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White });
-            _stateMachineStatusBadge = new TextBlock { Text = "● Entry", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(74, 222, 128)), Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            _stateMachineStatusBadge = new TextBlock { Text = "● Entry", FontSize = 10, Foreground = KerfBrand.MintBrush, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             title.Children.Add(_stateMachineStatusBadge);
             DockPanel.SetDock(title, Dock.Left);
             header.Children.Add(title);
 
             var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            _canvasInteractBtn = new Border { Background = new SolidColorBrush(Color.FromArgb(34, 34, 197, 94)), BorderBrush = new SolidColorBrush(Color.FromRgb(56, 128, 98)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(7, 3, 7, 3), Margin = new Thickness(0, 0, 6, 0), Cursor = Cursors.Hand };
-            _canvasInteractText = new TextBlock { Text = "Preview: On", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(134, 239, 172)) };
+            _canvasInteractBtn = new Border
+            {
+                Background = KerfBrand.MintBrush,
+                BorderBrush = KerfBrand.MintBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(7, 3, 7, 3),
+                Margin = new Thickness(0, 0, 6, 0),
+                Cursor = Cursors.Hand
+            };
+            _canvasInteractText = new TextBlock { Text = "Preview: On", FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = KerfBrand.TextBlackBrush };
             _canvasInteractBtn.Child = _canvasInteractText;
             _canvasInteractBtn.MouseLeftButtonUp += (s, e) =>
             {
                 _interactiveCanvasEnabled = !_interactiveCanvasEnabled;
                 _canvasInteractText.Text = _interactiveCanvasEnabled ? "Preview: On" : "Preview: Off";
-                _canvasInteractBtn.Background = _interactiveCanvasEnabled ? new SolidColorBrush(Color.FromArgb(34, 34, 197, 94)) : new SolidColorBrush(Color.FromArgb(30, 100, 116, 139));
+                _canvasInteractBtn.Background = _interactiveCanvasEnabled ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush;
+                _canvasInteractBtn.BorderBrush = _interactiveCanvasEnabled ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush;
+                _canvasInteractText.Foreground = _interactiveCanvasEnabled ? KerfBrand.TextBlackBrush : KerfBrand.TextMutedBrush;
             };
             actions.Children.Add(_canvasInteractBtn);
-            var graphZoomControls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 2, 0) };
+            var graphZoomControls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 6, 0) };
             var zoomOut = CreateSmallTimelineButton("−", () => ZoomStateGraphBy(1.0 / 1.15));
             zoomOut.Padding = new Thickness(7, 4, 7, 4);
             var zoomIn = CreateSmallTimelineButton("+", () => ZoomStateGraphBy(1.15));
             zoomIn.Padding = new Thickness(7, 4, 7, 4);
-            _stateMachineGraphZoomText = new TextBlock { Text = "100%", Width = 38, TextAlignment = TextAlignment.Center, FontSize = 9, Foreground = new SolidColorBrush(Color.FromRgb(154, 167, 188)), VerticalAlignment = VerticalAlignment.Center };
+            _stateMachineGraphZoomText = new TextBlock { Text = "100%", Width = 38, TextAlignment = TextAlignment.Center, FontSize = 9, Foreground = KerfBrand.TextMutedBrush, VerticalAlignment = VerticalAlignment.Center };
             graphZoomControls.Children.Add(zoomOut);
             graphZoomControls.Children.Add(_stateMachineGraphZoomText);
             graphZoomControls.Children.Add(zoomIn);
             graphZoomControls.Children.Add(CreateSmallTimelineButton("Fit", FitStateGraphToView));
             actions.Children.Add(graphZoomControls);
-            actions.Children.Add(CreateSmallTimelineButton("+ State", AddStateMachineState));
-            actions.Children.Add(CreateSmallTimelineButton("+ Transition", ShowAddTransitionDialog));
+
+            var addStateBtn = KerfBrand.CreatePrimaryButton("+ State", AddStateMachineState, 5);
+            addStateBtn.Height = 24;
+            addStateBtn.Padding = new Thickness(10, 2, 10, 2);
+            addStateBtn.FontSize = 11;
+            actions.Children.Add(addStateBtn);
+
+            var addTransBtn = KerfBrand.CreateSecondaryButton("+ Transition", ShowAddTransitionDialog, 5);
+            addTransBtn.Height = 24;
+            addTransBtn.Padding = new Thickness(10, 2, 10, 2);
+            addTransBtn.FontSize = 11;
+            addTransBtn.Margin = new Thickness(6, 0, 0, 0);
+            actions.Children.Add(addTransBtn);
+
             DockPanel.SetDock(actions, Dock.Right);
             header.Children.Add(actions);
             Grid.SetRow(header, 0);
@@ -11296,14 +11523,14 @@ namespace Kerf.UI
             var graph = new Grid { Margin = new Thickness(0, 0, 8, 0) };
             graph.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             graph.RowDefinitions.Add(new RowDefinition { Height = new GridLength(80) });
-            _stateMachineGraphCanvas = new Canvas { Width = 780, Height = 230, Background = new SolidColorBrush(Color.FromRgb(18, 21, 28)), LayoutTransform = _stateMachineGraphScale };
+            _stateMachineGraphCanvas = new Canvas { Width = 780, Height = 230, Background = KerfBrand.FigmaCanvasBrush, LayoutTransform = _stateMachineGraphScale };
             _stateMachineGraphCanvas.PreviewMouseDown += HandleStateGraphPanStart;
             _stateMachineGraphCanvas.PreviewMouseUp += HandleStateGraphPanEnd;
             _stateMachineGraphCanvas.MouseMove += HandleStateGraphMouseMove;
             _stateMachineGraphCanvas.MouseLeftButtonUp += HandleStateGraphMouseUp;
             _stateMachineGraphScrollViewer = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _stateMachineGraphCanvas };
             _stateMachineGraphScrollViewer.PreviewMouseWheel += HandleStateGraphMouseWheel;
-            var graphBorder = new Border { Background = new SolidColorBrush(Color.FromRgb(18, 21, 28)), BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 62)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Child = _stateMachineGraphScrollViewer };
+            var graphBorder = new Border { Background = KerfBrand.FigmaCanvasBrush, BorderBrush = KerfBrand.FigmaBorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Child = _stateMachineGraphScrollViewer };
             Grid.SetRow(graphBorder, 0);
             graph.Children.Add(graphBorder);
             var curvePanel = CreateInterpolationGraphPanel(true);
@@ -11336,10 +11563,10 @@ namespace Kerf.UI
 
         private FrameworkElement CreateStateMachineCollapsibleSection(string title, Panel items, Action addAction, out TextBox searchBox)
         {
-            var section = new Border { Background = new SolidColorBrush(Color.FromRgb(26, 30, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(48, 55, 68)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(6) };
+            var section = new Border { Background = KerfBrand.FigmaCardBrush, BorderBrush = KerfBrand.FigmaBorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(6) };
             var content = new StackPanel();
             var header = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
-            var toggle = new TextBlock { Text = "⌄  " + title, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(204, 211, 222)), VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand };
+            var toggle = new TextBlock { Text = "⌄  " + title, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand };
             DockPanel.SetDock(toggle, Dock.Left);
             header.Children.Add(toggle);
             var add = CreateSmallTimelineButton("+", addAction);
@@ -11348,7 +11575,7 @@ namespace Kerf.UI
             DockPanel.SetDock(add, Dock.Right);
             header.Children.Add(add);
             content.Children.Add(header);
-            searchBox = new TextBox { Text = "Search " + title, ToolTip = "Search " + title, Height = 23, Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 0, 4), Background = new SolidColorBrush(Color.FromRgb(18, 21, 28)), Foreground = new SolidColorBrush(Color.FromRgb(118, 130, 149)), BorderBrush = new SolidColorBrush(Color.FromRgb(45, 52, 64)), FontSize = 10 };
+            searchBox = new TextBox { Text = "Search " + title, ToolTip = "Search " + title, Height = 23, Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 0, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = KerfBrand.TextMutedBrush, BorderBrush = KerfBrand.FigmaBorderBrush, FontSize = 10 };
             var search = searchBox;
             content.Children.Add(searchBox);
             string placeholder = "Search " + title;
@@ -11674,13 +11901,13 @@ namespace Kerf.UI
                 Height = 235,
                 ResizeMode = ResizeMode.NoResize,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
+                Background = KerfBrand.FigmaPanelBrush,
                 Foreground = Brushes.White
             };
             var owner = Window.GetWindow(this);
             if (owner != null) dialog.Owner = owner;
             var form = new StackPanel { Margin = new Thickness(18) };
-            var nameBox = new TextBox { Text = "newProperty", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)), Margin = new Thickness(0, 0, 0, 10) };
+            var nameBox = new TextBox { Text = "newProperty", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush, Margin = new Thickness(0, 0, 0, 10) };
             form.Children.Add(CreateTransitionFormRow("Name", nameBox));
             var kindBox = CreateModernComboBox(30);
             foreach (var kind in new ViewModelPropertyKind[] { ViewModelPropertyKind.Boolean, ViewModelPropertyKind.Number, ViewModelPropertyKind.Trigger, ViewModelPropertyKind.Text })
@@ -11688,9 +11915,11 @@ namespace Kerf.UI
             kindBox.SelectedIndex = 0;
             form.Children.Add(CreateTransitionFormRow("Type", kindBox));
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
-            var cancel = CreateSmallButton("Cancel", "Close without changes", () => dialog.Close());
+            var cancel = KerfBrand.CreateSecondaryButton("Cancel", () => dialog.Close(), 6);
             cancel.Width = 72;
-            var create = CreateSmallButton("Create", "Create property", () =>
+            cancel.Height = 26;
+            cancel.Padding = new Thickness(0);
+            var create = KerfBrand.CreatePrimaryButton("Create", () =>
             {
                 string propertyName = nameBox.Text.Trim();
                 if (string.IsNullOrEmpty(propertyName)) return;
@@ -11713,8 +11942,10 @@ namespace Kerf.UI
                 BuildStateMachineInputsControls();
                 BuildStateMachineStatesGraph();
                 dialog.Close();
-            });
+            }, 6);
             create.Width = 78;
+            create.Height = 26;
+            create.Padding = new Thickness(0);
             create.Margin = new Thickness(8, 0, 0, 0);
             buttons.Children.Add(cancel);
             buttons.Children.Add(create);
@@ -11738,7 +11969,7 @@ namespace Kerf.UI
                 Height = 370,
                 ResizeMode = ResizeMode.NoResize,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
+                Background = KerfBrand.FigmaPanelBrush,
                 Foreground = Brushes.White
             };
             var owner = Window.GetWindow(this);
@@ -11758,14 +11989,16 @@ namespace Kerf.UI
                 if (property != null) propertyBox.Items.Add(new ComboBoxItem { Content = property.Name + " · " + property.Kind, Tag = property });
             if (propertyBox.Items.Count > 0) propertyBox.SelectedIndex = 0;
             form.Children.Add(CreateTransitionFormRow("Property", propertyBox));
-            var valueBox = new TextBox { Text = "1", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            var valueBox = new TextBox { Text = "1", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
             form.Children.Add(CreateTransitionFormRow("Set value", valueBox));
-            form.Children.Add(new TextBlock { Text = "Click a listener chip below to remove it.", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)), Margin = new Thickness(0, 0, 0, 8) });
+            form.Children.Add(new TextBlock { Text = "Click a listener chip below to remove it.", FontSize = 10, Foreground = KerfBrand.TextMutedBrush, Margin = new Thickness(0, 0, 0, 8) });
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
-            var cancel = CreateSmallButton("Cancel", "Close without changes", () => dialog.Close());
+            var cancel = KerfBrand.CreateSecondaryButton("Cancel", () => dialog.Close(), 6);
             cancel.Width = 72;
-            var create = CreateSmallButton("Create", "Create listener", () =>
+            cancel.Height = 26;
+            cancel.Padding = new Thickness(0);
+            var create = KerfBrand.CreatePrimaryButton("Create", () =>
             {
                 var layerItem = targetBox.SelectedItem as ComboBoxItem;
                 var eventItem = eventBox.SelectedItem as ComboBoxItem;
@@ -11794,8 +12027,10 @@ namespace Kerf.UI
                 History.MarkDirty();
                 BuildStateMachineListeners();
                 dialog.Close();
-            });
+            }, 6);
             create.Width = 78;
+            create.Height = 26;
+            create.Padding = new Thickness(0);
             create.Margin = new Thickness(8, 0, 0, 0);
             buttons.Children.Add(cancel);
             buttons.Children.Add(create);
@@ -11857,7 +12092,7 @@ namespace Kerf.UI
                 Height = 500,
                 ResizeMode = ResizeMode.NoResize,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)),
+                Background = KerfBrand.FigmaPanelBrush,
                 Foreground = Brushes.White
             };
             var owner = Window.GetWindow(this);
@@ -11877,7 +12112,7 @@ namespace Kerf.UI
             form.Children.Add(CreateTransitionFormRow("From", fromBox));
             form.Children.Add(CreateTransitionFormRow("To", toBox));
 
-            var durationBox = new TextBox { Text = "0.2", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            var durationBox = new TextBox { Text = "0.2", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
             form.Children.Add(CreateTransitionFormRow("Blend (s)", durationBox));
 
             var interpolationBox = CreateModernComboBox(30);
@@ -11900,7 +12135,7 @@ namespace Kerf.UI
             foreach (var op in new ConditionOp[] { ConditionOp.Eq, ConditionOp.Ne, ConditionOp.Gt, ConditionOp.Ge, ConditionOp.Lt, ConditionOp.Le })
                 opBox.Items.Add(new ComboBoxItem { Content = op.ToString(), Tag = op });
             opBox.SelectedIndex = 0;
-            var valueBox = new TextBox { Text = "1", Width = 74, Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            var valueBox = new TextBox { Text = "1", Width = 74, Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
             var conditionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
             conditionRow.Children.Add(opBox);
             conditionRow.Children.Add(valueBox);
@@ -11931,13 +12166,13 @@ namespace Kerf.UI
                 conditions.Add(condition);
                 var token = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(38, 48, 66)),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)),
+                    Background = KerfBrand.FigmaCardBrush,
+                    BorderBrush = KerfBrand.FigmaBorderBrush,
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(4),
                     Padding = new Thickness(7, 3, 7, 3),
                     Margin = new Thickness(0, 0, 5, 4),
-                    Child = new TextBlock { Text = (property != null ? property.Name : selected.Content.ToString()) + " " + operation.ToString() + " " + (property != null && property.Kind == ViewModelPropertyKind.Text ? valueBox.Text : threshold.ToString("0.##")), FontSize = 9.5, Foreground = new SolidColorBrush(Color.FromRgb(195, 207, 226)) }
+                    Child = new TextBlock { Text = (property != null ? property.Name : selected.Content.ToString()) + " " + operation.ToString() + " " + (property != null && property.Kind == ViewModelPropertyKind.Text ? valueBox.Text : threshold.ToString("0.##")), FontSize = 9.5, Foreground = Brushes.White }
                 };
                 token.ToolTip = "Click to remove condition";
                 token.Cursor = Cursors.Hand;
@@ -11951,13 +12186,15 @@ namespace Kerf.UI
             form.Children.Add(addConditionButton);
             form.Children.Add(conditionTokens);
 
-            var bidirectional = new CheckBox { Content = "Also add a reverse transition", Foreground = new SolidColorBrush(Color.FromRgb(184, 194, 210)), FontSize = 10.5, Margin = new Thickness(0, 2, 0, 4) };
+            var bidirectional = new CheckBox { Content = "Also add a reverse transition", Foreground = KerfBrand.TextMutedBrush, FontSize = 10.5, Margin = new Thickness(0, 2, 0, 4) };
             form.Children.Add(bidirectional);
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-            var cancelButton = CreateSmallButton("Cancel", "Close without changes", () => dialog.Close());
+            var cancelButton = KerfBrand.CreateSecondaryButton("Cancel", () => dialog.Close(), 6);
             cancelButton.Width = 72;
-            var addButton = CreateSmallButton("Create", "Create transition", () =>
+            cancelButton.Height = 26;
+            cancelButton.Padding = new Thickness(0);
+            var addButton = KerfBrand.CreatePrimaryButton("Create", () =>
             {
                 var from = fromBox.SelectedItem as ComboBoxItem;
                 var to = toBox.SelectedItem as ComboBoxItem;
@@ -11978,8 +12215,10 @@ namespace Kerf.UI
                 BuildStateMachineStatesGraph();
                 RefreshTimelineUI();
                 dialog.Close();
-            });
+            }, 6);
             addButton.Width = 78;
+            addButton.Height = 26;
+            addButton.Padding = new Thickness(0);
             addButton.Margin = new Thickness(8, 0, 0, 0);
             buttons.Children.Add(cancelButton);
             buttons.Children.Add(addButton);
@@ -11992,10 +12231,10 @@ namespace Kerf.UI
         {
             if (transition == null || layer == null || _timelineController == null || _timelineController.ActiveStateMachine == null) return;
             var sm = _timelineController.ActiveStateMachine;
-            var dialog = new Window { Title = "Transition", Width = 360, Height = 330, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)), Foreground = Brushes.White };
+            var dialog = new Window { Title = "Transition", Width = 360, Height = 330, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = KerfBrand.FigmaPanelBrush, Foreground = Brushes.White };
             var owner = Window.GetWindow(this); if (owner != null) dialog.Owner = owner;
             var form = new StackPanel { Margin = new Thickness(16) };
-            var duration = new TextBox { Text = transition.Duration.ToString("0.##", CultureInfo.InvariantCulture), Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            var duration = new TextBox { Text = transition.Duration.ToString("0.##", CultureInfo.InvariantCulture), Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
             form.Children.Add(CreateTransitionFormRow("Blend (s)", duration));
             var interpolation = CreateModernComboBox(30);
             foreach (InterpMode mode in new[] { InterpMode.Hold, InterpMode.Linear, InterpMode.Cubic }) interpolation.Items.Add(new ComboBoxItem { Content = mode.ToString(), Tag = mode });
@@ -12025,15 +12264,19 @@ namespace Kerf.UI
             foreach (var op in new[] { ConditionOp.Eq, ConditionOp.Ne, ConditionOp.Gt, ConditionOp.Ge, ConditionOp.Lt, ConditionOp.Le }) operators.Items.Add(new ComboBoxItem { Content = op.ToString(), Tag = op });
             var initialOp = existingCondition != null ? (int)existingCondition.Op : 0;
             operators.SelectedIndex = Math.Max(0, Math.Min(5, initialOp));
-            var value = new TextBox { Text = existingCondition != null ? (existingCondition.TextValue ?? existingCondition.Value.ToString("0.##", CultureInfo.InvariantCulture)) : "1", Width = 100, Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            var value = new TextBox { Text = existingCondition != null ? (existingCondition.TextValue ?? existingCondition.Value.ToString("0.##", CultureInfo.InvariantCulture)) : "1", Width = 100, Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
             var conditionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
             conditionRow.Children.Add(operators); conditionRow.Children.Add(value); form.Children.Add(conditionRow);
             bool reverseExists = layer.Transitions.Any(candidate => candidate != null && candidate != transition && candidate.FromState == transition.ToState && candidate.ToState == transition.FromState);
-            var bidirectional = new CheckBox { Content = "Add reverse transition", IsChecked = reverseExists, IsEnabled = !reverseExists, Foreground = new SolidColorBrush(Color.FromRgb(184, 194, 210)), FontSize = 10.5, Margin = new Thickness(0, 0, 0, 8) };
+            var bidirectional = new CheckBox { Content = "Add reverse transition", IsChecked = reverseExists, IsEnabled = !reverseExists, Foreground = KerfBrand.TextMutedBrush, FontSize = 10.5, Margin = new Thickness(0, 0, 0, 8) };
             form.Children.Add(bidirectional);
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            buttons.Children.Add(CreateSmallButton("Cancel", "Close without changes", () => dialog.Close()));
-            var saveButton = CreateSmallButton("Save", "Save transition", () =>
+            var editCancelBtn = KerfBrand.CreateSecondaryButton("Cancel", () => dialog.Close(), 6);
+            editCancelBtn.Width = 72;
+            editCancelBtn.Height = 26;
+            editCancelBtn.Padding = new Thickness(0);
+            buttons.Children.Add(editCancelBtn);
+            var saveButton = KerfBrand.CreatePrimaryButton("Save", () =>
             {
                 double blend;
                 if (!double.TryParse(duration.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out blend)) blend = transition.Duration;
@@ -12083,7 +12326,10 @@ namespace Kerf.UI
                 History.MarkDirty();
                 BuildStateMachineStatesGraph();
                 dialog.Close();
-            });
+            }, 6);
+            saveButton.Width = 78;
+            saveButton.Height = 26;
+            saveButton.Padding = new Thickness(0);
             saveButton.Margin = new Thickness(8, 0, 0, 0);
             buttons.Children.Add(saveButton);
             form.Children.Add(buttons);
@@ -12309,8 +12555,8 @@ namespace Kerf.UI
                 {
                     Width = width,
                     Height = height,
-                    Background = new SolidColorBrush(state.Kind == StateKind.Entry ? Color.FromRgb(29, 44, 42) : state.Kind == StateKind.Any ? Color.FromRgb(24, 40, 48) : state.Kind == StateKind.Exit ? Color.FromRgb(45, 31, 34) : Color.FromRgb(38, 40, 45)),
-                    BorderBrush = new SolidColorBrush(active ? Color.FromRgb(91, 196, 144) : selected ? Color.FromRgb(236, 72, 153) : Color.FromRgb(70, 75, 85)),
+                    Background = KerfBrand.FigmaCardBrush,
+                    BorderBrush = (active || selected) ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
                     BorderThickness = new Thickness(active || selected ? 1.5 : 1),
                     CornerRadius = new CornerRadius(5),
                     Cursor = state.Kind == StateKind.Exit ? Cursors.Arrow : Cursors.SizeAll,
@@ -12318,7 +12564,7 @@ namespace Kerf.UI
                 };
                 var content = new Grid { Margin = new Thickness(8, 4, state.Kind == StateKind.Exit ? 8 : 18, 4) };
                 var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-                var name = new TextBlock { Text = state.Name, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(state.Kind == StateKind.Entry ? Color.FromRgb(110, 231, 183) : state.Kind == StateKind.Exit ? Color.FromRgb(248, 113, 113) : state.Kind == StateKind.Any ? Color.FromRgb(103, 232, 249) : new Color { A = 255, R = 218, G = 223, B = 232 }), TextTrimming = TextTrimming.CharacterEllipsis };
+                var name = new TextBlock { Text = state.Name, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = (state.Kind == StateKind.Entry || active) ? KerfBrand.MintBrush : Brushes.White, TextTrimming = TextTrimming.CharacterEllipsis };
                 labels.Children.Add(name);
                 if (state.Kind == StateKind.Animation || state.Kind == StateKind.Blend1D || state.Kind == StateKind.BlendDirect)
                 {
@@ -12391,7 +12637,7 @@ namespace Kerf.UI
                 var geometry = new PathGeometry();
                 geometry.Figures.Add(figure);
                 bool selected = ReferenceEquals(_selectedGraphTransition, transition);
-                var line = new System.Windows.Shapes.Path { Data = geometry, Stroke = new SolidColorBrush(selected ? Color.FromRgb(244, 114, 182) : Color.FromRgb(94, 108, 128)), StrokeThickness = selected ? 2 : 1.35, Fill = Brushes.Transparent, Cursor = Cursors.Hand, Tag = transition, ToolTip = from.Name + " → " + to.Name + " · " + TransitionConditionSummary(transition) };
+                var line = new System.Windows.Shapes.Path { Data = geometry, Stroke = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)), StrokeThickness = selected ? 2 : 1.35, Fill = Brushes.Transparent, Cursor = Cursors.Hand, Tag = transition, ToolTip = from.Name + " → " + to.Name + " · " + TransitionConditionSummary(transition) };
                 line.MouseLeftButtonDown += (s, e) => { SelectGraphTransition(transition, layer); e.Handled = true; };
                 line.MouseRightButtonUp += (s, e) => ShowTransitionContextMenu(line, layer, transition);
                 Panel.SetZIndex(line, 0);
@@ -12404,14 +12650,14 @@ namespace Kerf.UI
                 var arrow = new Polygon
                 {
                     Points = new PointCollection { end, arrowBase + perpendicular * 4.0, arrowBase - perpendicular * 4.0 },
-                    Fill = new SolidColorBrush(selected ? Color.FromRgb(244, 114, 182) : Color.FromRgb(94, 108, 128)),
+                    Fill = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)),
                     Tag = transition,
                     IsHitTestVisible = false
                 };
                 Panel.SetZIndex(arrow, 11);
                 _stateMachineGraphCanvas.Children.Add(arrow);
                 Point middle = new Point((start.X + 3 * c1.X + 3 * c2.X + end.X) / 8.0, (start.Y + 3 * c1.Y + 3 * c2.Y + end.Y) / 8.0);
-                var label = new Border { Background = new SolidColorBrush(Color.FromRgb(31, 35, 43)), BorderBrush = new SolidColorBrush(selected ? Color.FromRgb(244, 114, 182) : Color.FromRgb(74, 83, 98)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(5, 2, 5, 2), Tag = transition, Cursor = Cursors.Hand, Child = new TextBlock { Text = string.Format("{0:0.##}s", transition.Duration), FontSize = 8, Foreground = new SolidColorBrush(Color.FromRgb(191, 200, 214)) }, ToolTip = TransitionConditionSummary(transition) + " · " + transition.Interpolation };
+                var label = new Border { Background = KerfBrand.FigmaCardBrush, BorderBrush = selected ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(5, 2, 5, 2), Tag = transition, Cursor = Cursors.Hand, Child = new TextBlock { Text = string.Format("{0:0.##}s", transition.Duration), FontSize = 8, Foreground = Brushes.White }, ToolTip = TransitionConditionSummary(transition) + " · " + transition.Interpolation };
                 Canvas.SetLeft(label, middle.X - 17);
                 Canvas.SetTop(label, middle.Y - 8);
                 label.MouseLeftButtonDown += (s, e) =>
@@ -12479,7 +12725,7 @@ namespace Kerf.UI
             var figure = new PathFigure { StartPoint = start, IsClosed = false };
             figure.Segments.Add(new BezierSegment(new Point(start.X + 40, start.Y), new Point(point.X - 40, point.Y), point, true));
             var geometry = new PathGeometry(); geometry.Figures.Add(figure);
-            var path = new System.Windows.Shapes.Path { Data = geometry, Stroke = new SolidColorBrush(Color.FromRgb(244, 114, 182)), StrokeThickness = 1.5, StrokeDashArray = new DoubleCollection { 3, 2 }, IsHitTestVisible = false, Tag = "__connectionPreview" };
+            var path = new System.Windows.Shapes.Path { Data = geometry, Stroke = KerfBrand.MintBrush, StrokeThickness = 1.5, StrokeDashArray = new DoubleCollection { 3, 2 }, IsHitTestVisible = false, Tag = "__connectionPreview" };
             Panel.SetZIndex(path, 20);
             _stateMachineGraphCanvas.Children.Add(path);
         }
@@ -12741,13 +12987,17 @@ namespace Kerf.UI
         private void ShowRenameStateDialog(MachineLayer layer, MachineState state)
         {
             if (state == null) return;
-            var dialog = new Window { Title = "Rename State", Width = 300, Height = 130, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = new SolidColorBrush(Color.FromRgb(20, 23, 32)), Foreground = Brushes.White };
+            var dialog = new Window { Title = "Rename State", Width = 300, Height = 135, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = KerfBrand.FigmaPanelBrush, Foreground = Brushes.White };
             var owner = Window.GetWindow(this); if (owner != null) dialog.Owner = owner;
             var stack = new StackPanel { Margin = new Thickness(14) };
-            var input = new TextBox { Text = state.Name, Height = 27, Padding = new Thickness(6, 4, 6, 4), Background = new SolidColorBrush(Color.FromRgb(35, 41, 56)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(67, 78, 99)) };
+            var input = new TextBox { Text = state.Name, Height = 27, Padding = new Thickness(6, 4, 6, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
             stack.Children.Add(input);
-            var save = CreateSmallButton("Save", "Rename state", () => { state.Name = input.Text.Trim(); if (History != null) History.MarkDirty(); BuildStateMachineStatesGraph(); dialog.Close(); });
-            save.Margin = new Thickness(0, 8, 0, 0); stack.Children.Add(save);
+            var save = KerfBrand.CreatePrimaryButton("Save", () => { state.Name = input.Text.Trim(); if (History != null) History.MarkDirty(); BuildStateMachineStatesGraph(); dialog.Close(); }, 6);
+            save.Height = 26;
+            save.Padding = new Thickness(16, 0, 16, 0);
+            save.Margin = new Thickness(0, 10, 0, 0);
+            save.HorizontalAlignment = HorizontalAlignment.Right;
+            stack.Children.Add(save);
             dialog.Content = stack; dialog.ShowDialog();
         }
 
@@ -12856,15 +13106,15 @@ namespace Kerf.UI
         {
             if (_tabStateMachineBtn != null)
             {
-                _tabStateMachineBtn.Background = _isStateMachineMode ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : Brushes.Transparent;
+                _tabStateMachineBtn.Background = _isStateMachineMode ? KerfBrand.MintBrush : Brushes.Transparent;
                 var tb = _tabStateMachineBtn.Child as TextBlock;
-                if (tb != null) tb.Foreground = _isStateMachineMode ? Brushes.White : new SolidColorBrush(Color.FromRgb(160, 175, 205));
+                if (tb != null) tb.Foreground = _isStateMachineMode ? KerfBrand.TextBlackBrush : KerfBrand.TextMutedBrush;
             }
             if (_tabTimelineClipsBtn != null)
             {
-                _tabTimelineClipsBtn.Background = !_isStateMachineMode ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : Brushes.Transparent;
+                _tabTimelineClipsBtn.Background = !_isStateMachineMode ? KerfBrand.MintBrush : Brushes.Transparent;
                 var tb = _tabTimelineClipsBtn.Child as TextBlock;
-                if (tb != null) tb.Foreground = !_isStateMachineMode ? Brushes.White : new SolidColorBrush(Color.FromRgb(160, 175, 205));
+                if (tb != null) tb.Foreground = !_isStateMachineMode ? KerfBrand.TextBlackBrush : KerfBrand.TextMutedBrush;
             }
         }
 
@@ -13493,6 +13743,7 @@ namespace Kerf.UI
                 layer.CornerRadiusBottomRight = pose.CornerRadiusBottomRight;
                 layer.CornerRadiusBottomLeft = pose.CornerRadiusBottomLeft;
                 if (pose.Geometry != null) layer.Geometry = pose.Geometry.Clone();
+                if (layer.RenderTransform != null) layer.RenderTransform.Reset();
             }
         }
 
@@ -13503,13 +13754,11 @@ namespace Kerf.UI
             foreach (var layer in layers)
             {
                 uint id = PropertyBinder.GetNumericNodeId(layer.Id);
-                if (!_animationRestPose.ContainsKey(layer))
-                {
-                    CaptureAnimationRestPoseForLayer(layer);
-                }
+                _animationNodesById[id] = layer;
+                if (layer.RenderTransform == null) layer.RenderTransform = new RenderTransform();
+                layer.RenderTransform.Reset();
             }
 
-            RestoreAnimationRestPose();
             if (pose != null)
             {
                 foreach (var item in pose)
@@ -13519,69 +13768,12 @@ namespace Kerf.UI
                         PropertyBinder.ApplyPoseToLayer(layer, item.Key, pose);
                 }
             }
-
-            // Layer bounds are stored in canvas coordinates, so animating a frame's transform
-            // must explicitly carry its descendants along. Each child uses the resulting parent
-            // delta as its own basis, which composes correctly through nested frames.
-            if (page.Layers != null)
-            {
-                foreach (var root in page.Layers)
-                    ApplyAnimatedParentTransformToChildren(root);
-            }
         }
 
         private void ApplyAnimatedParentTransformToChildren(LayerNode parent)
         {
-            if (parent == null || parent.Children == null || parent.Children.Count == 0) return;
-            AnimationRestPose parentRest;
-            if (!_animationRestPose.TryGetValue(parent, out parentRest) || parentRest == null) return;
-
-            double scaleX = parent.Width / Math.Max(0.001, parentRest.Width);
-            double scaleY = parent.Height / Math.Max(0.001, parentRest.Height);
-            double rotationDelta = parent.Rotation - parentRest.Rotation;
-            double radians = rotationDelta * Math.PI / 180.0;
-            double cos = Math.Cos(radians);
-            double sin = Math.Sin(radians);
-            double restCenterX = parentRest.X + parentRest.Width / 2.0;
-            double restCenterY = parentRest.Y + parentRest.Height / 2.0;
-            double currentCenterX = parent.X + parent.Width / 2.0;
-            double currentCenterY = parent.Y + parent.Height / 2.0;
-
-            foreach (var child in parent.Children)
-            {
-                if (child == null) continue;
-                AnimationRestPose childRest;
-                if (_animationRestPose.TryGetValue(child, out childRest) && childRest != null)
-                {
-                    double childCenterX = child.X + child.Width / 2.0;
-                    double childCenterY = child.Y + child.Height / 2.0;
-                    double relX = (childCenterX - restCenterX) * scaleX;
-                    double relY = (childCenterY - restCenterY) * scaleY;
-                    double nextCenterX = currentCenterX + relX * cos - relY * sin;
-                    double nextCenterY = currentCenterY + relX * sin + relY * cos;
-                    double nextWidth = Math.Max(1.0, child.Width * Math.Abs(scaleX));
-                    double nextHeight = Math.Max(1.0, child.Height * Math.Abs(scaleY));
-                    Rect nextBounds = new Rect(nextCenterX - nextWidth / 2.0, nextCenterY - nextHeight / 2.0, nextWidth, nextHeight);
-
-                    child.X = nextBounds.X;
-                    child.Y = nextBounds.Y;
-                    child.Width = nextBounds.Width;
-                    child.Height = nextBounds.Height;
-                    child.Rotation += rotationDelta;
-
-                    // Vector path points are canvas based, so scale/translate them with the frame too.
-                    if (child.Type == ElementType.Path && childRest.Geometry != null)
-                    {
-                        child.Geometry = childRest.Geometry.Clone();
-                        BezierVectorEngine.ScaleGeometry(
-                            child.Geometry,
-                            new Rect(childRest.X, childRest.Y, Math.Max(1.0, childRest.Width), Math.Max(1.0, childRest.Height)),
-                            nextBounds);
-                    }
-                }
-
-                ApplyAnimatedParentTransformToChildren(child);
-            }
+            // Non-destructive transform: Direct2D and WPF composition automatically apply the parent's
+            // RenderTransform to all visual children without mutating layout geometry or vector points.
         }
 
         private void EnsureTimelineControllerInitialized()

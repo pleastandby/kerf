@@ -6,7 +6,7 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 
 ## Phases
 
-- [ ] **Phase 1: Independent Transform Pipeline & Render Separation** - Introduce decoupled render transforms so animation never destructively mutates layer dimensions or Auto Layout bounds.
+- [x] **Phase 1: Independent Transform Pipeline & Render Separation** - Introduce decoupled render transforms so animation never destructively mutates layer dimensions or Auto Layout bounds.
 - [ ] **Phase 2: Core Animation Data Model** - Implement GUID-backed stable track targets, typed property binders, and keyframe schema.
 - [ ] **Phase 3: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
 - [ ] **Phase 4: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
@@ -28,8 +28,8 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Implement `LayerTransform` / `MatrixTransform` model with translation, scale, rotation, skew, and anchor origin support.
-- [ ] 01-02: Integrate render transform evaluation into Direct2D canvas renderer and layer bounds calculation while preserving Auto Layout geometry.
+- [x] 01-01: Implement `LayerTransform` / `MatrixTransform` model with translation, scale, rotation, skew, and anchor origin support.
+- [x] 01-02: Integrate render transform evaluation into Direct2D canvas renderer and layer bounds calculation while preserving Auto Layout geometry.
 
 ---
 
@@ -155,3 +155,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 ---
 *Roadmap defined: 2026-11-05*
 *Last updated: 2026-11-05 after initialization*
+

@@ -1,3 +1,0 @@
-1. Add a uniforrm scale option for object in transform.
-2. You should be able to duplicate objects inside the autolayout if you click alt and drag if the innter item is selected using deep select
-3. The Animation system needs refinement, remove the existing animation system and redefine it with rive as a reference, you can use any powerful tools and techniques to replicate the modern Rive animation engine into this using state machines, inputs, views, listeners etc

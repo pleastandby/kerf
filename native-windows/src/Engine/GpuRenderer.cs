@@ -54,6 +54,17 @@ namespace Kerf.Engine
                 visual.Clip = null;
             }
 
+            // Set hardware transform if RenderTransform is active (transforms this visual and its child visual tree)
+            if (node.RenderTransform != null && !node.RenderTransform.IsIdentity)
+            {
+                var rtMat = node.GetRenderTransformMatrix();
+                visual.Transform = new MatrixTransform(rtMat);
+            }
+            else
+            {
+                visual.Transform = null;
+            }
+
             using (var dc = visual.RenderOpen())
             {
                 if (!node.IsVisible || node.Opacity <= 0.0)

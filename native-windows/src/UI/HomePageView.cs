@@ -321,13 +321,13 @@ namespace Kerf.UI
 
             card.MouseEnter += (s, e) =>
             {
-                card.Background = KerfBrand.TealBrush;
+                card.Background = KerfBrand.FigmaBorderBrush;
                 card.BorderBrush = KerfBrand.MintBrush;
             };
             card.MouseLeave += (s, e) =>
             {
-                card.Background = KerfBrand.DarkSlateBrush;
-                card.BorderBrush = KerfBrand.TealBrush;
+                card.Background = KerfBrand.FigmaPanelBrush;
+                card.BorderBrush = KerfBrand.FigmaBorderBrush;
             };
             card.MouseLeftButtonUp += (s, e) => onClick();
 
@@ -485,13 +485,13 @@ namespace Kerf.UI
 
             card.MouseEnter += (s, e) =>
             {
-                card.Background = KerfBrand.TealBrush;
+                card.Background = KerfBrand.FigmaBorderBrush;
                 card.BorderBrush = KerfBrand.MintBrush;
             };
             card.MouseLeave += (s, e) =>
             {
-                card.Background = KerfBrand.DarkSlateBrush;
-                card.BorderBrush = KerfBrand.TealBrush;
+                card.Background = KerfBrand.FigmaPanelBrush;
+                card.BorderBrush = KerfBrand.FigmaBorderBrush;
             };
             card.MouseLeftButtonUp += (s, e) => OpenProjectFile(meta.FilePath);
 

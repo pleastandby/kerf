@@ -447,20 +447,49 @@ namespace Kerf.Engine
             return null;
         }
 
+        public static Point CanvasToLocalPoint(LayerNode layer, Point canvasPt)
+        {
+            if (layer == null || layer.RenderTransform == null || layer.RenderTransform.IsIdentity)
+            {
+                return canvasPt;
+            }
+            var mat = layer.GetRenderTransformMatrix();
+            if (mat.HasInverse)
+            {
+                mat.Invert();
+                return mat.Transform(canvasPt);
+            }
+            return canvasPt;
+        }
+
+        public static Point LocalToCanvasPoint(LayerNode layer, Point localPt)
+        {
+            if (layer == null || layer.RenderTransform == null || layer.RenderTransform.IsIdentity)
+            {
+                return localPt;
+            }
+            var mat = layer.GetRenderTransformMatrix();
+            return mat.Transform(localPt);
+        }
+
         private LayerNode HitTestSubtree(SceneVisualNode vNode, Point point)
         {
             if (!vNode.ModelNode.IsVisible || vNode.ModelNode.IsLocked) return null;
 
+            Point localPt = CanvasToLocalPoint(vNode.ModelNode, point);
+            var bounds = vNode.WorldBounds;
+            // Respect container clipping: if container clips content and point is outside, children cannot be hit
+            if (vNode.ModelNode.ClipContent && !bounds.Contains(localPt)) return null;
+
             // Check children first (topmost child first)
             for (int i = vNode.Children.Count - 1; i >= 0; i--)
             {
-                var hit = HitTestSubtree(vNode.Children[i], point);
+                var hit = HitTestSubtree(vNode.Children[i], localPt);
                 if (hit != null) return hit;
             }
 
             // Check self bounds
-            var bounds = vNode.WorldBounds;
-            if (bounds.Contains(point))
+            if (bounds.Contains(localPt))
             {
                 return vNode.ModelNode;
             }

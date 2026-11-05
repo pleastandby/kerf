@@ -31,13 +31,54 @@ namespace Kerf.Engine.Animation
             Dictionary<ushort, double> props;
             if (!pose.TryGetValue(numericNodeId, out props)) return;
 
+            if (layer.RenderTransform == null)
+            {
+                layer.RenderTransform = new RenderTransform();
+            }
+
             double val;
-            if (props.TryGetValue((ushort)PropKey.X, out val)) layer.X = val;
-            if (props.TryGetValue((ushort)PropKey.Y, out val)) layer.Y = val;
-            if (props.TryGetValue((ushort)PropKey.Width, out val)) layer.Width = Math.Max(1.0, val);
-            if (props.TryGetValue((ushort)PropKey.Height, out val)) layer.Height = Math.Max(1.0, val);
-            if (props.TryGetValue((ushort)PropKey.Rotation, out val)) layer.Rotation = val;
-            if (props.TryGetValue((ushort)PropKey.Opacity, out val)) layer.Opacity = Math.Max(0.0, Math.Min(1.0, val));
+            // 1. Non-destructive X, Y translation offsets
+            if (props.TryGetValue((ushort)PropKey.X, out val))
+            {
+                layer.RenderTransform.TranslationX = val - layer.X;
+            }
+            if (props.TryGetValue((ushort)PropKey.Y, out val))
+            {
+                layer.RenderTransform.TranslationY = val - layer.Y;
+            }
+
+            // 2. Non-destructive ScaleX, ScaleY transforms
+            if (props.TryGetValue((ushort)PropKey.ScaleX, out val))
+            {
+                layer.RenderTransform.ScaleX = val;
+            }
+            else if (props.TryGetValue((ushort)PropKey.Width, out val))
+            {
+                layer.RenderTransform.ScaleX = val / Math.Max(0.001, layer.Width);
+            }
+
+            if (props.TryGetValue((ushort)PropKey.ScaleY, out val))
+            {
+                layer.RenderTransform.ScaleY = val;
+            }
+            else if (props.TryGetValue((ushort)PropKey.Height, out val))
+            {
+                layer.RenderTransform.ScaleY = val / Math.Max(0.001, layer.Height);
+            }
+
+            // 3. Non-destructive Rotation
+            if (props.TryGetValue((ushort)PropKey.Rotation, out val))
+            {
+                layer.RenderTransform.Rotation = val - layer.Rotation;
+            }
+
+            // 4. Visual Opacity (non-destructive to geometry)
+            if (props.TryGetValue((ushort)PropKey.Opacity, out val))
+            {
+                layer.Opacity = Math.Max(0.0, Math.Min(1.0, val));
+            }
+
+            // 5. CornerRadius
             if (props.TryGetValue((ushort)PropKey.CornerRadius, out val))
             {
                 layer.CornerRadius = Math.Max(0.0, val);

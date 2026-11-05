@@ -74,6 +74,10 @@ namespace Kerf.Tests
             RunTest("Uniform Scale Option in Transform: Lock Aspect Ratio & Proportional Resizing", TestUniformScaleLockAspectRatio);
             RunTest("Alt+Drag Deep Select Duplication in Auto Layout Frames", TestAltDragDuplicationInAutoLayout);
             RunTest("Modern Vector State Machine Animation Engine: Inputs, Listeners, ViewModels & Blended Transitions", TestModernVectorStateMachineAnimationEngine);
+            RunTest("Figma Dark UI Colors, Light Green Button Theming & Menu Visibility", TestFigmaDarkColorsAndButtons);
+            RunTest("Hierarchical Hit-Testing & Centralized Selection/Drag Pipeline", TestHierarchicalHitTestingAndCentralizedInteractionPipeline);
+            RunTest("Hierarchical Object Insertion & Container Target Resolution", TestHierarchicalObjectInsertionAndContainerTargetResolution);
+            RunTest("Non-Destructive Render Transforms & Auto Layout Preservation", TestNonDestructiveRenderTransformsAndAutoLayoutPreservation);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -2401,7 +2405,7 @@ namespace Kerf.Tests
 
             LayerNode testLayer = new LayerNode { Id = "test-node", X = 0, Y = 0, Width = 100, Height = 100, Opacity = 1.0 };
             PropertyBinder.ApplyPoseToLayer(testLayer, 7, smartPose);
-            Assert(testLayer.X == smartPose[7][(ushort)PropKey.X], "PropertyBinder updated LayerNode X from animation pose");
+            Assert(testLayer.X + testLayer.RenderTransform.TranslationX == smartPose[7][(ushort)PropKey.X], "PropertyBinder updated LayerNode RenderTransform TranslationX from animation pose");
             Assert(testLayer.Opacity == smartPose[7][(ushort)PropKey.Opacity], "PropertyBinder updated LayerNode Opacity from animation pose");
 
             // 10. Native Rust Interop Verification
@@ -3350,6 +3354,716 @@ namespace Kerf.Tests
             runtime.Update(0.01, pose);
             runtime.Update(0.15, pose);
             Assert(runtime.LayerRuntimes[0].CurrentState == clickedState, "Transitioned to Clicked state (State 3)");
+        }
+
+        private static void TestFigmaDarkColorsAndButtons()
+        {
+            // 1. Verify Authentic Figma UI Colors
+            Assert(KerfBrand.FigmaPanel == Color.FromRgb(0x2C, 0x2C, 0x2C), "FigmaPanel is #2C2C2C");
+            Assert(KerfBrand.FigmaCanvas == Color.FromRgb(0x1E, 0x1E, 0x1E), "FigmaCanvas is #1E1E1E");
+            Assert(KerfBrand.FigmaBorder == Color.FromRgb(0x38, 0x38, 0x38), "FigmaBorder is #383838");
+            Assert(KerfBrand.Mint == Color.FromRgb(0x46, 0xEF, 0xB1), "Brand Light Green Mint is #46EFB1");
+            Assert(KerfBrand.DarkSlate == KerfBrand.FigmaPanel, "DarkSlate mapped to FigmaPanel #2C2C2C");
+            Assert(KerfBrand.Obsidian == KerfBrand.FigmaCanvas, "Obsidian mapped to FigmaCanvas #1E1E1E");
+            Assert(KerfBrand.TealBrush.Color == KerfBrand.FigmaBorder, "TealBrush mapped to subtle Figma divider #383838");
+
+            // 2. Verify Primary Button: Light Green #46EFB1 fill, Black text per button mockup
+            var primaryBtn = KerfBrand.CreatePrimaryButton("Test Button");
+            var pBg = primaryBtn.Background as SolidColorBrush;
+            var pFg = primaryBtn.Foreground as SolidColorBrush;
+            Assert(pBg != null && pBg.Color == KerfBrand.Mint, "Primary Button background is #46EFB1");
+            Assert(pFg != null && pFg.Color == KerfBrand.TextBlack, "Primary Button text is Black (#111827)");
+
+            // 3. Verify Secondary Button: #2C2C2C Figma dark fill, 1px #46EFB1 border, White text per mockup
+            var secBtn = KerfBrand.CreateSecondaryButton("Cancel");
+            var sBg = secBtn.Background as SolidColorBrush;
+            var sBorder = secBtn.BorderBrush as SolidColorBrush;
+            Assert(sBg != null && sBg.Color == KerfBrand.FigmaPanel, "Secondary Button background is #2C2C2C");
+            Assert(sBorder != null && sBorder.Color == KerfBrand.Mint, "Secondary Button border is 1px #46EFB1");
+            Assert(secBtn.Foreground == Brushes.White, "Secondary Button text is White");
+        }
+
+        private static void TestHierarchicalHitTestingAndCentralizedInteractionPipeline()
+        {
+            // -------------------------------------------------------------
+            // 1. Hierarchical Hit-Testing System & Ancestor Path Building
+            // -------------------------------------------------------------
+            var page = new Page();
+            var rootFrame = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Root Frame",
+                X = 100,
+                Y = 100,
+                Width = 400,
+                Height = 300,
+                IsVisible = true,
+                IsLocked = false,
+                ClipContent = false
+            };
+            page.Layers.Add(rootFrame);
+
+            var childCard = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Child Card",
+                X = 120,
+                Y = 120,
+                Width = 200,
+                Height = 150,
+                IsVisible = true,
+                IsLocked = false,
+                ClipContent = false,
+                ParentId = rootFrame.Id
+            };
+            rootFrame.Children.Add(childCard);
+
+            var leafButton = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                Name = "Leaf Button",
+                X = 140,
+                Y = 140,
+                Width = 80,
+                Height = 40,
+                IsVisible = true,
+                IsLocked = false,
+                ParentId = childCard.Id
+            };
+            childCard.Children.Add(leafButton);
+
+            var leafIcon = new LayerNode
+            {
+                Type = ElementType.Ellipse,
+                Name = "Leaf Icon",
+                X = 240,
+                Y = 140,
+                Width = 30,
+                Height = 30,
+                IsVisible = true,
+                IsLocked = false,
+                ParentId = childCard.Id
+            };
+            childCard.Children.Add(leafIcon);
+
+            // Hit test over leafButton at (150, 150)
+            var hit = CanvasInteractionController.HitTest(page, new Point(150, 150));
+            Assert(hit.HasHit, "Hit-test successfully identified hit under pointer");
+            Assert(hit.DeepestNode == leafButton, "DeepestNode correctly resolved to leafButton");
+            Assert(hit.OutermostNode == rootFrame, "OutermostNode correctly resolved to rootFrame");
+            Assert(hit.HierarchyPath.Count == 3, "HierarchyPath contains exactly 3 levels");
+            Assert(hit.HierarchyPath[0] == rootFrame, "HierarchyPath[0] is rootFrame");
+            Assert(hit.HierarchyPath[1] == childCard, "HierarchyPath[1] is childCard");
+            Assert(hit.HierarchyPath[2] == leafButton, "HierarchyPath[2] is leafButton");
+            Assert(hit.Candidates.Contains(leafButton) && hit.Candidates.Contains(childCard) && hit.Candidates.Contains(rootFrame),
+                "Candidates contains all overlapping ancestor and leaf layers in z-order");
+
+            // -------------------------------------------------------------
+            // 2. Container Clipping Respect (ClipContent)
+            // -------------------------------------------------------------
+            var clippedFrame = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Clipped Frame",
+                X = 600,
+                Y = 100,
+                Width = 100,
+                Height = 100,
+                IsVisible = true,
+                IsLocked = false,
+                ClipContent = true
+            };
+            page.Layers.Add(clippedFrame);
+
+            var overflowChild = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                Name = "Overflowing Child",
+                X = 650,
+                Y = 150,
+                Width = 100,
+                Height = 100, // extends to (750, 250), outside clippedFrame bounds (600..700, 100..200)
+                IsVisible = true,
+                IsLocked = false,
+                ParentId = clippedFrame.Id
+            };
+            clippedFrame.Children.Add(overflowChild);
+
+            // Hit test at (720, 220) - inside overflowChild bounds, but outside clippedFrame
+            var clippedHit = CanvasInteractionController.HitTest(page, new Point(720, 220));
+            Assert(!clippedHit.HasHit || (clippedHit.DeepestNode != overflowChild && clippedHit.HierarchyPath.IndexOf(overflowChild) < 0),
+                "ClipContent=true strictly prunes overflowing child outside frame boundaries");
+
+            // Disable ClipContent: now overflowing content is selectable
+            clippedFrame.ClipContent = false;
+            var unclippedHit = CanvasInteractionController.HitTest(page, new Point(720, 220));
+            Assert(unclippedHit.HasHit && unclippedHit.DeepestNode == overflowChild,
+                "ClipContent=false permits overflowing child interaction");
+
+            // -------------------------------------------------------------
+            // 3. Visibility and Locked Layer Respect
+            // -------------------------------------------------------------
+            leafButton.IsLocked = true;
+            var lockedHit = CanvasInteractionController.HitTest(page, new Point(150, 150));
+            Assert(lockedHit.HasHit && lockedHit.DeepestNode != leafButton && lockedHit.DeepestNode == childCard,
+                "Locked layer is skipped by hit-testing, falling back to selectable container");
+            leafButton.IsLocked = false;
+
+            leafButton.IsVisible = false;
+            var hiddenHit = CanvasInteractionController.HitTest(page, new Point(150, 150));
+            Assert(hiddenHit.HasHit && hiddenHit.DeepestNode != leafButton,
+                "Invisible layer is ignored by hit-testing");
+            leafButton.IsVisible = true;
+
+            // -------------------------------------------------------------
+            // 4. Exact 2D Point Containment with Rotation
+            // -------------------------------------------------------------
+            var rotated = new LayerNode
+            {
+                X = 0,
+                Y = 0,
+                Width = 100,
+                Height = 100,
+                Rotation = 45.0
+            };
+            // Center is (50, 50). Top vertex of diamond rotates to approximately (50, 50 - 50*sqrt(2)) = (50, -20.7)
+            Assert(CanvasInteractionController.ContainsPoint(rotated, new Point(50, -10)),
+                "Point inside 45-degree diamond top tip returns true");
+            // Unrotated top-left corner (0, 0) is outside the 45-degree diamond
+            Assert(!CanvasInteractionController.ContainsPoint(rotated, new Point(0, 0)),
+                "Corner point outside 45-degree diamond returns false");
+
+            // -------------------------------------------------------------
+            // 5. Selection Resolver & Drag Resolver Independence
+            // -------------------------------------------------------------
+            var selection = new List<LayerNode>();
+
+            // Case A: Initial click from outside (selection is empty)
+            var targetA = CanvasInteractionController.ResolveSelection(hit, selection, 1, false, false);
+            Assert(targetA == rootFrame, "Click 1 from outside selects outermost container (rootFrame)");
+            selection.Add(targetA);
+            var dragA = CanvasInteractionController.ResolveDragTargets(hit, selection, targetA, false, 1);
+            Assert(dragA.Count == 1 && dragA[0] == rootFrame, "Drag target is active selection (rootFrame)");
+
+            // Case B: Parent is already selected! Pointer down over descendant leaf
+            // MUST maintain rootFrame selection and drag rootFrame (Figma parity)
+            var targetB = CanvasInteractionController.ResolveSelection(hit, selection, 1, false, false);
+            Assert(targetB == rootFrame, "Pointer down over descendant does NOT replace selected parent with child");
+            var dragB = CanvasInteractionController.ResolveDragTargets(hit, selection, targetB, false, 1);
+            Assert(dragB.Count == 1 && dragB[0] == rootFrame, "Drag target remains selected parent rootFrame");
+
+            // Case C: Progressive Double-Click (drill down 1 level)
+            var targetC = CanvasInteractionController.ResolveSelection(hit, selection, 2, false, false);
+            Assert(targetC == childCard, "Double-click on selected parent drills down to next child level (childCard)");
+            selection.Clear();
+            selection.Add(targetC);
+            var dragC = CanvasInteractionController.ResolveDragTargets(hit, selection, targetC, false, 2);
+            Assert(dragC.Count == 1 && dragC[0] == childCard, "Drag target updated to drilled childCard");
+
+            // Double-click again drills down to leaf
+            var targetD = CanvasInteractionController.ResolveSelection(hit, selection, 2, false, false);
+            Assert(targetD == leafButton, "Second double-click drills down to leafButton");
+
+            // Case D: Direct Deep-Selection (Ctrl held)
+            selection.Clear();
+            selection.Add(rootFrame); // rootFrame is currently selected
+            var targetCtrl = CanvasInteractionController.ResolveSelection(hit, selection, 1, true, false);
+            Assert(targetCtrl == leafButton, "Ctrl+Click directly deep-selects deepest leafButton under cursor");
+            selection.Clear();
+            selection.Add(targetCtrl);
+            var dragCtrl = CanvasInteractionController.ResolveDragTargets(hit, selection, targetCtrl, true, 1);
+            Assert(dragCtrl.Count == 1 && dragCtrl[0] == leafButton, "Drag target for Ctrl+Click is leafButton");
+
+            // -------------------------------------------------------------
+            // 6. Auto Layout Container Parity
+            // -------------------------------------------------------------
+            var autoLayoutRow = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "AutoLayout Row",
+                X = 0,
+                Y = 500,
+                Width = 400,
+                Height = 80,
+                IsVisible = true,
+                IsLocked = false,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Horizontal,
+                    Gap = 10,
+                    PaddingLeft = 10,
+                    PaddingTop = 10
+                }
+            };
+            page.Layers.Add(autoLayoutRow);
+
+            var item1 = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                Name = "Item 1",
+                X = 10,
+                Y = 510,
+                Width = 100,
+                Height = 60,
+                IsVisible = true,
+                IsLocked = false,
+                ParentId = autoLayoutRow.Id
+            };
+            autoLayoutRow.Children.Add(item1);
+
+            var autoHit = CanvasInteractionController.HitTest(page, new Point(50, 530));
+            Assert(autoHit.HasHit && autoHit.DeepestNode == item1 && autoHit.OutermostNode == autoLayoutRow,
+                "Auto Layout container hit-test builds [AutoLayoutRow, Item1] hierarchy");
+
+            // Click from outside selects AutoLayoutRow
+            selection.Clear();
+            var autoTarget1 = CanvasInteractionController.ResolveSelection(autoHit, selection, 1, false, false);
+            Assert(autoTarget1 == autoLayoutRow, "Click from outside selects AutoLayoutRow");
+            selection.Add(autoTarget1);
+
+            // Click over child Item 1 while AutoLayoutRow is selected keeps AutoLayoutRow
+            var autoTarget2 = CanvasInteractionController.ResolveSelection(autoHit, selection, 1, false, false);
+            Assert(autoTarget2 == autoLayoutRow, "Pointer-down on AutoLayout item preserves parent AutoLayoutRow selection");
+            var autoDrag = CanvasInteractionController.ResolveDragTargets(autoHit, selection, autoTarget2, false, 1);
+            Assert(autoDrag.Count == 1 && autoDrag[0] == autoLayoutRow, "Drag target is AutoLayoutRow");
+
+            // Double click drills down to Item 1
+            var autoDrill = CanvasInteractionController.ResolveSelection(autoHit, selection, 2, false, false);
+            Assert(autoDrill == item1, "Double-click drills down to Item 1 inside AutoLayout");
+
+            // -------------------------------------------------------------
+            // 7. Multi-Selection Preservation
+            // -------------------------------------------------------------
+            var extraFrame = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Extra Frame",
+                X = 800,
+                Y = 100,
+                Width = 200,
+                Height = 200,
+                IsVisible = true,
+                IsLocked = false
+            };
+            page.Layers.Add(extraFrame);
+
+            selection.Clear();
+            selection.Add(rootFrame);
+            selection.Add(extraFrame);
+
+            // Pointer down on leafButton inside rootFrame
+            var multiTarget = CanvasInteractionController.ResolveSelection(hit, selection, 1, false, false);
+            Assert(multiTarget == rootFrame, "Resolved target is rootFrame (ancestor in selection)");
+            // Selection is not cleared
+            var multiDrag = CanvasInteractionController.ResolveDragTargets(hit, selection, multiTarget, false, 1);
+            Assert(multiDrag.Count == 2 && multiDrag.Contains(rootFrame) && multiDrag.Contains(extraFrame),
+                "Multi-selection drag targets both selected frames simultaneously");
+        }
+
+        private static void TestHierarchicalObjectInsertionAndContainerTargetResolution()
+        {
+            var page = new Page();
+
+            // Setup a 3-level nested Auto Layout hierarchy:
+            // Frame -> Auto Layout A -> Auto Layout B -> Auto Layout C
+            var rootFrame = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Root Frame",
+                X = 0,
+                Y = 0,
+                Width = 800,
+                Height = 600,
+                IsVisible = true,
+                IsLocked = false
+            };
+            page.Layers.Add(rootFrame);
+
+            var autoLayoutA = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Auto Layout A",
+                X = 20,
+                Y = 20,
+                Width = 700,
+                Height = 500,
+                IsVisible = true,
+                IsLocked = false,
+                ParentId = rootFrame.Id,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Vertical,
+                    Gap = 16,
+                    PaddingLeft = 16,
+                    PaddingTop = 16,
+                    PaddingRight = 16,
+                    PaddingBottom = 16,
+                    SizingH = SizingMode.Hug,
+                    SizingV = SizingMode.Hug
+                }
+            };
+            rootFrame.Children.Add(autoLayoutA);
+
+            var autoLayoutB = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Auto Layout B",
+                X = 36,
+                Y = 36,
+                Width = 600,
+                Height = 300,
+                IsVisible = true,
+                IsLocked = false,
+                ParentId = autoLayoutA.Id,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Horizontal,
+                    Gap = 12,
+                    PaddingLeft = 12,
+                    PaddingTop = 12,
+                    PaddingRight = 12,
+                    PaddingBottom = 12,
+                    SizingH = SizingMode.Hug,
+                    SizingV = SizingMode.Hug
+                }
+            };
+            autoLayoutA.Children.Add(autoLayoutB);
+
+            var autoLayoutC = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Auto Layout C",
+                X = 48,
+                Y = 48,
+                Width = 300,
+                Height = 150,
+                IsVisible = true,
+                IsLocked = false,
+                ParentId = autoLayoutB.Id,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Vertical,
+                    Gap = 8,
+                    PaddingLeft = 8,
+                    PaddingTop = 8,
+                    PaddingRight = 8,
+                    PaddingBottom = 8,
+                    SizingH = SizingMode.Hug,
+                    SizingV = SizingMode.Hug
+                }
+            };
+            autoLayoutB.Children.Add(autoLayoutC);
+
+            var child1 = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                Name = "Child 1 in C",
+                X = 56,
+                Y = 56,
+                Width = 80,
+                Height = 40,
+                IsVisible = true,
+                IsLocked = false,
+                ParentId = autoLayoutC.Id
+            };
+            autoLayoutC.Children.Add(child1);
+
+            // Reflow hierarchy to establish initial geometry
+            AutoLayoutEngine.ReflowHierarchy(page, autoLayoutA);
+
+            var selection = new List<LayerNode>();
+
+            // -------------------------------------------------------------
+            // Acceptance Test 1: Create an object inside a selected Frame
+            // -------------------------------------------------------------
+            selection.Clear();
+            selection.Add(rootFrame);
+            var targetFrame = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(targetFrame.Container == rootFrame, "Selected Frame is resolved as the active insertion container");
+            Assert(!targetFrame.IsRootCanvas, "Target is not root canvas");
+
+            var newRectInFrame = new LayerNode { Type = ElementType.Rectangle, Name = "Rect in Frame", Width = 50, Height = 50 };
+            bool insertedInFrame = InsertionTargetResolver.InsertObject(page, targetFrame, newRectInFrame);
+            Assert(insertedInFrame, "Object inserted successfully into Frame");
+            Assert(newRectInFrame.ParentId == rootFrame.Id, "Inserted object ParentId set to Root Frame ID");
+            Assert(rootFrame.Children.Contains(newRectInFrame), "Root Frame children list contains newly created object");
+
+            // -------------------------------------------------------------
+            // Acceptance Test 2: Create an object inside a selected Auto Layout
+            // -------------------------------------------------------------
+            selection.Clear();
+            selection.Add(autoLayoutC);
+            var targetALC = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(targetALC.Container == autoLayoutC, "Selected Auto Layout C is resolved as active insertion container");
+
+            var newTextInC = new LayerNode { Type = ElementType.Text, Name = "Text in C", Width = 100, Height = 30 };
+            double heightBefore = autoLayoutC.Height;
+            bool insertedInC = InsertionTargetResolver.InsertObject(page, targetALC, newTextInC, reflowAutoLayout: true);
+            Assert(insertedInC, "Object inserted successfully into Auto Layout C");
+            Assert(newTextInC.ParentId == autoLayoutC.Id, "Inserted object ParentId set to Auto Layout C ID");
+            Assert(autoLayoutC.Children.Contains(newTextInC), "Auto Layout C contains newly inserted text");
+            // Auto Layout reflow verification
+            Assert(newTextInC.Y > child1.Y, "Auto Layout reflow stacked text vertically below child1");
+            Assert(autoLayoutC.Height > heightBefore, "Auto Layout C hug height expanded to fit newly inserted object");
+
+            // -------------------------------------------------------------
+            // Acceptance Test 3: Insert objects into each level of 3-level nested Auto Layout hierarchy
+            // -------------------------------------------------------------
+            // Level 1: Auto Layout A selected
+            selection.Clear();
+            selection.Add(autoLayoutA);
+            var targetA = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(targetA.Container == autoLayoutA, "Selection at Level 1 targets Auto Layout A");
+            var itemInA = new LayerNode { Type = ElementType.Rectangle, Name = "Item in A", Width = 60, Height = 40 };
+            InsertionTargetResolver.InsertObject(page, targetA, itemInA, reflowAutoLayout: true);
+            Assert(itemInA.ParentId == autoLayoutA.Id && autoLayoutA.Children.Contains(itemInA), "Item inserted into Auto Layout A");
+
+            // Level 2: Auto Layout B selected (drilled into hierarchy)
+            selection.Clear();
+            selection.Add(autoLayoutB);
+            var targetB = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(targetB.Container == autoLayoutB, "Selection at Level 2 targets Auto Layout B");
+            var itemInB = new LayerNode { Type = ElementType.Rectangle, Name = "Item in B", Width = 60, Height = 40 };
+            InsertionTargetResolver.InsertObject(page, targetB, itemInB, reflowAutoLayout: true);
+            Assert(itemInB.ParentId == autoLayoutB.Id && autoLayoutB.Children.Contains(itemInB), "Item inserted into Auto Layout B");
+
+            // Level 3: Auto Layout C selected (drilled further into hierarchy)
+            selection.Clear();
+            selection.Add(autoLayoutC);
+            var targetC = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(targetC.Container == autoLayoutC, "Selection at Level 3 targets Auto Layout C");
+            var itemInC = new LayerNode { Type = ElementType.Rectangle, Name = "Item in C", Width = 60, Height = 40 };
+            InsertionTargetResolver.InsertObject(page, targetC, itemInC, reflowAutoLayout: true);
+            Assert(itemInC.ParentId == autoLayoutC.Id && autoLayoutC.Children.Contains(itemInC), "Item inserted into Auto Layout C");
+
+            // -------------------------------------------------------------
+            // Acceptance Test 4: Insertion targets change ONLY through intentional hierarchy navigation
+            // -------------------------------------------------------------
+            // Deep-selected child inside AutoLayout C -> targets AutoLayout C immediately after child
+            selection.Clear();
+            selection.Add(child1); // Deep-selected child inside C
+            var targetChildInC = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(targetChildInC.Container == autoLayoutC, "Selecting child inside Auto Layout C targets Auto Layout C as container");
+            Assert(targetChildInC.InsertionIndex == autoLayoutC.Children.IndexOf(child1) + 1, "Insertion index is immediately after the selected child");
+
+            // Empty selection -> targets root canvas
+            selection.Clear();
+            var targetEmpty = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(targetEmpty.Container == null, "Empty selection targets root canvas");
+            Assert(targetEmpty.IsRootCanvas, "target.IsRootCanvas is true when nothing selected");
+
+            // Locked container cannot be targeted
+            autoLayoutC.IsLocked = true;
+            selection.Clear();
+            selection.Add(autoLayoutC);
+            var targetLocked = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(targetLocked.Container != autoLayoutC, "Locked Auto Layout C is rejected as insertion target");
+            Assert(targetLocked.Container == autoLayoutB, "Target climbs to nearest unlocked container ancestor (Auto Layout B)");
+            autoLayoutC.IsLocked = false;
+
+            // -------------------------------------------------------------
+            // Acceptance Test 5: Paste and duplicate objects without corrupting hierarchy
+            // -------------------------------------------------------------
+            // Create a complex composite component: Card with Header and Icon
+            var cardFrame = new LayerNode { Id = "card1", Type = ElementType.Frame, Name = "Card", Width = 200, Height = 100 };
+            var cardHeader = new LayerNode { Id = "hdr1", Type = ElementType.Text, Name = "Header", ParentId = "card1", Width = 150, Height = 30 };
+            var cardIcon = new LayerNode { Id = "icn1", Type = ElementType.Ellipse, Name = "Icon", ParentId = "card1", Width = 20, Height = 20 };
+            cardFrame.Children.Add(cardHeader);
+            cardFrame.Children.Add(cardIcon);
+
+            var toPaste = new List<LayerNode> { cardFrame, cardHeader, cardIcon };
+            selection.Clear();
+            selection.Add(autoLayoutB); // Target container for paste
+
+            var pasteTarget = InsertionTargetResolver.ResolveTarget(page, selection);
+            bool pastedOk = InsertionTargetResolver.InsertMultipleObjects(page, pasteTarget, toPaste, reflowAutoLayout: true);
+            Assert(pastedOk, "Multi-object hierarchy inserted successfully");
+            Assert(cardFrame.ParentId == autoLayoutB.Id, "Top-level pasted Card ParentId is set to Auto Layout B");
+            Assert(cardHeader.ParentId == "card1", "Pasted child Header maintains its internal parent-child relationship to Card");
+            Assert(cardIcon.ParentId == "card1", "Pasted child Icon maintains its internal parent-child relationship to Card");
+            Assert(cardFrame.Children.Contains(cardHeader) && cardFrame.Children.Contains(cardIcon), "CardFrame children list preserved intact");
+            Assert(autoLayoutB.Children.Contains(cardFrame), "Auto Layout B contains CardFrame");
+            Assert(!autoLayoutB.Children.Contains(cardHeader), "Auto Layout B does NOT flatten internal child Header into its own children");
+
+            // -------------------------------------------------------------
+            // Acceptance Test 6: Auto Layout recalculates correctly after insertion
+            // -------------------------------------------------------------
+            var simpleRow = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Simple Row",
+                X = 100,
+                Y = 100,
+                Width = 100,
+                Height = 50,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Horizontal,
+                    Gap = 10,
+                    PaddingLeft = 10,
+                    PaddingTop = 10,
+                    PaddingRight = 10,
+                    PaddingBottom = 10,
+                    SizingH = SizingMode.Hug,
+                    SizingV = SizingMode.Hug
+                }
+            };
+            page.Layers.Add(simpleRow);
+            var item1 = new LayerNode { Type = ElementType.Rectangle, Width = 50, Height = 30 };
+            var item2 = new LayerNode { Type = ElementType.Rectangle, Width = 50, Height = 30 };
+
+            var rowTarget = new InsertionTargetResult(simpleRow, 0);
+            InsertionTargetResolver.InsertObject(page, rowTarget, item1, reflowAutoLayout: true);
+            InsertionTargetResolver.InsertObject(page, new InsertionTargetResult(simpleRow, 1), item2, reflowAutoLayout: true);
+
+            // Row width should hug: paddingLeft(10) + item1(50) + gap(10) + item2(50) + paddingRight(10) = 130
+            Assert(Math.Abs(simpleRow.Width - 130) < 0.01, string.Format("Auto Layout row width hugged to 130 after insertions (got {0})", simpleRow.Width));
+            Assert(item2.X == simpleRow.X + 10 + 50 + 10, "Item2 positioned horizontally after Item1 with gap");
+
+            // -------------------------------------------------------------
+            // Acceptance Test 7: Selection, dragging, and insertion do not interfere
+            // -------------------------------------------------------------
+            // 1. Selection Resolver over child1 keeps autoLayoutC selected for drag
+            var hitC = CanvasInteractionController.HitTest(page, new Point(child1.X + 5, child1.Y + 5));
+            selection.Clear();
+            selection.Add(autoLayoutC);
+            var resolvedSel = CanvasInteractionController.ResolveSelection(hitC, selection, 1, false, false);
+            Assert(resolvedSel == autoLayoutC, "Pointer down over child1 preserves autoLayoutC selection for dragging");
+            var dragTargets = CanvasInteractionController.ResolveDragTargets(hitC, selection, resolvedSel, false, 1);
+            Assert(dragTargets.Count == 1 && dragTargets[0] == autoLayoutC, "Drag target is autoLayoutC");
+
+            // 2. Insertion Target Resolver with autoLayoutC selected targets autoLayoutC for insertion
+            var insertTarget = InsertionTargetResolver.ResolveTarget(page, selection);
+            Assert(insertTarget.Container == autoLayoutC, "Insertion target correctly resolves to autoLayoutC independent of pointer drag state");
+
+            // 3. AddLayerCommand undo/redo maintains container integrity and reflow
+            var undoTestRect = new LayerNode { Type = ElementType.Rectangle, Name = "Undo Test Rect", Width = 20, Height = 20 };
+            var addCmd = new AddLayerCommand(page, undoTestRect, autoLayoutC.Id, -1, () =>
+            {
+                AutoLayoutEngine.ReflowRecursive(autoLayoutC);
+            });
+            addCmd.Execute();
+            Assert(autoLayoutC.Children.Contains(undoTestRect), "AddLayerCommand executed: object in autoLayoutC");
+            Assert(undoTestRect.ParentId == autoLayoutC.Id, "AddLayerCommand set ParentId to autoLayoutC");
+
+            addCmd.Unexecute();
+            Assert(!autoLayoutC.Children.Contains(undoTestRect), "AddLayerCommand undone: object removed from autoLayoutC");
+
+            addCmd.Execute();
+            Assert(autoLayoutC.Children.Contains(undoTestRect), "AddLayerCommand redone: object restored in autoLayoutC");
+        }
+
+        private static void TestNonDestructiveRenderTransformsAndAutoLayoutPreservation()
+        {
+            var page = new Page();
+
+            // 1. Create an Auto Layout Frame containing two child layers
+            var frame = new LayerNode
+            {
+                Type = ElementType.Frame,
+                Name = "Motion Card",
+                X = 100,
+                Y = 100,
+                Width = 240,
+                Height = 120,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Horizontal,
+                    Gap = 16,
+                    PaddingLeft = 16,
+                    PaddingTop = 16,
+                    PaddingRight = 16,
+                    PaddingBottom = 16,
+                    SizingH = SizingMode.Fixed,
+                    SizingV = SizingMode.Fixed
+                }
+            };
+            page.Layers.Add(frame);
+
+            var childRect = new LayerNode
+            {
+                Type = ElementType.Rectangle,
+                Name = "Badge",
+                X = 116,
+                Y = 116,
+                Width = 80,
+                Height = 40,
+                ParentId = frame.Id
+            };
+            frame.Children.Add(childRect);
+
+            var childPath = new LayerNode
+            {
+                Type = ElementType.Path,
+                Name = "Icon Path",
+                X = 212,
+                Y = 116,
+                Width = 40,
+                Height = 40,
+                ParentId = frame.Id,
+                Geometry = new VectorGeometry()
+            };
+            childPath.Geometry.Nodes.Add(new BezierNode(0, 0));
+            childPath.Geometry.Nodes.Add(new BezierNode(40, 40));
+            frame.Children.Add(childPath);
+
+            // Verify initial dimensions
+            Assert(frame.Width == 240 && frame.Height == 120, "Initial frame bounds: 240x120");
+            Assert(childRect.Width == 80 && childRect.Height == 40, "Initial child rect: 80x40");
+            Assert(childPath.Geometry.Nodes[0].Anchor.X == 0.0, "Initial path node 0 is at (0, 0)");
+
+            // 2. Simulate Animation Pose applying 2.0x scale, 30deg rotation, and translation via PropertyBinder
+            uint frameId = PropertyBinder.GetNumericNodeId(frame.Id);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            pose[frameId] = new Dictionary<ushort, double>
+            {
+                { (ushort)PropKey.ScaleX, 2.0 },
+                { (ushort)PropKey.ScaleY, 1.5 },
+                { (ushort)PropKey.Rotation, 30.0 },
+                { (ushort)PropKey.X, 150.0 },
+                { (ushort)PropKey.Y, 120.0 }
+            };
+
+            PropertyBinder.ApplyPoseToLayer(frame, frameId, pose);
+
+            // 3. Verify that LayerNode.Width, Height, X, and Y are NOT mutated (design rest model preserved)
+            Assert(frame.Width == 240, string.Format("Frame Width preserved at 240 (got {0})", frame.Width));
+            Assert(frame.Height == 120, string.Format("Frame Height preserved at 120 (got {0})", frame.Height));
+            Assert(frame.X == 100 && frame.Y == 100, "Frame design coordinates preserved at (100, 100)");
+
+            // 4. Verify that RenderTransform captured the animation values
+            Assert(frame.RenderTransform != null, "RenderTransform instantiated");
+            Assert(Math.Abs(frame.RenderTransform.ScaleX - 2.0) < 0.001, "RenderTransform ScaleX is 2.0");
+            Assert(Math.Abs(frame.RenderTransform.ScaleY - 1.5) < 0.001, "RenderTransform ScaleY is 1.5");
+            Assert(Math.Abs(frame.RenderTransform.Rotation - 30.0) < 0.001, "RenderTransform Rotation is 30 deg");
+            Assert(Math.Abs(frame.RenderTransform.TranslationX - 50.0) < 0.001, "RenderTransform TranslationX is 50.0");
+            Assert(Math.Abs(frame.RenderTransform.TranslationY - 20.0) < 0.001, "RenderTransform TranslationY is 20.0");
+
+            // 5. Verify child layers in Auto Layout frame were NOT mutated
+            Assert(childRect.Width == 80 && childRect.Height == 40, "Child rect bounds untouched by parent animation");
+            Assert(childPath.Geometry.Nodes[0].Anchor.X == 0.0, "Vector path geometry untouched by scale animation");
+
+            // 6. Verify Matrix calculation and center pivot invariance
+            var matrix = frame.GetRenderTransformMatrix();
+            Assert(!matrix.IsIdentity, "RenderTransform matrix is non-identity");
+            // Center pivot is (100 + 120, 100 + 60) = (220, 160).
+            // Under translation (50, 20), pivot maps to (270, 180) regardless of rotation/scale.
+            Point centerPt = new Point(220, 160);
+            Point transformedCenter = matrix.Transform(centerPt);
+            Assert(Math.Abs(transformedCenter.X - 270.0) < 0.01 && Math.Abs(transformedCenter.Y - 180.0) < 0.01,
+                string.Format("Pivot transformed to (270, 180), got ({0:F1}, {1:F1})", transformedCenter.X, transformedCenter.Y));
+
+            // 7. Verify Hit-Testing with RenderTransform inverse mapping
+            // Point at (270, 180) is transformed center: must hit frame
+            Assert(CanvasInteractionController.ContainsPoint(frame, new Point(270, 180)),
+                "ContainsPoint correctly hits transformed frame center");
+
+            // 8. Verify Reset() restores exact design rest bounds with zero drift
+            frame.RenderTransform.Reset();
+            Assert(frame.RenderTransform.IsIdentity, "RenderTransform IsIdentity is true after Reset");
+            Assert(frame.GetRenderTransformMatrix().IsIdentity, "Render transform matrix is identity after Reset");
+            Assert(frame.Width == 240 && frame.Height == 120, "Frame bounds 100% restored with zero drift");
+            Assert(frame.X == 100 && frame.Y == 100, "Frame position 100% restored with zero drift");
         }
     }
 }

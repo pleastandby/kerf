@@ -240,7 +240,7 @@ namespace Kerf.UI
 
             btn.MouseEnter += (s, e) =>
             {
-                btn.Background = isClose ? new SolidColorBrush(Color.FromRgb(220, 38, 38)) : KerfBrand.TealBrush;
+                btn.Background = isClose ? new SolidColorBrush(Color.FromRgb(220, 38, 38)) : KerfBrand.FigmaBorderBrush;
                 btn.Foreground = KerfBrand.TextWhiteBrush;
             };
             btn.MouseLeave += (s, e) =>

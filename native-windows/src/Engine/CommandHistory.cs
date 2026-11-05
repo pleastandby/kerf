@@ -190,26 +190,77 @@ namespace Kerf.Engine
         public string Description { get { return "Add " + node.Name; } }
         private readonly Page page;
         private readonly LayerNode node;
+        private readonly string parentId;
+        private readonly int index;
         private readonly Action onRender;
 
         public AddLayerCommand(Page p, LayerNode n, Action renderCallback = null)
+            : this(p, n, n != null ? n.ParentId : null, -1, renderCallback)
+        {
+        }
+
+        public AddLayerCommand(Page p, LayerNode n, string pId, int idx = -1, Action renderCallback = null)
         {
             page = p;
             node = n;
+            parentId = pId;
+            index = idx;
             onRender = renderCallback;
         }
 
         public void Execute()
         {
-            if (!page.Layers.Contains(node))
+            if (!string.IsNullOrEmpty(parentId))
             {
-                page.Layers.Add(node);
+                var parent = page.FindLayerById(parentId);
+                if (parent != null)
+                {
+                    if (parent.Children == null) parent.Children = new List<LayerNode>();
+                    if (!parent.Children.Contains(node))
+                    {
+                        node.ParentId = parent.Id;
+                        if (index >= 0 && index <= parent.Children.Count)
+                            parent.Children.Insert(index, node);
+                        else
+                            parent.Children.Add(node);
+                    }
+                }
+                else
+                {
+                    node.ParentId = null;
+                    if (!page.Layers.Contains(node))
+                    {
+                        if (index >= 0 && index <= page.Layers.Count)
+                            page.Layers.Insert(index, node);
+                        else
+                            page.Layers.Add(node);
+                    }
+                }
+            }
+            else
+            {
+                node.ParentId = null;
+                if (!page.Layers.Contains(node))
+                {
+                    if (index >= 0 && index <= page.Layers.Count)
+                        page.Layers.Insert(index, node);
+                    else
+                        page.Layers.Add(node);
+                }
             }
             if (onRender != null) onRender();
         }
 
         public void Unexecute()
         {
+            if (!string.IsNullOrEmpty(parentId))
+            {
+                var parent = page.FindLayerById(parentId);
+                if (parent != null && parent.Children != null)
+                {
+                    parent.Children.Remove(node);
+                }
+            }
             page.Layers.Remove(node);
             if (onRender != null) onRender();
         }
