@@ -1,0 +1,157 @@
+# Roadmap: Kerf Studio Animation Engine Reconstruction
+
+## Overview
+
+This roadmap defines the architectural reconstruction of the Kerf Studio animation system into an industrial-grade motion graphics engine. The refactor proceeds across 7 small, dependency-aware, independently verifiable phases. By building from a non-destructive transform foundation upward through typed data models, visual curve editing, undo/redo integration, isolated runtime evaluation, and interactive state machines, the application gains professional motion capabilities while strictly preserving the existing design editor, auto layout, and canvas interaction pipeline.
+
+## Phases
+
+- [ ] **Phase 1: Independent Transform Pipeline & Render Separation** - Introduce decoupled render transforms so animation never destructively mutates layer dimensions or Auto Layout bounds.
+- [ ] **Phase 2: Core Animation Data Model** - Implement GUID-backed stable track targets, typed property binders, and keyframe schema.
+- [ ] **Phase 3: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
+- [ ] **Phase 4: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
+- [ ] **Phase 5: Decoupled Animation Runtime Playback & Transport** - Deterministic timeline playback with isolated evaluation buffers, zero design-state corruption, and instant rest pose recovery.
+- [ ] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
+- [ ] **Phase 7: Verification, Legacy Migration & Safe Deprecation** - End-to-end integration tests, legacy project file migration, and deprecation of old property binders with 0 regressions.
+
+## Phase Details
+
+### Phase 1: Independent Transform Pipeline & Render Separation
+**Goal**: Decouple render transformations from document layout bounds so animating scale, translation, rotation, and skew operates non-destructively without altering `Layer.Width`, `Layer.Height`, or Auto Layout frames.
+**Depends on**: Nothing (first phase)
+**Requirements**: TRANS-01, TRANS-02, TRANS-03, TRANS-04
+**Success Criteria** (what must be TRUE):
+  1. Setting or animating a layer's scale (e.g. 0.5x, 2.5x) visually scales its rendered appearance without altering its underlying `layer.Width` or `layer.Height`.
+  2. Auto Layout containers containing scaled layers maintain their computed flexbox bounds and item distribution without distortion or clipping errors.
+  3. Resetting or clearing a layer's render transform restores its exact original visual bounds with zero drift.
+  4. All 49 existing test fixtures pass without regression.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 01-01: Implement `LayerTransform` / `MatrixTransform` model with translation, scale, rotation, skew, and anchor origin support.
+- [ ] 01-02: Integrate render transform evaluation into Direct2D canvas renderer and layer bounds calculation while preserving Auto Layout geometry.
+
+---
+
+### Phase 2: Core Animation Data Model
+**Goal**: Establish a robust, GUID-backed, type-safe animation document schema that reliably binds property tracks to scene graph layers without ID collision risks.
+**Depends on**: Phase 1
+**Requirements**: MODEL-01, MODEL-02, MODEL-03, MODEL-04
+**Success Criteria** (what must be TRUE):
+  1. Keyframe property tracks bind to layer instances via stable GUID/unique ID references, maintaining bindings when layers are renamed or moved inside containers.
+  2. Animatable properties (Transform.X, Transform.Y, ScaleX, ScaleY, Rotation, Opacity, FillColor, CornerRadius) evaluate with strongly typed interpolators.
+  3. Keyframes support unique identifiers, timestamps, values, and interpolation modes (Linear, Step, Bézier).
+  4. Animation clips, tracks, and keyframes serialize and deserialize losslessly to and from project JSON.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 02-01: Create strong typing for `AnimProperty`, `Keyframe<T>`, `AnimationTrack`, and `AnimationClip` with GUID layer referencing.
+- [ ] 02-02: Implement property evaluators and JSON serialization/deserialization for the new animation schema.
+
+---
+
+### Phase 3: Easing Engine & Interactive Graph Curve Editor
+**Goal**: Build a precision cubic Bézier easing engine with standard presets and an interactive Direct2D canvas curve/graph editor widget with draggable tangent handles.
+**Depends on**: Phase 2
+**Requirements**: EASE-01, EASE-02, EASE-03, EASE-04
+**Success Criteria** (what must be TRUE):
+  1. Cubic Bézier curves evaluate accurately for custom $(x_1, y_1, x_2, y_2)$ control points and match standard presets (Ease In, Ease Out, Ease In-Out, Bounce, Spring).
+  2. A dedicated Graph Editor view renders editable velocity and value curves for active property tracks.
+  3. Users can select keyframes in the graph editor and interactively drag tangent handles to shape transition curves.
+  4. Scrubbing or playback accurately reflects easing curves in real-time on the canvas.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 03-01: Implement enhanced `BezierCurve` evaluation with custom tangents, overshoot clamping, and preset profiles.
+- [ ] 03-02: Build the interactive Direct2D Graph Editor canvas widget with selectable keyframe nodes and draggable tangent handles.
+
+---
+
+### Phase 4: Animation Command History & Full Undo/Redo
+**Goal**: Integrate all timeline, keyframe, curve manipulation, and track modifications into the centralized `CommandHistory` architecture.
+**Depends on**: Phase 3
+**Requirements**: HIST-01, HIST-02, HIST-03, HIST-04
+**Success Criteria** (what must be TRUE):
+  1. Adding, moving, deleting, or editing keyframe values can be undone (`Ctrl+Z`) and redone (`Ctrl+Y`) with immediate canvas and timeline synchronization.
+  2. Modifying Bézier tangent handles in the graph editor creates atomic undo entries on pointer release.
+  3. Adding or removing tracks and clips participates fully in undo/redo history without desynchronizing the scene graph.
+  4. Continuous timeline scrubbing or dragging batches into a single discrete undoable command.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 04-01: Implement atomic animation commands (`AddKeyframeCommand`, `ModifyKeyframeCommand`, `MoveKeyframesCommand`, `DeleteKeyframesCommand`, `ChangeEasingCommand`).
+- [ ] 04-02: Wire transaction batching on pointer interactions and connect undo/redo events to timeline and graph editor UI views.
+
+---
+
+### Phase 5: Decoupled Animation Runtime Playback & Transport
+**Goal**: Build a deterministic runtime playback controller with isolated evaluation buffers that protects design canvas state from corruption.
+**Depends on**: Phase 4
+**Requirements**: PLAY-01, PLAY-02, PLAY-03, PLAY-04
+**Success Criteria** (what must be TRUE):
+  1. Timeline transport controls (Play, Pause, Stop, Seek, Step forward/back, FPS selection) run smoothly at target frame rates.
+  2. Animated playback computes values into an isolated runtime evaluation layer without altering underlying design document layer properties.
+  3. Playback supports Play Once, Loop, and Ping-Pong playback modes.
+  4. Stopping playback or switching back to Design mode immediately restores exact design rest poses with 0% drift or persistent offsets.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 05-01: Build `AnimationRuntimeEvaluator` with decoupled rest pose caching and high-performance Direct2D frame rendering.
+- [ ] 05-02: Implement timeline transport controller with scrubbing, playhead tracking, looping, and mode switching.
+
+---
+
+### Phase 6: Interactive State Machine Engine
+**Goal**: Implement a complete interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean, Number, Trigger), and canvas event listeners.
+**Depends on**: Phase 5
+**Requirements**: STATE-01, STATE-02, STATE-03, STATE-04, STATE-05, STATE-06
+**Success Criteria** (what must be TRUE):
+  1. Users can construct state machine graphs containing Entry, AnyState, and custom animation states connected by directional transitions.
+  2. Transitions evaluate conditional logic against Boolean, Number, and Trigger state machine inputs.
+  3. Canvas pointer interactions (Hover In, Hover Out, Pointer Down, Pointer Up, Click) trigger state inputs and fire transitions.
+  4. Transition cross-fading blends smoothly between active animation clips without visual popping or geometry snaps.
+  5. An interactive node graph UI panel allows visual inspection, state creation, and transition wiring.
+**Plans**: 3 plans
+
+Plans:
+- [ ] 06-01: Build state machine graph data model, inputs system, and condition evaluation engine.
+- [ ] 06-02: Implement state transition runtime with clip cross-fade blending and canvas event listener integration.
+- [ ] 06-03: Create interactive State Machine visual node graph editor panel in Kerf Studio UI.
+
+---
+
+### Phase 7: Verification, Legacy Migration & Safe Deprecation
+**Goal**: Validate end-to-end animation workflows, migrate legacy project files to the new schema, and safely deprecate legacy property binders with zero regressions.
+**Depends on**: Phase 6
+**Requirements**: MIGR-01, MIGR-02, MIGR-03
+**Success Criteria** (what must be TRUE):
+  1. Existing project files containing legacy animation data automatically convert into the new clip and track data model.
+  2. Old destructive `PropertyBinder` scaling code is cleanly deprecated and removed without affecting design tools.
+  3. Automated test suite expands to cover transforms, keyframe interpolation, easing mathematics, undo/redo, and state machine transitions.
+  4. 100% test pass rate achieved across all test suites with 0 regressions.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 07-01: Build legacy animation data migrator and deprecate obsolete prototype binders.
+- [ ] 07-02: Create automated test suites for the complete animation and state machine engine; verify all tests pass.
+
+---
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Independent Transform Pipeline & Render Separation | 0/2 | Not started | - |
+| 2. Core Animation Data Model | 0/2 | Not started | - |
+| 3. Easing Engine & Interactive Graph Curve Editor | 0/2 | Not started | - |
+| 4. Animation Command History & Full Undo/Redo | 0/2 | Not started | - |
+| 5. Decoupled Animation Runtime Playback & Transport | 0/2 | Not started | - |
+| 6. Interactive State Machine Engine | 0/3 | Not started | - |
+| 7. Verification, Legacy Migration & Safe Deprecation | 0/2 | Not started | - |
+
+---
+*Roadmap defined: 2026-11-05*
+*Last updated: 2026-11-05 after initialization*
