@@ -84,6 +84,7 @@ namespace Kerf.Tests
             RunTest("Anchor Point System, Stationary Pan-Behind & Raster Scaling", TestAnchorPointAndRasterScaling);
             RunTest("Rive 3-Axis + Rotation Gizmo, Y Key Reposition & Non-Destructive Frame Scaling", TestRiveAnchorPointGizmoAndContentScaling);
             RunTest("Easing Engine, Closed-Form Harmonic Springs & Graph Editor Reconstruction", TestEasingEngineClosedFormSpringsAndGraphEditor);
+            RunTest("Universal Graph Editor Sidebar Consolidation & Clean Timeline", TestUniversalGraphEditorConsolidationAndCleanTimeline);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -5250,6 +5251,68 @@ namespace Kerf.Tests
             var syncLayer = new LayerNode { Id = "sync-node", X = 0, Y = 0, Width = 100, Height = 100 };
             PropertyBinder.ApplyPoseToLayer(syncLayer, 50, poseDict);
             Assert(Math.Abs(syncLayer.X + syncLayer.RenderTransform.TranslationX - valAfterOvershoot) < 1e-4, "PropertyBinder synchronizes real-time layer pose directly from evaluated track");
+        }
+
+        private static void TestUniversalGraphEditorConsolidationAndCleanTimeline()
+        {
+            // 1. Verify all 21 motion presets provide valid control points and evaluate without crashing
+            var presets = new EasingPreset[]
+            {
+                EasingPreset.Linear, EasingPreset.Ease, EasingPreset.EaseIn,
+                EasingPreset.EaseOut, EasingPreset.EaseInOut, EasingPreset.QuadIn,
+                EasingPreset.QuadOut, EasingPreset.QuadInOut, EasingPreset.CubicIn,
+                EasingPreset.CubicOut, EasingPreset.CubicInOut, EasingPreset.QuartIn,
+                EasingPreset.QuartOut, EasingPreset.QuartInOut, EasingPreset.QuintIn,
+                EasingPreset.QuintOut, EasingPreset.QuintInOut, EasingPreset.Back,
+                EasingPreset.Elastic, EasingPreset.Bounce, EasingPreset.Smooth
+            };
+
+            foreach (var preset in presets)
+            {
+                double x1, y1, x2, y2;
+                EasingEngine.GetPresetControlPoints(preset, out x1, out y1, out x2, out y2);
+                Assert(x1 >= 0.0 && x1 <= 1.0, string.Format("Preset {0} X1 is within [0, 1] ({1})", preset, x1));
+                Assert(x2 >= 0.0 && x2 <= 1.0, string.Format("Preset {0} X2 is within [0, 1] ({1})", preset, x2));
+
+                double v0 = EasingEngine.EvaluatePreset(preset, 0.0);
+                double v1 = EasingEngine.EvaluatePreset(preset, 1.0);
+                Assert(Math.Abs(v0 - 0.0) < 1e-4, string.Format("Preset {0} evaluates to 0.0 at u=0.0", preset));
+                Assert(Math.Abs(v1 - 1.0) < 1e-4, string.Format("Preset {0} evaluates to 1.0 at u=1.0", preset));
+            }
+
+            // 2. Verify all Spring presets (Bouncy, Snappy, Gentle, Stiff) apply correct physics
+            var springKey = new Keyframe(0.0, 0.0, InterpMode.Linear);
+            EasingEngine.ApplySpringPreset(springKey, SpringPreset.Bouncy);
+            Assert(springKey.Interp == InterpMode.Spring, "Bouncy sets Spring mode");
+            Assert(springKey.Stiffness == 150.0 && springKey.Damping == 10.0, "Bouncy parameters correct");
+
+            EasingEngine.ApplySpringPreset(springKey, SpringPreset.Snappy);
+            Assert(springKey.Stiffness == 200.0 && springKey.Damping == 25.0, "Snappy parameters correct");
+
+            EasingEngine.ApplySpringPreset(springKey, SpringPreset.Gentle);
+            Assert(springKey.Stiffness == 100.0 && springKey.Damping == 15.0, "Gentle parameters correct");
+
+            EasingEngine.ApplySpringPreset(springKey, SpringPreset.Stiff);
+            Assert(springKey.Stiffness == 300.0 && springKey.Damping == 30.0, "Stiff parameters correct");
+
+            // 3. Verify real-time handle manipulation with vertical overshoot updates track sampling
+            var k0 = new Keyframe(0.0, 0.0, InterpMode.Cubic, 0.25, 0.1, 0.25, 1.0);
+            var k1 = new Keyframe(1.0, 100.0, InterpMode.Linear);
+            var track = new Track(1, (ushort)PropKey.X);
+            track.AddKeyframe(k0);
+            track.AddKeyframe(k1);
+
+            double sampleNormal = track.Sample(0.5);
+
+            // Drag handle to vertical overshoot (Y1 = 1.40, like Bounce/Back)
+            k0.Y1 = 1.40;
+            k0.Preset = EasingPreset.CustomBezier;
+            double sampleOvershoot = track.Sample(0.5);
+            Assert(sampleOvershoot > sampleNormal, "Track sampling responds immediately to vertical overshoot handle dragging");
+
+            // 4. Verify clean timeline keyframe diamond data integrity
+            Assert(track.Keys.Count == 2, "Track preserves keyframe count");
+            Assert(track.Keys[0].Time == 0.0 && track.Keys[1].Time == 1.0, "Keyframe times preserved");
         }
     }
 }

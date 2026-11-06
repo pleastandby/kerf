@@ -101,8 +101,13 @@ namespace Kerf.UI
         private FrameworkElement _defaultInterpolationPanel;
         private Canvas _defaultInterpolationCanvas;
         private TextBlock _defaultInterpolationValues;
+        private TextBlock _defaultInterpolationTitle;
+        private TextBlock _defaultInterpolationSubtitle;
+        private StackPanel _defaultInterpolationSpringRow;
+        private Border _defaultSmoothTangentBtn;
+        private Border _defaultBrokenTangentBtn;
         private Button _applyDefaultInterpolationButton;
-        private readonly Border[] _defaultInterpolationPresetButtons = new Border[5];
+        private readonly Border[] _defaultInterpolationPresetButtons = new Border[6];
         private InterpMode _defaultInterpolationMode = InterpMode.Linear;
         private double _defaultInterpolationX1 = 0.0;
         private double _defaultInterpolationY1 = 0.0;
@@ -158,23 +163,6 @@ namespace Kerf.UI
         private TextBlock _canvasInteractText;
 
         // Graph Editor Components
-        private GraphEditorCanvas _graphEditorCanvas;
-        private ScrollViewer _graphCanvasScroll;
-        private GridSplitter _graphSplitter;
-        private Border _graphEditorHeaderBorder;
-        private TextBlock _graphTrackNameText;
-        private TextBlock _graphTrackUnitsText;
-        private Border _graphAutoFitBtn;
-        private TextBlock _graphAutoFitBtnText;
-        private Border _graphSmoothBtn;
-        private Border _graphBrokenBtn;
-        private Border _graphToggleBtn;
-        private TextBlock _graphToggleBtnText;
-        private RowDefinition _graphSplitterRowDef;
-        private RowDefinition _graphEditorRowDef;
-        private bool _isGraphEditorOpen = true;
-        private GridLength _lastGraphRowHeight = new GridLength(180);
-        private bool _isSyncingHorizontalScroll = false;
         private Popup _presetPickerPopup;
 
         // Document & Engine
@@ -1345,22 +1333,24 @@ namespace Kerf.UI
         {
             var border = new Border
             {
-                Height = 272,
                 Margin = new Thickness(8, 4, 8, 8),
-                Padding = new Thickness(8, 7, 8, 6),
+                Padding = new Thickness(8, 6, 8, 6),
                 Background = KerfBrand.DarkSlateBrush,
                 BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5)
             };
             var content = new Grid();
-            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20) });
-            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
-            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
-            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(26) });
+            content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Row 0: Title & Subtitle
+            content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Row 1: Presets & popover button
+            content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Row 2: Spring options (collapsible)
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(145) }); // Row 3: Graph Canvas
+            content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Row 4: Values & Tangent buttons
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) }); // Row 5: Apply button
 
-            var title = new TextBlock
+            // Row 0: Header with context title and property/time subtitle
+            var titleDock = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+            _defaultInterpolationTitle = new TextBlock
             {
                 Text = "Default Interpolation",
                 FontSize = 10.5,
@@ -1368,19 +1358,39 @@ namespace Kerf.UI
                 Foreground = KerfBrand.TextWhiteBrush,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            Grid.SetRow(title, 0);
-            content.Children.Add(title);
+            DockPanel.SetDock(_defaultInterpolationTitle, Dock.Left);
+            titleDock.Children.Add(_defaultInterpolationTitle);
 
-            var presets = new Grid { Margin = new Thickness(0, 2, 0, 5), Background = KerfBrand.ObsidianBrush };
+            _defaultInterpolationSubtitle = new TextBlock
+            {
+                Text = "",
+                FontSize = 9,
+                Foreground = KerfBrand.MintBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            DockPanel.SetDock(_defaultInterpolationSubtitle, Dock.Right);
+            titleDock.Children.Add(_defaultInterpolationSubtitle);
+
+            Grid.SetRow(titleDock, 0);
+            content.Children.Add(titleDock);
+
+            // Row 1: 6 Quick Presets + Popover button
+            var presetsGrid = new Grid { Margin = new Thickness(0, 2, 0, 4) };
+            presetsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            presetsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var iconGrid = new UniformGrid { Columns = 6, Margin = new Thickness(0, 0, 4, 0), Background = KerfBrand.ObsidianBrush };
             for (int i = 0; i < _defaultInterpolationPresetButtons.Length; i++)
             {
-                presets.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 int presetIndex = i;
                 var button = new Border
                 {
                     Margin = new Thickness(1),
                     CornerRadius = new CornerRadius(3),
                     Cursor = Cursors.Hand,
+                    ToolTip = GetQuickPresetTooltip(i),
                     Child = CreateInterpolationPresetIcon(i)
                 };
                 button.MouseLeftButtonUp += (s, e) =>
@@ -1389,16 +1399,72 @@ namespace Kerf.UI
                     e.Handled = true;
                 };
                 _defaultInterpolationPresetButtons[i] = button;
-                Grid.SetColumn(button, i);
-                presets.Children.Add(button);
+                iconGrid.Children.Add(button);
             }
-            Grid.SetRow(presets, 1);
-            content.Children.Add(presets);
+            Grid.SetColumn(iconGrid, 0);
+            presetsGrid.Children.Add(iconGrid);
 
+            var popoverBtn = new Border
+            {
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.TealBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(5, 2, 5, 2),
+                Cursor = Cursors.Hand,
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "Browse all 21 motion & easing presets"
+            };
+            var popoverTxt = new TextBlock
+            {
+                Text = "∿ Presets [21]",
+                FontSize = 9,
+                Foreground = KerfBrand.MintBrush,
+                FontWeight = FontWeights.SemiBold
+            };
+            popoverBtn.Child = popoverTxt;
+            popoverBtn.MouseEnter += (s, e) => popoverBtn.Background = KerfBrand.TealBrush;
+            popoverBtn.MouseLeave += (s, e) => popoverBtn.Background = KerfBrand.FigmaPanelBrush;
+            popoverBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                ShowPresetPickerPopover(popoverBtn);
+                e.Handled = true;
+            };
+            Grid.SetColumn(popoverBtn, 1);
+            presetsGrid.Children.Add(popoverBtn);
+
+            Grid.SetRow(presetsGrid, 1);
+            content.Children.Add(presetsGrid);
+
+            // Row 2: Spring Presets row (visible when in Spring mode)
+            _defaultInterpolationSpringRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 0, 0, 4),
+                Visibility = Visibility.Collapsed
+            };
+            var springLbl = new TextBlock
+            {
+                Text = "Spring:",
+                FontSize = 8.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 4, 0)
+            };
+            _defaultInterpolationSpringRow.Children.Add(springLbl);
+            _defaultInterpolationSpringRow.Children.Add(CreateSpringPresetButton("Bouncy", SpringPreset.Bouncy));
+            _defaultInterpolationSpringRow.Children.Add(CreateSpringPresetButton("Snappy", SpringPreset.Snappy));
+            _defaultInterpolationSpringRow.Children.Add(CreateSpringPresetButton("Gentle", SpringPreset.Gentle));
+            _defaultInterpolationSpringRow.Children.Add(CreateSpringPresetButton("Stiff", SpringPreset.Stiff));
+
+            Grid.SetRow(_defaultInterpolationSpringRow, 2);
+            content.Children.Add(_defaultInterpolationSpringRow);
+
+            // Row 3: Interactive Graph Canvas
             _defaultInterpolationCanvas = new Canvas
             {
-                Height = 166,
-                MinHeight = 120,
+                Height = 145,
+                MinHeight = 110,
                 Background = KerfBrand.ObsidianBrush,
                 ClipToBounds = true
             };
@@ -1415,25 +1481,39 @@ namespace Kerf.UI
                 ClipToBounds = true,
                 Child = _defaultInterpolationCanvas
             };
-            Grid.SetRow(graphBorder, 2);
+            Grid.SetRow(graphBorder, 3);
             content.Children.Add(graphBorder);
 
+            // Row 4: Values readout & Tangent slope controls
+            var valuesDock = new DockPanel { Margin = new Thickness(2, 3, 2, 2) };
             _defaultInterpolationValues = new TextBlock
             {
                 Text = "0, 0, 1, 1",
-                FontSize = 10,
+                FontSize = 9.5,
+                FontFamily = new FontFamily("Consolas, Courier New"),
                 Foreground = KerfBrand.MintBrush,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(4, 4, 0, 0)
+                VerticalAlignment = VerticalAlignment.Center
             };
-            Grid.SetRow(_defaultInterpolationValues, 3);
-            content.Children.Add(_defaultInterpolationValues);
+            DockPanel.SetDock(_defaultInterpolationValues, Dock.Left);
+            valuesDock.Children.Add(_defaultInterpolationValues);
 
+            var tangentStack = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            _defaultSmoothTangentBtn = CreateTangentModeButton("Smooth", true);
+            _defaultBrokenTangentBtn = CreateTangentModeButton("Broken", false);
+            tangentStack.Children.Add(_defaultSmoothTangentBtn);
+            tangentStack.Children.Add(_defaultBrokenTangentBtn);
+            DockPanel.SetDock(tangentStack, Dock.Right);
+            valuesDock.Children.Add(tangentStack);
+
+            Grid.SetRow(valuesDock, 4);
+            content.Children.Add(valuesDock);
+
+            // Row 5: Action Apply Button
             _applyDefaultInterpolationButton = new Button
             {
                 Content = "Apply to selected transitions",
                 Height = 22,
-                Margin = new Thickness(0, 3, 0, 0),
+                Margin = new Thickness(0, 2, 0, 0),
                 Padding = new Thickness(6, 1, 6, 1),
                 Background = KerfBrand.TealBrush,
                 Foreground = KerfBrand.TextWhiteBrush,
@@ -1442,32 +1522,59 @@ namespace Kerf.UI
                 Cursor = Cursors.Hand
             };
             _applyDefaultInterpolationButton.Click += (s, e) => ApplyDefaultInterpolationToSelection();
-            Grid.SetRow(_applyDefaultInterpolationButton, 4);
+            Grid.SetRow(_applyDefaultInterpolationButton, 5);
             content.Children.Add(_applyDefaultInterpolationButton);
+
             border.Child = content;
-            RefreshDefaultInterpolationPresetButtons();
+            UpdateDefaultInterpolationFromSelection();
             return border;
+        }
+
+        private static string GetQuickPresetTooltip(int index)
+        {
+            switch (index)
+            {
+                case 0: return "Hold / Step interpolation";
+                case 1: return "Linear interpolation";
+                case 2: return "Ease In Out";
+                case 3: return "Ease Out";
+                case 4: return "Ease In";
+                case 5: return "Spring (Harmonic Oscillator)";
+                default: return "Interpolation Preset";
+            }
         }
 
         private FrameworkElement CreateInterpolationPresetIcon(int preset)
         {
-            var icon = new Canvas { Width = 24, Height = 20, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
-            var figure = new PathFigure { StartPoint = new Point(2, 17), IsClosed = false };
-            if (preset == 0)
+            var icon = new Canvas { Width = 22, Height = 18, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+            var figure = new PathFigure { StartPoint = new Point(2, 15), IsClosed = false };
+            if (preset == 0) // Hold
             {
-                figure.Segments.Add(new LineSegment(new Point(12, 17), true));
-                figure.Segments.Add(new LineSegment(new Point(12, 3), true));
-                figure.Segments.Add(new LineSegment(new Point(22, 3), true));
+                figure.Segments.Add(new LineSegment(new Point(11, 15), true));
+                figure.Segments.Add(new LineSegment(new Point(11, 3), true));
+                figure.Segments.Add(new LineSegment(new Point(20, 3), true));
             }
-            else if (preset == 1)
+            else if (preset == 1) // Linear
             {
-                figure.Segments.Add(new LineSegment(new Point(22, 3), true));
+                figure.Segments.Add(new LineSegment(new Point(20, 3), true));
             }
-            else
+            else if (preset == 2) // Ease In Out
             {
-                Point c1 = preset == 2 ? new Point(10, 17) : preset == 3 ? new Point(5, 3) : new Point(3, 17);
-                Point c2 = preset == 2 ? new Point(14, 3) : preset == 3 ? new Point(13, 3) : new Point(21, 3);
-                figure.Segments.Add(new BezierSegment(c1, c2, new Point(22, 3), true));
+                figure.Segments.Add(new BezierSegment(new Point(9, 15), new Point(13, 3), new Point(20, 3), true));
+            }
+            else if (preset == 3) // Ease Out
+            {
+                figure.Segments.Add(new BezierSegment(new Point(3, 7), new Point(11, 3), new Point(20, 3), true));
+            }
+            else if (preset == 4) // Ease In
+            {
+                figure.Segments.Add(new BezierSegment(new Point(11, 15), new Point(19, 11), new Point(20, 3), true));
+            }
+            else // Spring
+            {
+                figure.Segments.Add(new BezierSegment(new Point(4, 15), new Point(6, 2), new Point(10, 2), true));
+                figure.Segments.Add(new BezierSegment(new Point(13, 2), new Point(15, 6), new Point(18, 4), true));
+                figure.Segments.Add(new LineSegment(new Point(20, 4), true));
             }
             var geometry = new PathGeometry();
             geometry.Figures.Add(figure);
@@ -1477,32 +1584,263 @@ namespace Kerf.UI
 
         private void ApplyDefaultInterpolationPreset(int preset)
         {
-            _defaultInterpolationPreset = Math.Max(0, Math.Min(4, preset));
+            _defaultInterpolationPreset = Math.Max(0, Math.Min(5, preset));
             switch (_defaultInterpolationPreset)
             {
                 case 0:
                     _defaultInterpolationMode = InterpMode.Hold;
                     _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 1.0; _defaultInterpolationY2 = 1.0;
+                    if (_editingInterpolationKeyframe != null)
+                    {
+                        _editingInterpolationKeyframe.Interp = InterpMode.Hold;
+                        _editingInterpolationKeyframe.Preset = EasingPreset.Linear;
+                    }
                     break;
                 case 1:
                     _defaultInterpolationMode = InterpMode.Linear;
                     _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 1.0; _defaultInterpolationY2 = 1.0;
+                    if (_editingInterpolationKeyframe != null)
+                    {
+                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, EasingPreset.Linear);
+                    }
                     break;
                 case 2:
                     _defaultInterpolationMode = InterpMode.Cubic;
                     _defaultInterpolationX1 = 0.42; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 0.58; _defaultInterpolationY2 = 1.0;
+                    if (_editingInterpolationKeyframe != null)
+                    {
+                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, EasingPreset.EaseInOut);
+                    }
                     break;
                 case 3:
                     _defaultInterpolationMode = InterpMode.Cubic;
                     _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 0.58; _defaultInterpolationY2 = 1.0;
+                    if (_editingInterpolationKeyframe != null)
+                    {
+                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, EasingPreset.EaseOut);
+                    }
                     break;
-                default:
+                case 4:
                     _defaultInterpolationMode = InterpMode.Cubic;
-                    _defaultInterpolationX1 = 0.25; _defaultInterpolationY1 = 0.1; _defaultInterpolationX2 = 0.25; _defaultInterpolationY2 = 1.0;
+                    _defaultInterpolationX1 = 0.42; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 1.0; _defaultInterpolationY2 = 1.0;
+                    if (_editingInterpolationKeyframe != null)
+                    {
+                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, EasingPreset.EaseIn);
+                    }
+                    break;
+                case 5:
+                    _defaultInterpolationMode = InterpMode.Spring;
+                    if (_editingInterpolationKeyframe != null)
+                    {
+                        EasingEngine.ApplySpringPreset(_editingInterpolationKeyframe, SpringPreset.Bouncy);
+                    }
                     break;
             }
-            RefreshDefaultInterpolationPresetButtons();
+
+            if (_editingInterpolationKeyframe != null)
+            {
+                foreach (var kf in _selectedTimelineKeyframes)
+                {
+                    if (kf != null && !ReferenceEquals(kf, _editingInterpolationKeyframe))
+                    {
+                        kf.Interp = _defaultInterpolationMode;
+                        kf.X1 = _defaultInterpolationX1;
+                        kf.Y1 = _defaultInterpolationY1;
+                        kf.X2 = _defaultInterpolationX2;
+                        kf.Y2 = _defaultInterpolationY2;
+                        if (_defaultInterpolationMode == InterpMode.Spring)
+                        {
+                            kf.Mass = _editingInterpolationKeyframe.Mass;
+                            kf.Stiffness = _editingInterpolationKeyframe.Stiffness;
+                            kf.Damping = _editingInterpolationKeyframe.Damping;
+                            kf.InitialVelocity = _editingInterpolationKeyframe.InitialVelocity;
+                        }
+                    }
+                }
+                SyncRealtimeEvaluator();
+                if (History != null) History.MarkDirty();
+                RefreshTimelineCanvas();
+            }
+
+            UpdateDefaultInterpolationFromSelection();
+        }
+
+        public void ApplyEasingPresetToCurrentSelection(EasingPreset preset)
+        {
+            if (_editingInterpolationKeyframe != null)
+            {
+                EasingEngine.ApplyPreset(_editingInterpolationKeyframe, preset);
+                _defaultInterpolationMode = _editingInterpolationKeyframe.Interp;
+                _defaultInterpolationX1 = _editingInterpolationKeyframe.X1;
+                _defaultInterpolationY1 = _editingInterpolationKeyframe.Y1;
+                _defaultInterpolationX2 = _editingInterpolationKeyframe.X2;
+                _defaultInterpolationY2 = _editingInterpolationKeyframe.Y2;
+
+                foreach (var kf in _selectedTimelineKeyframes)
+                {
+                    if (kf != null && !ReferenceEquals(kf, _editingInterpolationKeyframe))
+                    {
+                        EasingEngine.ApplyPreset(kf, preset);
+                    }
+                }
+
+                SyncRealtimeEvaluator();
+                if (History != null) History.MarkDirty();
+                RefreshTimelineCanvas();
+            }
+            else if (_selectedGraphTransition != null)
+            {
+                _selectedGraphTransition.Interpolation = InterpMode.Cubic;
+                double x1, y1, x2, y2;
+                EasingEngine.GetPresetControlPoints(preset, out x1, out y1, out x2, out y2);
+                _selectedGraphTransition.X1 = x1;
+                _selectedGraphTransition.Y1 = y1;
+                _selectedGraphTransition.X2 = x2;
+                _selectedGraphTransition.Y2 = y2;
+                _defaultInterpolationX1 = x1;
+                _defaultInterpolationY1 = y1;
+                _defaultInterpolationX2 = x2;
+                _defaultInterpolationY2 = y2;
+                _defaultInterpolationMode = InterpMode.Cubic;
+            }
+            else
+            {
+                _defaultInterpolationMode = InterpMode.Cubic;
+                double x1, y1, x2, y2;
+                EasingEngine.GetPresetControlPoints(preset, out x1, out y1, out x2, out y2);
+                _defaultInterpolationX1 = x1;
+                _defaultInterpolationY1 = y1;
+                _defaultInterpolationX2 = x2;
+                _defaultInterpolationY2 = y2;
+            }
+
+            UpdateDefaultInterpolationFromSelection();
+        }
+
+        public void ApplySpringPresetToCurrentSelection(SpringPreset preset)
+        {
+            _defaultInterpolationMode = InterpMode.Spring;
+            if (_editingInterpolationKeyframe != null)
+            {
+                EasingEngine.ApplySpringPreset(_editingInterpolationKeyframe, preset);
+                foreach (var kf in _selectedTimelineKeyframes)
+                {
+                    if (kf != null && !ReferenceEquals(kf, _editingInterpolationKeyframe))
+                    {
+                        EasingEngine.ApplySpringPreset(kf, preset);
+                    }
+                }
+                SyncRealtimeEvaluator();
+                if (History != null) History.MarkDirty();
+                RefreshTimelineCanvas();
+            }
+            UpdateDefaultInterpolationFromSelection();
+        }
+
+        private void UpdateDefaultInterpolationFromSelection()
+        {
+            if (_defaultInterpolationPanel == null) return;
+
+            if (_editingInterpolationKeyframe != null)
+            {
+                var kf = _editingInterpolationKeyframe;
+                _defaultInterpolationMode = kf.Interp;
+                _defaultInterpolationX1 = kf.X1;
+                _defaultInterpolationY1 = kf.Y1;
+                _defaultInterpolationX2 = kf.X2;
+                _defaultInterpolationY2 = kf.Y2;
+
+                if (_defaultInterpolationTitle != null)
+                    _defaultInterpolationTitle.Text = "Keyframe Interpolation";
+
+                if (_defaultInterpolationSubtitle != null)
+                {
+                    string propName = _editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Property";
+                    _defaultInterpolationSubtitle.Text = string.Format(CultureInfo.InvariantCulture, "{0} · {1:0.00}s", propName, kf.Time);
+                }
+
+                if (_applyDefaultInterpolationButton != null)
+                {
+                    int selCount = _selectedTimelineKeyframes.Count;
+                    _applyDefaultInterpolationButton.Content = selCount > 1 ? string.Format("Apply to {0} selected keys", selCount) : "Apply to selected keys";
+                    _applyDefaultInterpolationButton.IsEnabled = true;
+                }
+            }
+            else if (_selectedGraphTransition != null)
+            {
+                var tr = _selectedGraphTransition;
+                _defaultInterpolationMode = tr.Interpolation;
+                _defaultInterpolationX1 = tr.X1;
+                _defaultInterpolationY1 = tr.Y1;
+                _defaultInterpolationX2 = tr.X2;
+                _defaultInterpolationY2 = tr.Y2;
+
+                if (_defaultInterpolationTitle != null)
+                    _defaultInterpolationTitle.Text = "Transition Interpolation";
+
+                if (_defaultInterpolationSubtitle != null)
+                    _defaultInterpolationSubtitle.Text = TransitionConditionSummary(tr);
+
+                if (_applyDefaultInterpolationButton != null)
+                {
+                    _applyDefaultInterpolationButton.Content = "Apply to selected transitions";
+                    _applyDefaultInterpolationButton.IsEnabled = true;
+                }
+            }
+            else
+            {
+                if (_defaultInterpolationTitle != null)
+                    _defaultInterpolationTitle.Text = "Default Interpolation";
+
+                if (_defaultInterpolationSubtitle != null)
+                    _defaultInterpolationSubtitle.Text = "Applies to new keyframes";
+
+                if (_applyDefaultInterpolationButton != null)
+                {
+                    _applyDefaultInterpolationButton.Content = "Apply to selection";
+                    _applyDefaultInterpolationButton.IsEnabled = _selectedTimelineKeyframes.Count > 0;
+                }
+            }
+
+            UpdateDefaultInterpolationPresetSelection();
+
+            if (_defaultInterpolationSpringRow != null)
+            {
+                _defaultInterpolationSpringRow.Visibility = (_defaultInterpolationMode == InterpMode.Spring) ? Visibility.Visible : Visibility.Collapsed;
+            }
+
             DrawDefaultInterpolationGraph();
+        }
+
+        private void UpdateDefaultInterpolationPresetSelection()
+        {
+            int selectedIdx = -1;
+            if (_defaultInterpolationMode == InterpMode.Hold) selectedIdx = 0;
+            else if (_defaultInterpolationMode == InterpMode.Linear) selectedIdx = 1;
+            else if (_defaultInterpolationMode == InterpMode.Spring) selectedIdx = 5;
+            else if (_defaultInterpolationMode == InterpMode.Cubic)
+            {
+                if (Math.Abs(_defaultInterpolationX1 - 0.42) < 0.05 && Math.Abs(_defaultInterpolationY1 - 0.0) < 0.05 &&
+                    Math.Abs(_defaultInterpolationX2 - 0.58) < 0.05 && Math.Abs(_defaultInterpolationY2 - 1.0) < 0.05)
+                    selectedIdx = 2;
+                else if (Math.Abs(_defaultInterpolationX1 - 0.0) < 0.05 && Math.Abs(_defaultInterpolationY1 - 0.0) < 0.05 &&
+                         Math.Abs(_defaultInterpolationX2 - 0.58) < 0.05 && Math.Abs(_defaultInterpolationY2 - 1.0) < 0.05)
+                    selectedIdx = 3;
+                else if (Math.Abs(_defaultInterpolationX1 - 0.42) < 0.05 && Math.Abs(_defaultInterpolationY1 - 0.0) < 0.05 &&
+                         Math.Abs(_defaultInterpolationX2 - 1.0) < 0.05 && Math.Abs(_defaultInterpolationY2 - 1.0) < 0.05)
+                    selectedIdx = 4;
+            }
+
+            _defaultInterpolationPreset = selectedIdx;
+            for (int i = 0; i < _defaultInterpolationPresetButtons.Length; i++)
+            {
+                var btn = _defaultInterpolationPresetButtons[i];
+                if (btn == null) continue;
+                bool isSel = (i == selectedIdx);
+                btn.Background = isSel ? KerfBrand.TealBrush : Brushes.Transparent;
+                btn.BorderBrush = isSel ? KerfBrand.MintBrush : Brushes.Transparent;
+                btn.BorderThickness = new Thickness(isSel ? 1 : 0);
+            }
         }
 
         private void ApplyDefaultInterpolationToSelection()
@@ -1517,6 +1855,13 @@ namespace Kerf.UI
                 keyframe.Y1 = _defaultInterpolationY1;
                 keyframe.X2 = _defaultInterpolationX2;
                 keyframe.Y2 = _defaultInterpolationY2;
+                if (_defaultInterpolationMode == InterpMode.Spring && _editingInterpolationKeyframe != null)
+                {
+                    keyframe.Mass = _editingInterpolationKeyframe.Mass;
+                    keyframe.Stiffness = _editingInterpolationKeyframe.Stiffness;
+                    keyframe.Damping = _editingInterpolationKeyframe.Damping;
+                    keyframe.InitialVelocity = _editingInterpolationKeyframe.InitialVelocity;
+                }
                 applied = true;
             }
             if (_selectedGraphTransition != null)
@@ -1530,6 +1875,7 @@ namespace Kerf.UI
             }
             if (!applied) return;
             if (History != null) History.MarkDirty();
+            SyncRealtimeEvaluator();
             RefreshInterpolationGraphPanels();
             RefreshTimelineCanvas();
             if (_selectedGraphTransition != null) BuildStateMachineStatesGraph();
@@ -1538,17 +1884,7 @@ namespace Kerf.UI
 
         private void RefreshDefaultInterpolationPresetButtons()
         {
-            if (_applyDefaultInterpolationButton != null)
-                _applyDefaultInterpolationButton.IsEnabled = _editingInterpolationKeyframe != null || _selectedTimelineKeyframes.Count > 0 || _selectedGraphTransition != null;
-            for (int i = 0; i < _defaultInterpolationPresetButtons.Length; i++)
-            {
-                var button = _defaultInterpolationPresetButtons[i];
-                if (button == null) continue;
-                bool selected = i == _defaultInterpolationPreset;
-                button.Background = selected ? KerfBrand.TealBrush : Brushes.Transparent;
-                button.BorderBrush = selected ? KerfBrand.MintBrush : Brushes.Transparent;
-                button.BorderThickness = new Thickness(selected ? 1 : 0);
-            }
+            UpdateDefaultInterpolationPresetSelection();
         }
 
         private void DrawDefaultInterpolationGraph()
@@ -1557,9 +1893,11 @@ namespace Kerf.UI
             if (canvas == null) return;
             canvas.Children.Clear();
             double width = Math.Max(130.0, canvas.ActualWidth > 20.0 ? canvas.ActualWidth : 210.0);
-            double height = Math.Max(100.0, canvas.ActualHeight > 20.0 ? canvas.ActualHeight : 166.0);
-            double left = 8.0, right = width - 8.0, top = 8.0, bottom = height - 8.0;
-            var gridBrush = KerfBrand.DarkSlateBrush;
+            double height = Math.Max(100.0, canvas.ActualHeight > 20.0 ? canvas.ActualHeight : 145.0);
+            double left = 12.0, right = width - 12.0, top = 16.0, bottom = height - 16.0;
+
+            // 1. Grid lines (3x3)
+            var gridBrush = new SolidColorBrush(Color.FromRgb(32, 38, 50));
             for (int i = 1; i < 4; i++)
             {
                 double gx = left + (right - left) * i / 4.0;
@@ -1567,44 +1905,117 @@ namespace Kerf.UI
                 canvas.Children.Add(new Line { X1 = gx, Y1 = top, X2 = gx, Y2 = bottom, Stroke = gridBrush, StrokeThickness = 0.7 });
                 canvas.Children.Add(new Line { X1 = left, Y1 = gy, X2 = right, Y2 = gy, Stroke = gridBrush, StrokeThickness = 0.7 });
             }
+
+            // 2. Baseline (0.0) and ceiling (1.0)
             canvas.Children.Add(new Line { X1 = left, Y1 = bottom, X2 = right, Y2 = bottom, Stroke = KerfBrand.TealBrush, StrokeThickness = 1 });
+            canvas.Children.Add(new Line { X1 = left, Y1 = top, X2 = right, Y2 = top, Stroke = new SolidColorBrush(Color.FromRgb(40, 50, 68)), StrokeThickness = 1, StrokeDashArray = new DoubleCollection(new double[] { 2, 2 }) });
             canvas.Children.Add(new Line { X1 = left, Y1 = top, X2 = left, Y2 = bottom, Stroke = KerfBrand.TealBrush, StrokeThickness = 1 });
 
-            Point start = new Point(left, bottom);
-            Point end = new Point(right, top);
-            var figure = new PathFigure { StartPoint = start, IsClosed = false };
-            if (_defaultInterpolationMode == InterpMode.Hold)
+            // 3. Draw curve via polyline with 32 samples
+            var polyline = new Polyline
             {
-                figure.Segments.Add(new LineSegment(new Point(right, bottom), true));
-                figure.Segments.Add(new LineSegment(end, true));
+                Stroke = new LinearGradientBrush(KerfBrand.Mint, KerfBrand.Teal, 0.0),
+                StrokeThickness = 2.0,
+                StrokeLineJoin = PenLineJoin.Round,
+                IsHitTestVisible = false
+            };
+
+            int sampleCount = 32;
+            for (int i = 0; i <= sampleCount; i++)
+            {
+                double u = (double)i / sampleCount;
+                double val = 0.0;
+                if (_defaultInterpolationMode == InterpMode.Hold)
+                {
+                    val = (u >= 1.0) ? 1.0 : 0.0;
+                }
+                else if (_defaultInterpolationMode == InterpMode.Linear)
+                {
+                    val = u;
+                }
+                else if (_defaultInterpolationMode == InterpMode.Spring)
+                {
+                    double m = (_editingInterpolationKeyframe != null) ? _editingInterpolationKeyframe.Mass : 1.0;
+                    double k = (_editingInterpolationKeyframe != null) ? _editingInterpolationKeyframe.Stiffness : 150.0;
+                    double c = (_editingInterpolationKeyframe != null) ? _editingInterpolationKeyframe.Damping : 10.0;
+                    double v0 = (_editingInterpolationKeyframe != null) ? _editingInterpolationKeyframe.InitialVelocity : 0.0;
+                    val = EasingEngine.EvaluateSpring(u, m, k, c, v0);
+                }
+                else
+                {
+                    val = EasingEngine.EvaluateBezier(u, _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2);
+                }
+
+                double px = left + u * (right - left);
+                double py = bottom - val * (bottom - top);
+                polyline.Points.Add(new Point(px, py));
             }
-            else if (_defaultInterpolationMode == InterpMode.Linear)
+            canvas.Children.Add(polyline);
+
+            // 4. If Cubic, draw draggable handles and tangent lines
+            if (_defaultInterpolationMode == InterpMode.Cubic)
             {
-                figure.Segments.Add(new LineSegment(end, true));
-            }
-            else
-            {
+                Point start = new Point(left, bottom);
+                Point end = new Point(right, top);
                 Point c1 = new Point(left + _defaultInterpolationX1 * (right - left), bottom - _defaultInterpolationY1 * (bottom - top));
                 Point c2 = new Point(left + _defaultInterpolationX2 * (right - left), bottom - _defaultInterpolationY2 * (bottom - top));
-                figure.Segments.Add(new BezierSegment(c1, c2, end, true));
-                canvas.Children.Add(new Line { X1 = start.X, Y1 = start.Y, X2 = c1.X, Y2 = c1.Y, Stroke = KerfBrand.TealBrush, StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 2, 2 }, IsHitTestVisible = false });
-                canvas.Children.Add(new Line { X1 = end.X, Y1 = end.Y, X2 = c2.X, Y2 = c2.Y, Stroke = KerfBrand.TealBrush, StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 2, 2 }, IsHitTestVisible = false });
+
+                canvas.Children.Add(new Line
+                {
+                    X1 = start.X, Y1 = start.Y,
+                    X2 = c1.X, Y2 = c1.Y,
+                    Stroke = KerfBrand.TealBrush,
+                    StrokeThickness = 1,
+                    StrokeDashArray = new DoubleCollection(new double[] { 2, 2 }),
+                    IsHitTestVisible = false
+                });
+
+                canvas.Children.Add(new Line
+                {
+                    X1 = end.X, Y1 = end.Y,
+                    X2 = c2.X, Y2 = c2.Y,
+                    Stroke = KerfBrand.TealBrush,
+                    StrokeThickness = 1,
+                    StrokeDashArray = new DoubleCollection(new double[] { 2, 2 }),
+                    IsHitTestVisible = false
+                });
+
                 AddDefaultInterpolationHandle(canvas, c1, 1);
                 AddDefaultInterpolationHandle(canvas, c2, 2);
             }
-            var curve = new PathGeometry();
-            curve.Figures.Add(figure);
-            var gradient = new LinearGradientBrush(KerfBrand.Mint, KerfBrand.Teal, 0.0);
-            canvas.Children.Add(new System.Windows.Shapes.Path { Data = curve, Stroke = gradient, StrokeThickness = 1.5, Fill = Brushes.Transparent, IsHitTestVisible = false });
+
+            // 5. Update values readout text
             if (_defaultInterpolationValues != null)
-                _defaultInterpolationValues.Text = string.Format(CultureInfo.InvariantCulture, "{0:0.##}, {1:0.##}, {2:0.##}, {3:0.##}", _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2);
+            {
+                if (_defaultInterpolationMode == InterpMode.Spring)
+                {
+                    double m = (_editingInterpolationKeyframe != null) ? _editingInterpolationKeyframe.Mass : 1.0;
+                    double k = (_editingInterpolationKeyframe != null) ? _editingInterpolationKeyframe.Stiffness : 150.0;
+                    double c = (_editingInterpolationKeyframe != null) ? _editingInterpolationKeyframe.Damping : 10.0;
+                    _defaultInterpolationValues.Text = string.Format(CultureInfo.InvariantCulture, "m:{0:0.#} k:{1:0} c:{2:0}", m, k, c);
+                }
+                else if (_defaultInterpolationMode == InterpMode.Hold)
+                {
+                    _defaultInterpolationValues.Text = "Hold (Step)";
+                }
+                else if (_defaultInterpolationMode == InterpMode.Linear)
+                {
+                    _defaultInterpolationValues.Text = "Linear";
+                }
+                else
+                {
+                    _defaultInterpolationValues.Text = string.Format(CultureInfo.InvariantCulture, "{0:0.##}, {1:0.##}, {2:0.##}, {3:0.##}", _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2);
+                }
+            }
+
+            UpdateTangentButtonsState();
         }
 
         private static void AddDefaultInterpolationHandle(Canvas canvas, Point point, int id)
         {
-            var handle = new Ellipse { Width = 7, Height = 7, Fill = KerfBrand.MintBrush, Stroke = Brushes.White, StrokeThickness = 1, Tag = id, IsHitTestVisible = false };
-            Canvas.SetLeft(handle, point.X - 3.5);
-            Canvas.SetTop(handle, point.Y - 3.5);
+            var handle = new Ellipse { Width = 8, Height = 8, Fill = KerfBrand.MintBrush, Stroke = Brushes.White, StrokeThickness = 1.2, Tag = id, IsHitTestVisible = false };
+            Canvas.SetLeft(handle, point.X - 4.0);
+            Canvas.SetTop(handle, point.Y - 4.0);
             canvas.Children.Add(handle);
         }
 
@@ -1614,10 +2025,10 @@ namespace Kerf.UI
             Point point = e.GetPosition(_defaultInterpolationCanvas);
             double width = Math.Max(130.0, _defaultInterpolationCanvas.ActualWidth);
             double height = Math.Max(100.0, _defaultInterpolationCanvas.ActualHeight);
-            double left = 8.0, right = width - 8.0, top = 8.0, bottom = height - 8.0;
+            double left = 12.0, right = width - 12.0, top = 16.0, bottom = height - 16.0;
             Point c1 = new Point(left + _defaultInterpolationX1 * (right - left), bottom - _defaultInterpolationY1 * (bottom - top));
             Point c2 = new Point(left + _defaultInterpolationX2 * (right - left), bottom - _defaultInterpolationY2 * (bottom - top));
-            if ((point - c1).Length > 15.0 && (point - c2).Length > 15.0) return;
+            if ((point - c1).Length > 18.0 && (point - c2).Length > 18.0) return;
             _defaultInterpolationDragHandle = (point - c1).Length < (point - c2).Length ? 1 : 2;
             _defaultInterpolationCanvas.CaptureMouse();
             e.Handled = true;
@@ -1629,14 +2040,61 @@ namespace Kerf.UI
             Point point = e.GetPosition(_defaultInterpolationCanvas);
             double width = Math.Max(130.0, _defaultInterpolationCanvas.ActualWidth);
             double height = Math.Max(100.0, _defaultInterpolationCanvas.ActualHeight);
-            double left = 8.0, right = width - 8.0, top = 8.0, bottom = height - 8.0;
+            double left = 12.0, right = width - 12.0, top = 16.0, bottom = height - 16.0;
+
             double x = Math.Max(0.0, Math.Min(1.0, (point.X - left) / Math.Max(1.0, right - left)));
-            double y = Math.Max(0.0, Math.Min(1.0, (bottom - point.Y) / Math.Max(1.0, bottom - top)));
-            if (_defaultInterpolationDragHandle == 1) { _defaultInterpolationX1 = x; _defaultInterpolationY1 = y; }
-            else { _defaultInterpolationX2 = x; _defaultInterpolationY2 = y; }
+            double y = (bottom - point.Y) / Math.Max(1.0, bottom - top);
+            // Allow vertical overshoot between -0.5 and 1.5
+            y = Math.Max(-0.5, Math.Min(1.5, y));
+
+            if (_defaultInterpolationDragHandle == 1)
+            {
+                _defaultInterpolationX1 = x;
+                _defaultInterpolationY1 = y;
+            }
+            else
+            {
+                _defaultInterpolationX2 = x;
+                _defaultInterpolationY2 = y;
+            }
             _defaultInterpolationMode = InterpMode.Cubic;
-            _defaultInterpolationPreset = 4;
-            RefreshDefaultInterpolationPresetButtons();
+            _defaultInterpolationPreset = -1;
+
+            if (_editingInterpolationKeyframe != null)
+            {
+                _editingInterpolationKeyframe.Interp = InterpMode.Cubic;
+                _editingInterpolationKeyframe.Preset = EasingPreset.CustomBezier;
+                _editingInterpolationKeyframe.X1 = _defaultInterpolationX1;
+                _editingInterpolationKeyframe.Y1 = _defaultInterpolationY1;
+                _editingInterpolationKeyframe.X2 = _defaultInterpolationX2;
+                _editingInterpolationKeyframe.Y2 = _defaultInterpolationY2;
+
+                foreach (var kf in _selectedTimelineKeyframes)
+                {
+                    if (kf != null && !ReferenceEquals(kf, _editingInterpolationKeyframe))
+                    {
+                        kf.Interp = InterpMode.Cubic;
+                        kf.Preset = EasingPreset.CustomBezier;
+                        kf.X1 = _defaultInterpolationX1;
+                        kf.Y1 = _defaultInterpolationY1;
+                        kf.X2 = _defaultInterpolationX2;
+                        kf.Y2 = _defaultInterpolationY2;
+                    }
+                }
+
+                SyncRealtimeEvaluator();
+            }
+
+            if (_selectedGraphTransition != null)
+            {
+                _selectedGraphTransition.Interpolation = InterpMode.Cubic;
+                _selectedGraphTransition.X1 = _defaultInterpolationX1;
+                _selectedGraphTransition.Y1 = _defaultInterpolationY1;
+                _selectedGraphTransition.X2 = _defaultInterpolationX2;
+                _selectedGraphTransition.Y2 = _defaultInterpolationY2;
+            }
+
+            UpdateDefaultInterpolationPresetSelection();
             DrawDefaultInterpolationGraph();
             e.Handled = true;
         }
@@ -1645,7 +2103,10 @@ namespace Kerf.UI
         {
             if (_defaultInterpolationDragHandle < 0) return;
             _defaultInterpolationDragHandle = -1;
-            if (_defaultInterpolationCanvas != null && _defaultInterpolationCanvas.IsMouseCaptured) _defaultInterpolationCanvas.ReleaseMouseCapture();
+            if (_defaultInterpolationCanvas != null && _defaultInterpolationCanvas.IsMouseCaptured)
+                _defaultInterpolationCanvas.ReleaseMouseCapture();
+            if (History != null) History.MarkDirty();
+            RefreshTimelineCanvas();
             e.Handled = true;
         }
 
@@ -11564,7 +12025,7 @@ namespace Kerf.UI
             {
                 if (_defaultInterpolationPanel != null)
                     _defaultInterpolationPanel.Visibility = _isAssetsTabActive ? Visibility.Collapsed : Visibility.Visible;
-                DrawDefaultInterpolationGraph();
+                UpdateDefaultInterpolationFromSelection();
                 if (_designTabButton != null)
                 {
                     _designTabButton.Background = Brushes.Transparent;
@@ -11586,8 +12047,6 @@ namespace Kerf.UI
                 SanitizeAnimationClips(Document);
                 EnsureTimelineControllerInitialized();
                 CaptureAnimationRestPose();
-                _isGraphEditorOpen = true;
-                ApplyGraphEditorVisibility();
                 _isStateMachineMode = true;
                 if (_timelineController != null) _timelineController.UseStateMachine = true;
                 if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
@@ -11655,36 +12114,23 @@ namespace Kerf.UI
             Grid.SetRow(transportBar, 0);
             grid.Children.Add(transportBar);
 
-            // 2. Timeline Body (Tracks container with vertical split panel to Graph Editor)
+            // 2. Timeline Body (Clean tracks container: track headers on left, ruler & lanes on right)
             var bodyGrid = new Grid();
-            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) }); // Left: Track headers & Graph header
-            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Right: Ruler, Lanes & Graph Canvas
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) }); // Left: Track headers
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Right: Ruler & Lanes
+            bodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            bodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 80 }); // Row 0: Tracks & Lanes
-            _graphSplitterRowDef = new RowDefinition { Height = new GridLength(5) }; // Row 1: GridSplitter
-            bodyGrid.RowDefinitions.Add(_graphSplitterRowDef);
-            _graphEditorRowDef = new RowDefinition { Height = new GridLength(180), MinHeight = 60 }; // Row 2: Graph Editor Panel
-            bodyGrid.RowDefinitions.Add(_graphEditorRowDef);
-
-            // Left: Track Headers Stack
+            // Left: Track Headers Stack (clean track list, no graph editor)
             var leftTrackBorder = new Border
             {
                 Background = KerfBrand.DarkSlateBrush,
                 BorderBrush = KerfBrand.TealBrush,
                 BorderThickness = new Thickness(0, 0, 1, 0)
             };
-            var leftTrackGrid = new Grid();
-            leftTrackGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            leftTrackGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(92) });
             var trackScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             _timelineTracksStack = new StackPanel { Margin = new Thickness(0) };
             trackScroll.Content = _timelineTracksStack;
-            Grid.SetRow(trackScroll, 0);
-            leftTrackGrid.Children.Add(trackScroll);
-            var interpolationPanel = CreateInterpolationGraphPanel(false);
-            Grid.SetRow(interpolationPanel, 1);
-            leftTrackGrid.Children.Add(interpolationPanel);
-            leftTrackBorder.Child = leftTrackGrid;
+            leftTrackBorder.Child = trackScroll;
             Grid.SetRow(leftTrackBorder, 0);
             Grid.SetColumn(leftTrackBorder, 0);
             bodyGrid.Children.Add(leftTrackBorder);
@@ -11720,60 +12166,7 @@ namespace Kerf.UI
             Grid.SetColumn(rightCanvasBorder, 1);
             bodyGrid.Children.Add(rightCanvasBorder);
 
-            // Row 1: GridSplitter between Tracks and Graph Editor (Height = 5, Background = KerfBrand.FigmaBorderBrush) per D-01
-            _graphSplitter = new GridSplitter
-            {
-                Height = 5,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Center,
-                Background = KerfBrand.FigmaBorderBrush,
-                ResizeDirection = GridResizeDirection.Rows,
-                ShowsPreview = false
-            };
-            Grid.SetRow(_graphSplitter, 1);
-            Grid.SetColumnSpan(_graphSplitter, 2);
-            bodyGrid.Children.Add(_graphSplitter);
-
-            // Row 2 Left: Graph Editor Header / Property Info Sidebar
-            _graphEditorHeaderBorder = CreateGraphEditorHeaderPanel();
-            Grid.SetRow(_graphEditorHeaderBorder, 2);
-            Grid.SetColumn(_graphEditorHeaderBorder, 0);
-            bodyGrid.Children.Add(_graphEditorHeaderBorder);
-
-            // Row 2 Right: Graph Editor Canvas ScrollViewer
-            var graphCanvasBorder = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(19, 22, 29)),
-                ClipToBounds = true
-            };
-            _graphCanvasScroll = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
-            };
-            _graphEditorCanvas = new GraphEditorCanvas();
-            _graphEditorCanvas.KeyframeModified += (kf, trk) =>
-            {
-                SyncRealtimeEvaluator();
-                RefreshPropertyInspector();
-            };
-            _graphEditorCanvas.KeyframeSelectionChanged += (kf) =>
-            {
-                _editingInterpolationKeyframe = kf;
-                _selectedTimelineKeyframes.Clear();
-                if (kf != null) _selectedTimelineKeyframes.Add(kf);
-                UpdateTimelineKeyframeDiamondStyles();
-                RefreshInterpolationGraphPanels();
-                RefreshPropertyInspector();
-            };
-            _graphCanvasScroll.Content = _graphEditorCanvas;
-            graphCanvasBorder.Child = _graphCanvasScroll;
-
-            Grid.SetRow(graphCanvasBorder, 2);
-            Grid.SetColumn(graphCanvasBorder, 1);
-            bodyGrid.Children.Add(graphCanvasBorder);
-
-            // Cross-synchronized scrolling between Tracks and Graph Editor per D-02
+            // Synchronize vertical scrolling between track headers and timeline canvas
             trackScroll.ScrollChanged += (s, e) =>
             {
                 if (e.VerticalChange != 0) timelineCanvasScroll.ScrollToVerticalOffset(trackScroll.VerticalOffset);
@@ -11781,33 +12174,6 @@ namespace Kerf.UI
             timelineCanvasScroll.ScrollChanged += (s, e) =>
             {
                 if (e.VerticalChange != 0) trackScroll.ScrollToVerticalOffset(timelineCanvasScroll.VerticalOffset);
-                if (!_isSyncingHorizontalScroll && e.HorizontalChange != 0 && _graphCanvasScroll != null)
-                {
-                    _isSyncingHorizontalScroll = true;
-                    try
-                    {
-                        _graphCanvasScroll.ScrollToHorizontalOffset(timelineCanvasScroll.HorizontalOffset);
-                    }
-                    finally
-                    {
-                        _isSyncingHorizontalScroll = false;
-                    }
-                }
-            };
-            _graphCanvasScroll.ScrollChanged += (s, e) =>
-            {
-                if (!_isSyncingHorizontalScroll && e.HorizontalChange != 0 && timelineCanvasScroll != null)
-                {
-                    _isSyncingHorizontalScroll = true;
-                    try
-                    {
-                        timelineCanvasScroll.ScrollToHorizontalOffset(_graphCanvasScroll.HorizontalOffset);
-                    }
-                    finally
-                    {
-                        _isSyncingHorizontalScroll = false;
-                    }
-                }
             };
 
             _timelineTracksContainer = bodyGrid;
@@ -12007,36 +12373,6 @@ namespace Kerf.UI
             speedBtn.MouseLeftButtonUp += (s, e) => CycleTimelineSpeed();
             rightStack.Children.Add(speedBtn);
 
-            // Graph Editor Toggle Button ("📈 Graph Editor" / "Timeline Only") per D-01
-            _graphToggleBtn = new Border
-            {
-                Background = _isGraphEditorOpen ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush,
-                BorderBrush = KerfBrand.FigmaBorderBrush,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(8, 4, 8, 4),
-                Margin = new Thickness(0, 0, 8, 0),
-                Cursor = Cursors.Hand
-            };
-            _graphToggleBtnText = new TextBlock
-            {
-                Text = _isGraphEditorOpen ? "📈 Graph Editor" : "Timeline Only",
-                FontSize = 11,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = _isGraphEditorOpen ? KerfBrand.TextBlackBrush : Brushes.White
-            };
-            _graphToggleBtn.Child = _graphToggleBtnText;
-            _graphToggleBtn.MouseEnter += (s, e) =>
-            {
-                if (!_isGraphEditorOpen) _graphToggleBtn.Background = KerfBrand.FigmaBorderBrush;
-            };
-            _graphToggleBtn.MouseLeave += (s, e) =>
-            {
-                _graphToggleBtn.Background = _isGraphEditorOpen ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush;
-            };
-            _graphToggleBtn.MouseLeftButtonUp += (s, e) => ToggleGraphEditor();
-            rightStack.Children.Add(_graphToggleBtn);
-
             // Mode Tabs: [ ⚙ State Machine ] vs [ ⏱ Timeline Clips ]
             var modePill = new Border
             {
@@ -12131,122 +12467,6 @@ namespace Kerf.UI
             return btn;
         }
 
-        private Border CreateGraphEditorHeaderPanel()
-        {
-            var border = new Border
-            {
-                Background = KerfBrand.DarkSlateBrush,
-                BorderBrush = KerfBrand.TealBrush,
-                BorderThickness = new Thickness(0, 0, 1, 0),
-                Padding = new Thickness(10, 8, 10, 8)
-            };
-
-            var stack = new StackPanel();
-
-            var title = new TextBlock
-            {
-                Text = "GRAPH EDITOR",
-                FontSize = 9,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
-                Margin = new Thickness(0, 0, 0, 4)
-            };
-            stack.Children.Add(title);
-
-            _graphTrackNameText = new TextBlock
-            {
-                Text = "No Track Focused",
-                FontSize = 11,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = Brushes.White,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 0, 0, 2)
-            };
-            stack.Children.Add(_graphTrackNameText);
-
-            _graphTrackUnitsText = new TextBlock
-            {
-                Text = "Click a track in timeline",
-                FontSize = 9,
-                Foreground = new SolidColorBrush(Color.FromRgb(110, 125, 150)),
-                Margin = new Thickness(0, 0, 0, 8)
-            };
-            stack.Children.Add(_graphTrackUnitsText);
-
-            // Button Row: [ Auto-Fit (F) ]
-            _graphAutoFitBtn = new Border
-            {
-                Background = KerfBrand.FigmaPanelBrush,
-                BorderBrush = KerfBrand.FigmaBorderBrush,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(6, 4, 6, 4),
-                Margin = new Thickness(0, 0, 0, 8),
-                Cursor = Cursors.Hand
-            };
-            _graphAutoFitBtnText = new TextBlock
-            {
-                Text = "⛶ Auto-Fit Framing [F]",
-                FontSize = 10,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-            _graphAutoFitBtn.Child = _graphAutoFitBtnText;
-            _graphAutoFitBtn.MouseEnter += (s, e) => _graphAutoFitBtn.Background = KerfBrand.FigmaBorderBrush;
-            _graphAutoFitBtn.MouseLeave += (s, e) => _graphAutoFitBtn.Background = KerfBrand.FigmaPanelBrush;
-            _graphAutoFitBtn.MouseLeftButtonUp += (s, e) =>
-            {
-                if (_graphEditorCanvas != null) _graphEditorCanvas.AutoFit();
-            };
-            stack.Children.Add(_graphAutoFitBtn);
-
-            // Presets Popover Button
-            var presetsBtn = new Border
-            {
-                Background = KerfBrand.FigmaPanelBrush,
-                BorderBrush = KerfBrand.FigmaBorderBrush,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(6, 4, 6, 4),
-                Margin = new Thickness(0, 0, 0, 8),
-                Cursor = Cursors.Hand
-            };
-            var presetsBtnText = new TextBlock
-            {
-                Text = "∿ Easing Presets [21]",
-                FontSize = 10,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-            presetsBtn.Child = presetsBtnText;
-            presetsBtn.MouseEnter += (s, e) => presetsBtn.Background = KerfBrand.FigmaBorderBrush;
-            presetsBtn.MouseLeave += (s, e) => presetsBtn.Background = KerfBrand.FigmaPanelBrush;
-            presetsBtn.MouseLeftButtonUp += (s, e) => ShowPresetPickerPopover(presetsBtn);
-            stack.Children.Add(presetsBtn);
-
-            // Tangent Continuity Row: [ Smooth ] vs [ Broken ] per D-06
-            var tangentLabel = new TextBlock
-            {
-                Text = "Tangent Slope (D-06):",
-                FontSize = 9,
-                Foreground = new SolidColorBrush(Color.FromRgb(110, 125, 150)),
-                Margin = new Thickness(0, 2, 0, 3)
-            };
-            stack.Children.Add(tangentLabel);
-
-            var tangentRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
-            _graphSmoothBtn = CreateTangentModeButton("Smooth (180°)", true);
-            _graphBrokenBtn = CreateTangentModeButton("Broken (Alt)", false);
-            tangentRow.Children.Add(_graphSmoothBtn);
-            tangentRow.Children.Add(_graphBrokenBtn);
-            stack.Children.Add(tangentRow);
-
-            UpdateTangentButtonsState();
-
-            border.Child = stack;
-            return border;
-        }
-
         private Border CreateTangentModeButton(string label, bool smooth)
         {
             var btn = new Border
@@ -12295,15 +12515,20 @@ namespace Kerf.UI
 
         private void UpdateTangentButtonsState()
         {
-            if (_graphSmoothBtn == null || _graphBrokenBtn == null) return;
             bool isBroken = (_editingInterpolationKeyframe != null && _editingInterpolationKeyframe.IsTangentBroken);
-            _graphSmoothBtn.Background = !isBroken ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush;
-            var st = _graphSmoothBtn.Child as TextBlock;
-            if (st != null) st.Foreground = !isBroken ? KerfBrand.TextBlackBrush : Brushes.White;
+            if (_defaultSmoothTangentBtn != null)
+            {
+                _defaultSmoothTangentBtn.Background = !isBroken ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush;
+                var st = _defaultSmoothTangentBtn.Child as TextBlock;
+                if (st != null) st.Foreground = !isBroken ? KerfBrand.TextBlackBrush : Brushes.White;
+            }
 
-            _graphBrokenBtn.Background = isBroken ? KerfBrand.AmberBrush : KerfBrand.FigmaPanelBrush;
-            var bt = _graphBrokenBtn.Child as TextBlock;
-            if (bt != null) bt.Foreground = isBroken ? KerfBrand.TextBlackBrush : Brushes.White;
+            if (_defaultBrokenTangentBtn != null)
+            {
+                _defaultBrokenTangentBtn.Background = isBroken ? KerfBrand.AmberBrush : KerfBrand.FigmaPanelBrush;
+                var bt = _defaultBrokenTangentBtn.Child as TextBlock;
+                if (bt != null) bt.Foreground = isBroken ? KerfBrand.TextBlackBrush : Brushes.White;
+            }
         }
 
         public void SyncRealtimeEvaluator()
@@ -12332,10 +12557,7 @@ namespace Kerf.UI
                 _sceneGraph.InvalidateAll();
             }
             RefreshCanvas();
-            if (_graphEditorCanvas != null)
-            {
-                _graphEditorCanvas.Redraw();
-            }
+            DrawDefaultInterpolationGraph();
         }
 
         private static readonly EasingPreset[] All21EasingPresets = new EasingPreset[]
@@ -12635,13 +12857,8 @@ namespace Kerf.UI
             btn.MouseLeave += (s, e) => btn.Background = KerfBrand.FigmaPanelBrush;
             btn.MouseLeftButtonUp += (s, e) =>
             {
-                if (_editingInterpolationKeyframe != null)
-                {
-                    EasingEngine.ApplySpringPreset(_editingInterpolationKeyframe, preset);
-                    SyncRealtimeEvaluator();
-                    RefreshGraphEditor();
-                    RefreshPropertyInspector();
-                }
+                ApplySpringPresetToCurrentSelection(preset);
+                RefreshPropertyInspector();
             };
             return btn;
         }
@@ -12894,105 +13111,20 @@ namespace Kerf.UI
 
         private void ToggleGraphEditor()
         {
-            _isGraphEditorOpen = !_isGraphEditorOpen;
-            ApplyGraphEditorVisibility();
         }
 
         private void ApplyGraphEditorVisibility()
         {
-            if (_graphSplitterRowDef == null || _graphEditorRowDef == null) return;
-
-            if (_isGraphEditorOpen)
-            {
-                _graphSplitterRowDef.Height = new GridLength(5);
-                _graphEditorRowDef.Height = _lastGraphRowHeight.Value > 20 ? _lastGraphRowHeight : new GridLength(180);
-                if (_graphSplitter != null) _graphSplitter.Visibility = Visibility.Visible;
-                if (_graphCanvasScroll != null) _graphCanvasScroll.Visibility = Visibility.Visible;
-                if (_graphEditorHeaderBorder != null) _graphEditorHeaderBorder.Visibility = Visibility.Visible;
-
-                if (_graphToggleBtn != null)
-                {
-                    _graphToggleBtn.Background = KerfBrand.MintBrush;
-                    if (_graphToggleBtnText != null)
-                    {
-                        _graphToggleBtnText.Text = "📈 Graph Editor";
-                        _graphToggleBtnText.Foreground = KerfBrand.TextBlackBrush;
-                    }
-                }
-                RefreshGraphEditor();
-            }
-            else
-            {
-                if (_graphEditorRowDef.Height.Value > 20)
-                {
-                    _lastGraphRowHeight = _graphEditorRowDef.Height;
-                }
-                _graphSplitterRowDef.Height = new GridLength(0);
-                _graphEditorRowDef.Height = new GridLength(0);
-                if (_graphSplitter != null) _graphSplitter.Visibility = Visibility.Collapsed;
-                if (_graphCanvasScroll != null) _graphCanvasScroll.Visibility = Visibility.Collapsed;
-                if (_graphEditorHeaderBorder != null) _graphEditorHeaderBorder.Visibility = Visibility.Collapsed;
-
-                if (_graphToggleBtn != null)
-                {
-                    _graphToggleBtn.Background = KerfBrand.FigmaPanelBrush;
-                    if (_graphToggleBtnText != null)
-                    {
-                        _graphToggleBtnText.Text = "Timeline Only";
-                        _graphToggleBtnText.Foreground = Brushes.White;
-                    }
-                }
-            }
         }
 
         private void RefreshGraphEditor()
         {
-            if (_graphEditorCanvas == null) return;
-
-            if (_editingInterpolationTrack == null && _selectedLayers.Count > 0 && _timelineController != null && _timelineController.ActiveClip != null)
-            {
-                uint selId = PropertyBinder.GetNumericNodeId(_selectedLayers[0].Id);
-                var tracks = _timelineController.ActiveClip.GetTracksForNode(selId);
-                if (tracks.Count > 0)
-                {
-                    _editingInterpolationTrack = tracks[0];
-                    if (_editingInterpolationTrack.Keys != null && _editingInterpolationTrack.Keys.Count > 0)
-                    {
-                        _editingInterpolationKeyframe = _editingInterpolationTrack.Keys[0];
-                    }
-                }
-            }
-
-            _graphEditorCanvas.ActiveTrack = _editingInterpolationTrack;
-            _graphEditorCanvas.SelectedKeyframe = _editingInterpolationKeyframe;
-            _graphEditorCanvas.PixelsPerSecond = _timelinePixelsPerSecond;
-            _graphEditorCanvas.Duration = (_timelineController != null && _timelineController.ActiveClip != null) ? _timelineController.ActiveClip.Duration : 2.0;
-            _graphEditorCanvas.PlayheadTime = (_timelineController != null) ? _timelineController.CurrentTime : 0.0;
-
-            UpdateGraphHeaderInfo();
-            UpdateTangentButtonsState();
-            _graphEditorCanvas.Redraw();
+            UpdateDefaultInterpolationFromSelection();
         }
 
         private void UpdateGraphHeaderInfo()
         {
-            if (_graphTrackNameText == null) return;
-            if (_editingInterpolationTrack != null)
-            {
-                PropKey pk = (PropKey)_editingInterpolationTrack.Prop;
-                string propName = pk.ToString();
-                string units = GetPropertyUnits(pk);
-                string layerName = "";
-                if (_selectedLayers.Count > 0) layerName = _selectedLayers[0].Name;
-
-                _graphTrackNameText.Text = string.IsNullOrEmpty(layerName) ? propName : string.Format("{0} · {1}", layerName, propName);
-                _graphTrackUnitsText.Text = string.Format("Units: {0}", units);
-            }
-            else
-            {
-                _graphTrackNameText.Text = "No Track Focused";
-                _graphTrackUnitsText.Text = "Click a track in timeline";
-            }
+            UpdateDefaultInterpolationFromSelection();
         }
 
         private static string GetPropertyUnits(PropKey pk)
@@ -13079,10 +13211,8 @@ namespace Kerf.UI
         private void RefreshInterpolationGraphPanels()
         {
             FindTimelineInterpolationKey();
-            RefreshInterpolationGraphPanel(false);
+            UpdateDefaultInterpolationFromSelection();
             RefreshInterpolationGraphPanel(true);
-            RefreshDefaultInterpolationPresetButtons();
-            RefreshGraphEditor();
         }
 
         private void FindTimelineInterpolationKey()
@@ -17134,11 +17264,6 @@ namespace Kerf.UI
                 double factor = e.Delta > 0 ? 1.15 : (1.0 / 1.15);
                 _timelinePixelsPerSecond = Math.Max(60.0, Math.Min(1200.0, _timelinePixelsPerSecond * factor));
                 RefreshTimelineCanvas();
-                if (_graphEditorCanvas != null)
-                {
-                    _graphEditorCanvas.PixelsPerSecond = _timelinePixelsPerSecond;
-                    _graphEditorCanvas.Redraw();
-                }
                 e.Handled = true;
             }
         }
