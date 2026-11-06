@@ -94,6 +94,11 @@ namespace Kerf.Engine
             IsDirty = false;
         }
 
+        public bool IsBatching
+        {
+            get { return batchCommands != null; }
+        }
+
         public void BeginBatch(string description)
         {
             batchCommands = new List<ICommand>();
@@ -445,6 +450,105 @@ namespace Kerf.Engine
                 n.Height = r.Height;
             }
             if (onRender != null) onRender();
+        }
+    }
+
+    public class ModifyBoundsCommand : ICommand
+    {
+        public string Description { get { return "Modify Bounds"; } }
+        private readonly LayerNode _layer;
+        private readonly Rect _beforeBounds;
+        private readonly Rect _afterBounds;
+        private readonly Action _onRender;
+
+        public ModifyBoundsCommand(LayerNode layer, Rect beforeBounds, Rect afterBounds, Action onRender = null)
+        {
+            _layer = layer;
+            _beforeBounds = beforeBounds;
+            _afterBounds = afterBounds;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_layer != null)
+            {
+                _layer.X = _afterBounds.X;
+                _layer.Y = _afterBounds.Y;
+                _layer.Width = _afterBounds.Width;
+                _layer.Height = _afterBounds.Height;
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_layer != null)
+            {
+                _layer.X = _beforeBounds.X;
+                _layer.Y = _beforeBounds.Y;
+                _layer.Width = _beforeBounds.Width;
+                _layer.Height = _beforeBounds.Height;
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class ModifyRotationCommand : ICommand
+    {
+        public string Description { get { return "Modify Rotation"; } }
+        private readonly LayerNode _layer;
+        private readonly double _beforeRot;
+        private readonly double _afterRot;
+        private readonly Action _onRender;
+
+        public ModifyRotationCommand(LayerNode layer, double beforeRot, double afterRot, Action onRender = null)
+        {
+            _layer = layer;
+            _beforeRot = beforeRot;
+            _afterRot = afterRot;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_layer != null) _layer.Rotation = _afterRot;
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_layer != null) _layer.Rotation = _beforeRot;
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class ModifyOpacityCommand : ICommand
+    {
+        public string Description { get { return "Modify Opacity"; } }
+        private readonly LayerNode _layer;
+        private readonly double _beforeOpacity;
+        private readonly double _afterOpacity;
+        private readonly Action _onRender;
+
+        public ModifyOpacityCommand(LayerNode layer, double beforeOpacity, double afterOpacity, Action onRender = null)
+        {
+            _layer = layer;
+            _beforeOpacity = beforeOpacity;
+            _afterOpacity = afterOpacity;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_layer != null) _layer.Opacity = _afterOpacity;
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_layer != null) _layer.Opacity = _beforeOpacity;
+            if (_onRender != null) _onRender();
         }
     }
 

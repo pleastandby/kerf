@@ -176,15 +176,28 @@ namespace Kerf.UI
                 }
             };
 
+            scrubHandle.LostMouseCapture += (s, e) =>
+            {
+                if (isScrubbing)
+                {
+                    isScrubbing = false;
+                    container.BorderBrush = KerfBrand.TealBrush;
+                    if (onDragComplete != null) onDragComplete();
+                }
+            };
+
             scrubHandle.MouseLeftButtonUp += (s, e) =>
             {
                 if (scrubHandle.IsMouseCaptured)
                 {
                     scrubHandle.ReleaseMouseCapture();
                 }
-                isScrubbing = false;
-                container.BorderBrush = KerfBrand.TealBrush;
-                if (onDragComplete != null) onDragComplete();
+                if (isScrubbing)
+                {
+                    isScrubbing = false;
+                    container.BorderBrush = KerfBrand.TealBrush;
+                    if (onDragComplete != null) onDragComplete();
+                }
             };
 
             Action commitText = () =>
@@ -201,6 +214,7 @@ namespace Kerf.UI
                         tb.Text = formatVal(parsed);
                         if (onChanged != null) onChanged(parsed);
                         if (onDragComplete != null) onDragComplete();
+                        startVal = currentValue;
                     }
                     else
                     {
@@ -211,6 +225,11 @@ namespace Kerf.UI
                 {
                     // Fail-safe to guarantee studio never crashes on text commit
                 }
+            };
+
+            tb.GotFocus += (s, e) =>
+            {
+                startVal = currentValue;
             };
 
             tb.KeyDown += (s, e) =>
@@ -357,6 +376,10 @@ namespace Kerf.UI
             isInitializing = false;
 
             slider.PreviewMouseLeftButtonUp += (s, e) =>
+            {
+                if (onDragComplete != null) onDragComplete();
+            };
+            slider.LostMouseCapture += (s, e) =>
             {
                 if (onDragComplete != null) onDragComplete();
             };

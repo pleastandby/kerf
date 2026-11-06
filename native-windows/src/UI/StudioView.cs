@@ -169,6 +169,16 @@ namespace Kerf.UI
         public KerfDocument Document { get; private set; }
         public string CurrentFilePath { get; private set; }
         public CommandHistory History { get; private set; }
+        public StudioMode CurrentStudioMode { get { return _currentStudioMode; } }
+        public AnimationTimelineController TimelineController { get { return _timelineController; } }
+        public HashSet<Keyframe> SelectedTimelineKeyframes { get { return _selectedTimelineKeyframes; } }
+        public AnimationRestPose GetAnimationRestPose(LayerNode layer)
+        {
+            if (layer == null) return null;
+            AnimationRestPose pose;
+            if (_animationRestPose.TryGetValue(layer, out pose)) return pose;
+            return null;
+        }
 
         private GpuRenderer _renderer;
         private RetainedSceneGraph _sceneGraph;
@@ -279,7 +289,7 @@ namespace Kerf.UI
         private StackPanel _booleanToolbar;
         private DispatcherTimer _autosaveTimer;
 
-        private sealed class AnimationRestPose
+        public sealed class AnimationRestPose
         {
             public double X, Y, Width, Height, Rotation, Opacity;
             public double CornerRadius, CornerRadiusTopLeft, CornerRadiusTopRight;
@@ -3608,8 +3618,71 @@ namespace Kerf.UI
             row1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
             row1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var xBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("X", primary.X, val => { primary.X = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.X, primary.X); }), primary, PropKey.X);
-            var yBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Y", primary.Y, val => { primary.Y = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.Y, primary.Y); }), primary, PropKey.Y);
+            double startX = primary.X;
+            var xField = ScrubControls.CreateScrubField("X", primary.X, val =>
+            {
+                primary.X = val;
+                InvalidateAndRefresh(primary);
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    AutoKeyPropertyLivePreview(primary, PropKey.X, val);
+                }
+            }, onDragComplete: () =>
+            {
+                double finalX = primary.X;
+                if (Math.Abs(finalX - startX) > 1e-6)
+                {
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        CommitKeyframeValueChange(primary, PropKey.X, startX, finalX);
+                    }
+                    else
+                    {
+                        var beforeRect = new Rect(startX, primary.Y, primary.Width, primary.Height);
+                        var afterRect = new Rect(finalX, primary.Y, primary.Width, primary.Height);
+                        History.Execute(new ModifyBoundsCommand(primary, beforeRect, afterRect, () =>
+                        {
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        }));
+                    }
+                    startX = finalX;
+                }
+            });
+            var xBox = CreateAnimatedPropertyField(xField, primary, PropKey.X);
+
+            double startY = primary.Y;
+            var yField = ScrubControls.CreateScrubField("Y", primary.Y, val =>
+            {
+                primary.Y = val;
+                InvalidateAndRefresh(primary);
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    AutoKeyPropertyLivePreview(primary, PropKey.Y, val);
+                }
+            }, onDragComplete: () =>
+            {
+                double finalY = primary.Y;
+                if (Math.Abs(finalY - startY) > 1e-6)
+                {
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        CommitKeyframeValueChange(primary, PropKey.Y, startY, finalY);
+                    }
+                    else
+                    {
+                        var beforeRect = new Rect(primary.X, startY, primary.Width, primary.Height);
+                        var afterRect = new Rect(primary.X, finalY, primary.Width, primary.Height);
+                        History.Execute(new ModifyBoundsCommand(primary, beforeRect, afterRect, () =>
+                        {
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        }));
+                    }
+                    startY = finalY;
+                }
+            });
+            var yBox = CreateAnimatedPropertyField(yField, primary, PropKey.Y);
             Grid.SetColumn(xBox, 0); Grid.SetColumn(yBox, 2);
             row1.Children.Add(xBox); row1.Children.Add(yBox);
             _propertyInspectorStack.Children.Add(row1);
@@ -3633,6 +3706,9 @@ namespace Kerf.UI
                 else if (Math.Abs(primary.RenderTransform.ScaleY - 1.0) > 1e-4) initH = Math.Round(primary.Height * primary.RenderTransform.ScaleY, 1);
             }
 
+            double startW = initW;
+            double startH = initH;
+
             wBox = ScrubControls.CreateScrubField("W", initW, val =>
             {
                 if (_currentStudioMode == StudioMode.Animate)
@@ -3643,9 +3719,6 @@ namespace Kerf.UI
                     double newSx = Math.Max(0.01, Math.Round(val / baseW, 3));
                     primary.RenderTransform.ScaleX = newSx;
                     primary.RenderTransform.VisualWidth = val;
-                    AutoKeyProperty(primary, PropKey.ScaleX, newSx);
-                    AutoKeyProperty(primary, PropKey.Width, val);
-                    AutoKeyProperty(primary, PropKey.VisualWidth, val);
 
                     if (primary.LockAspectRatio)
                     {
@@ -3653,9 +3726,6 @@ namespace Kerf.UI
                         double newH = Math.Max(1.0, Math.Round(baseH * newSy, 1));
                         primary.RenderTransform.ScaleY = newSy;
                         primary.RenderTransform.VisualHeight = newH;
-                        AutoKeyProperty(primary, PropKey.ScaleY, newSy);
-                        AutoKeyProperty(primary, PropKey.Height, newH);
-                        AutoKeyProperty(primary, PropKey.VisualHeight, newH);
                         var hUp = hBox != null ? hBox.Tag as Action<double> : null;
                         if (hUp != null) hUp(newH);
                     }
@@ -3670,7 +3740,6 @@ namespace Kerf.UI
                 if (primary.LockAspectRatio)
                 {
                     primary.Height = Math.Max(1, Math.Round(primary.Width * (oldH / oldW), 1));
-                    AutoKeyProperty(primary, PropKey.Height, primary.Height);
                     var hUp = hBox != null ? hBox.Tag as Action<double> : null;
                     if (hUp != null) hUp(primary.Height);
                 }
@@ -3681,9 +3750,61 @@ namespace Kerf.UI
                     if (primary.LockAspectRatio) primary.AutoLayout.SizingV = SizingMode.Fixed;
                     AutoLayoutEngine.ReflowRecursive(primary);
                 }
-                AutoKeyProperty(primary, PropKey.Width, primary.Width);
                 InvalidateAndRefresh(primary);
-            }, min: 1, onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); });
+            }, min: 1, onDragComplete: () =>
+            {
+                double finalW = primary.Width;
+                double finalH = primary.Height;
+                if (_currentStudioMode == StudioMode.Animate && primary.RenderTransform != null)
+                {
+                    finalW = primary.RenderTransform.VisualWidth > 0 ? primary.RenderTransform.VisualWidth : Math.Round(primary.Width * primary.RenderTransform.ScaleX, 1);
+                    finalH = primary.RenderTransform.VisualHeight > 0 ? primary.RenderTransform.VisualHeight : Math.Round(primary.Height * primary.RenderTransform.ScaleY, 1);
+                }
+                if (Math.Abs(finalW - startW) > 1e-6 || (primary.LockAspectRatio && Math.Abs(finalH - startH) > 1e-6))
+                {
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        double baseW = Math.Max(0.001, primary.Width);
+                        double baseH = Math.Max(0.001, primary.Height);
+                        double startSx = Math.Round(startW / baseW, 3);
+                        double finalSx = Math.Round(finalW / baseW, 3);
+                        double startSy = Math.Round(startH / baseH, 3);
+                        double finalSy = Math.Round(finalH / baseH, 3);
+                        if (primary.LockAspectRatio)
+                        {
+                            History.BeginBatch("Modify Width and Height");
+                            CommitKeyframeValueChange(primary, PropKey.Width, startW, finalW);
+                            CommitKeyframeValueChange(primary, PropKey.VisualWidth, startW, finalW);
+                            CommitKeyframeValueChange(primary, PropKey.ScaleX, startSx, finalSx);
+                            CommitKeyframeValueChange(primary, PropKey.Height, startH, finalH);
+                            CommitKeyframeValueChange(primary, PropKey.VisualHeight, startH, finalH);
+                            CommitKeyframeValueChange(primary, PropKey.ScaleY, startSy, finalSy);
+                            History.EndBatch();
+                        }
+                        else
+                        {
+                            History.BeginBatch("Modify Width");
+                            CommitKeyframeValueChange(primary, PropKey.Width, startW, finalW);
+                            CommitKeyframeValueChange(primary, PropKey.VisualWidth, startW, finalW);
+                            CommitKeyframeValueChange(primary, PropKey.ScaleX, startSx, finalSx);
+                            History.EndBatch();
+                        }
+                    }
+                    else
+                    {
+                        var beforeRect = new Rect(primary.X, primary.Y, startW, startH);
+                        var afterRect = new Rect(primary.X, primary.Y, finalW, finalH);
+                        History.Execute(new ModifyBoundsCommand(primary, beforeRect, afterRect, () =>
+                        {
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        }));
+                    }
+                    startW = finalW;
+                    startH = finalH;
+                }
+                if (primary.LockAspectRatio) RefreshPropertyInspector();
+            });
 
             var lockBtn = new Border
             {
@@ -3726,9 +3847,6 @@ namespace Kerf.UI
                     double newSy = Math.Max(0.01, Math.Round(val / baseH, 3));
                     primary.RenderTransform.ScaleY = newSy;
                     primary.RenderTransform.VisualHeight = val;
-                    AutoKeyProperty(primary, PropKey.ScaleY, newSy);
-                    AutoKeyProperty(primary, PropKey.Height, val);
-                    AutoKeyProperty(primary, PropKey.VisualHeight, val);
 
                     if (primary.LockAspectRatio)
                     {
@@ -3736,9 +3854,6 @@ namespace Kerf.UI
                         double newW = Math.Max(1.0, Math.Round(baseW * newSx, 1));
                         primary.RenderTransform.ScaleX = newSx;
                         primary.RenderTransform.VisualWidth = newW;
-                        AutoKeyProperty(primary, PropKey.ScaleX, newSx);
-                        AutoKeyProperty(primary, PropKey.Width, newW);
-                        AutoKeyProperty(primary, PropKey.VisualWidth, newW);
                         var wUp = wBox != null ? wBox.Tag as Action<double> : null;
                         if (wUp != null) wUp(newW);
                     }
@@ -3753,7 +3868,6 @@ namespace Kerf.UI
                 if (primary.LockAspectRatio)
                 {
                     primary.Width = Math.Max(1, Math.Round(primary.Height * (oldW / oldH), 1));
-                    AutoKeyProperty(primary, PropKey.Width, primary.Width);
                     var wUp = wBox != null ? wBox.Tag as Action<double> : null;
                     if (wUp != null) wUp(primary.Width);
                 }
@@ -3764,9 +3878,61 @@ namespace Kerf.UI
                     if (primary.LockAspectRatio) primary.AutoLayout.SizingH = SizingMode.Fixed;
                     AutoLayoutEngine.ReflowRecursive(primary);
                 }
-                AutoKeyProperty(primary, PropKey.Height, primary.Height);
                 InvalidateAndRefresh(primary);
-            }, min: 1, onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); });
+            }, min: 1, onDragComplete: () =>
+            {
+                double finalW = primary.Width;
+                double finalH = primary.Height;
+                if (_currentStudioMode == StudioMode.Animate && primary.RenderTransform != null)
+                {
+                    finalW = primary.RenderTransform.VisualWidth > 0 ? primary.RenderTransform.VisualWidth : Math.Round(primary.Width * primary.RenderTransform.ScaleX, 1);
+                    finalH = primary.RenderTransform.VisualHeight > 0 ? primary.RenderTransform.VisualHeight : Math.Round(primary.Height * primary.RenderTransform.ScaleY, 1);
+                }
+                if (Math.Abs(finalH - startH) > 1e-6 || (primary.LockAspectRatio && Math.Abs(finalW - startW) > 1e-6))
+                {
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        double baseW = Math.Max(0.001, primary.Width);
+                        double baseH = Math.Max(0.001, primary.Height);
+                        double startSx = Math.Round(startW / baseW, 3);
+                        double finalSx = Math.Round(finalW / baseW, 3);
+                        double startSy = Math.Round(startH / baseH, 3);
+                        double finalSy = Math.Round(finalH / baseH, 3);
+                        if (primary.LockAspectRatio)
+                        {
+                            History.BeginBatch("Modify Width and Height");
+                            CommitKeyframeValueChange(primary, PropKey.Height, startH, finalH);
+                            CommitKeyframeValueChange(primary, PropKey.VisualHeight, startH, finalH);
+                            CommitKeyframeValueChange(primary, PropKey.ScaleY, startSy, finalSy);
+                            CommitKeyframeValueChange(primary, PropKey.Width, startW, finalW);
+                            CommitKeyframeValueChange(primary, PropKey.VisualWidth, startW, finalW);
+                            CommitKeyframeValueChange(primary, PropKey.ScaleX, startSx, finalSx);
+                            History.EndBatch();
+                        }
+                        else
+                        {
+                            History.BeginBatch("Modify Height");
+                            CommitKeyframeValueChange(primary, PropKey.Height, startH, finalH);
+                            CommitKeyframeValueChange(primary, PropKey.VisualHeight, startH, finalH);
+                            CommitKeyframeValueChange(primary, PropKey.ScaleY, startSy, finalSy);
+                            History.EndBatch();
+                        }
+                    }
+                    else
+                    {
+                        var beforeRect = new Rect(primary.X, primary.Y, startW, startH);
+                        var afterRect = new Rect(primary.X, primary.Y, finalW, finalH);
+                        History.Execute(new ModifyBoundsCommand(primary, beforeRect, afterRect, () =>
+                        {
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        }));
+                    }
+                    startW = finalW;
+                    startH = finalH;
+                }
+                if (primary.LockAspectRatio) RefreshPropertyInspector();
+            });
             wBox = CreateAnimatedPropertyField(wBox, primary, PropKey.Width);
             hBox = CreateAnimatedPropertyField(hBox, primary, PropKey.Height);
             Grid.SetColumn(wBox, 0); Grid.SetColumn(lockBtn, 1); Grid.SetColumn(hBox, 2);
@@ -3778,8 +3944,39 @@ namespace Kerf.UI
             row3.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
             row3.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var rotBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("∠", primary.Rotation, val => { primary.Rotation = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.Rotation, primary.Rotation); }, suffix: "°", tooltip: "Rotation (degrees)"), primary, PropKey.Rotation);
-            var crBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("R", primary.CornerRadius, val =>
+            double startRot = primary.Rotation;
+            var rotField = ScrubControls.CreateScrubField("∠", primary.Rotation, val =>
+            {
+                primary.Rotation = val;
+                InvalidateAndRefresh(primary);
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    AutoKeyPropertyLivePreview(primary, PropKey.Rotation, primary.Rotation);
+                }
+            }, onDragComplete: () =>
+            {
+                double finalRot = primary.Rotation;
+                if (Math.Abs(finalRot - startRot) > 1e-6)
+                {
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        CommitKeyframeValueChange(primary, PropKey.Rotation, startRot, finalRot);
+                    }
+                    else
+                    {
+                        History.Execute(new ModifyRotationCommand(primary, startRot, finalRot, () =>
+                        {
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        }));
+                    }
+                    startRot = finalRot;
+                }
+            }, suffix: "°", tooltip: "Rotation (degrees)");
+            var rotBox = CreateAnimatedPropertyField(rotField, primary, PropKey.Rotation);
+
+            double startR = primary.CornerRadius;
+            var crField = ScrubControls.CreateScrubField("R", primary.CornerRadius, val =>
             {
                 double r = Math.Max(0, Math.Round(val, 1));
                 primary.CornerRadius = r;
@@ -3788,9 +3985,31 @@ namespace Kerf.UI
                 primary.CornerRadiusBottomRight = r;
                 primary.CornerRadiusBottomLeft = r;
                 InvalidateAndRefresh(primary);
-                AutoKeyProperty(primary, PropKey.CornerRadius, r);
-                History.MarkDirty();
-            }, min: 0, suffix: "px", tooltip: "Corner Radius (px)", icon: VectorIcons.CornerRadiusGeometry), primary, PropKey.CornerRadius);
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    AutoKeyPropertyLivePreview(primary, PropKey.CornerRadius, r);
+                }
+            }, onDragComplete: () =>
+            {
+                double finalR = primary.CornerRadius;
+                if (Math.Abs(finalR - startR) > 1e-6)
+                {
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        CommitKeyframeValueChange(primary, PropKey.CornerRadius, startR, finalR);
+                    }
+                    else
+                    {
+                        History.Execute(new ModifyCornerRadiusCommand(primary, startR, finalR, () =>
+                        {
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        }));
+                    }
+                    startR = finalR;
+                }
+            }, min: 0, suffix: "px", tooltip: "Corner Radius (px)", icon: VectorIcons.CornerRadiusGeometry);
+            var crBox = CreateAnimatedPropertyField(crField, primary, PropKey.CornerRadius);
             Grid.SetColumn(rotBox, 0); Grid.SetColumn(crBox, 2);
             row3.Children.Add(rotBox); row3.Children.Add(crBox);
             _propertyInspectorStack.Children.Add(row3);
@@ -3808,22 +4027,19 @@ namespace Kerf.UI
                 FrameworkElement sxField = null;
                 FrameworkElement syField = null;
 
+                double startSx = currentScaleX;
+                double startSy = currentScaleY;
+
                 sxField = ScrubControls.CreateScrubField("↔", currentScaleX, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     primary.RenderTransform.ScaleX = val;
                     primary.RenderTransform.VisualWidth = Math.Round(primary.Width * val, 1);
-                    AutoKeyProperty(primary, PropKey.ScaleX, val);
-                    AutoKeyProperty(primary, PropKey.Width, primary.RenderTransform.VisualWidth);
-                    AutoKeyProperty(primary, PropKey.VisualWidth, primary.RenderTransform.VisualWidth);
 
                     if (primary.LockAspectRatio)
                     {
                         primary.RenderTransform.ScaleY = val;
                         primary.RenderTransform.VisualHeight = Math.Round(primary.Height * val, 1);
-                        AutoKeyProperty(primary, PropKey.ScaleY, val);
-                        AutoKeyProperty(primary, PropKey.Height, primary.RenderTransform.VisualHeight);
-                        AutoKeyProperty(primary, PropKey.VisualHeight, primary.RenderTransform.VisualHeight);
                         var syUp = syField != null ? syField.Tag as Action<double> : null;
                         if (syUp != null) syUp(val);
                         var hUp = hBox != null ? hBox.Tag as Action<double> : null;
@@ -3834,7 +4050,36 @@ namespace Kerf.UI
 
                     _sceneGraph.InvalidateSubtree(primary.Id);
                     RefreshCanvas();
-                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, tooltip: "Scale X (Horizontal Scale factor)", onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); }, icon: VectorIcons.ScaleXGeometry);
+                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, tooltip: "Scale X (Horizontal Scale factor)", onDragComplete: () =>
+                {
+                    double finalSx = primary.RenderTransform != null ? primary.RenderTransform.ScaleX : 1.0;
+                    double finalSy = primary.RenderTransform != null ? primary.RenderTransform.ScaleY : 1.0;
+                    if (Math.Abs(finalSx - startSx) > 1e-6 || (primary.LockAspectRatio && Math.Abs(finalSy - startSy) > 1e-6))
+                    {
+                        if (primary.LockAspectRatio)
+                        {
+                            History.BeginBatch("Modify Scale");
+                            CommitKeyframeValueChange(primary, PropKey.ScaleX, startSx, finalSx);
+                            CommitKeyframeValueChange(primary, PropKey.ScaleY, startSy, finalSy);
+                            CommitKeyframeValueChange(primary, PropKey.Width, Math.Round(primary.Width * startSx, 1), Math.Round(primary.Width * finalSx, 1));
+                            CommitKeyframeValueChange(primary, PropKey.VisualWidth, Math.Round(primary.Width * startSx, 1), Math.Round(primary.Width * finalSx, 1));
+                            CommitKeyframeValueChange(primary, PropKey.Height, Math.Round(primary.Height * startSy, 1), Math.Round(primary.Height * finalSy, 1));
+                            CommitKeyframeValueChange(primary, PropKey.VisualHeight, Math.Round(primary.Height * startSy, 1), Math.Round(primary.Height * finalSy, 1));
+                            History.EndBatch();
+                        }
+                        else
+                        {
+                            History.BeginBatch("Modify ScaleX");
+                            CommitKeyframeValueChange(primary, PropKey.ScaleX, startSx, finalSx);
+                            CommitKeyframeValueChange(primary, PropKey.Width, Math.Round(primary.Width * startSx, 1), Math.Round(primary.Width * finalSx, 1));
+                            CommitKeyframeValueChange(primary, PropKey.VisualWidth, Math.Round(primary.Width * startSx, 1), Math.Round(primary.Width * finalSx, 1));
+                            History.EndBatch();
+                        }
+                        startSx = finalSx;
+                        startSy = finalSy;
+                    }
+                    if (primary.LockAspectRatio) RefreshPropertyInspector();
+                }, icon: VectorIcons.ScaleXGeometry);
 
                 var scaleLockBtn = new Border
                 {
@@ -3872,17 +4117,11 @@ namespace Kerf.UI
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     primary.RenderTransform.ScaleY = val;
                     primary.RenderTransform.VisualHeight = Math.Round(primary.Height * val, 1);
-                    AutoKeyProperty(primary, PropKey.ScaleY, val);
-                    AutoKeyProperty(primary, PropKey.Height, primary.RenderTransform.VisualHeight);
-                    AutoKeyProperty(primary, PropKey.VisualHeight, primary.RenderTransform.VisualHeight);
 
                     if (primary.LockAspectRatio)
                     {
                         primary.RenderTransform.ScaleX = val;
                         primary.RenderTransform.VisualWidth = Math.Round(primary.Width * val, 1);
-                        AutoKeyProperty(primary, PropKey.ScaleX, val);
-                        AutoKeyProperty(primary, PropKey.Width, primary.RenderTransform.VisualWidth);
-                        AutoKeyProperty(primary, PropKey.VisualWidth, primary.RenderTransform.VisualWidth);
                         var sxUp = sxField != null ? sxField.Tag as Action<double> : null;
                         if (sxUp != null) sxUp(val);
                         var wUp = wBox != null ? wBox.Tag as Action<double> : null;
@@ -3893,7 +4132,36 @@ namespace Kerf.UI
 
                     _sceneGraph.InvalidateSubtree(primary.Id);
                     RefreshCanvas();
-                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, tooltip: "Scale Y (Vertical Scale factor)", onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); }, icon: VectorIcons.ScaleYGeometry);
+                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, tooltip: "Scale Y (Vertical Scale factor)", onDragComplete: () =>
+                {
+                    double finalSx = primary.RenderTransform != null ? primary.RenderTransform.ScaleX : 1.0;
+                    double finalSy = primary.RenderTransform != null ? primary.RenderTransform.ScaleY : 1.0;
+                    if (Math.Abs(finalSy - startSy) > 1e-6 || (primary.LockAspectRatio && Math.Abs(finalSx - startSx) > 1e-6))
+                    {
+                        if (primary.LockAspectRatio)
+                        {
+                            History.BeginBatch("Modify Scale");
+                            CommitKeyframeValueChange(primary, PropKey.ScaleY, startSy, finalSy);
+                            CommitKeyframeValueChange(primary, PropKey.ScaleX, startSx, finalSx);
+                            CommitKeyframeValueChange(primary, PropKey.Height, Math.Round(primary.Height * startSy, 1), Math.Round(primary.Height * finalSy, 1));
+                            CommitKeyframeValueChange(primary, PropKey.VisualHeight, Math.Round(primary.Height * startSy, 1), Math.Round(primary.Height * finalSy, 1));
+                            CommitKeyframeValueChange(primary, PropKey.Width, Math.Round(primary.Width * startSx, 1), Math.Round(primary.Width * finalSx, 1));
+                            CommitKeyframeValueChange(primary, PropKey.VisualWidth, Math.Round(primary.Width * startSx, 1), Math.Round(primary.Width * finalSx, 1));
+                            History.EndBatch();
+                        }
+                        else
+                        {
+                            History.BeginBatch("Modify ScaleY");
+                            CommitKeyframeValueChange(primary, PropKey.ScaleY, startSy, finalSy);
+                            CommitKeyframeValueChange(primary, PropKey.Height, Math.Round(primary.Height * startSy, 1), Math.Round(primary.Height * finalSy, 1));
+                            CommitKeyframeValueChange(primary, PropKey.VisualHeight, Math.Round(primary.Height * startSy, 1), Math.Round(primary.Height * finalSy, 1));
+                            History.EndBatch();
+                        }
+                        startSx = finalSx;
+                        startSy = finalSy;
+                    }
+                    if (primary.LockAspectRatio) RefreshPropertyInspector();
+                }, icon: VectorIcons.ScaleYGeometry);
 
                 var sxBox = CreateAnimatedPropertyField(sxField, primary, PropKey.ScaleX);
                 var syBox = CreateAnimatedPropertyField(syField, primary, PropKey.ScaleY);
@@ -3910,21 +4178,39 @@ namespace Kerf.UI
                 double currentAnchorX = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.5;
                 double currentAnchorY = primary.RenderTransform != null ? primary.RenderTransform.AnchorY : 0.5;
 
-                var axBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Ax", currentAnchorX, val =>
+                double startAx = currentAnchorX;
+                var axField = ScrubControls.CreateScrubField("Ax", currentAnchorX, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     primary.RenderTransform.AnchorX = val;
                     InvalidateAndRefresh(primary);
-                    AutoKeyProperty(primary, PropKey.AnchorX, val);
-                }, step: 0.01, decimals: 2, tooltip: "Anchor Point X (0.0 to 1.0)"), primary, PropKey.AnchorX);
+                }, onDragComplete: () =>
+                {
+                    double finalAx = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.5;
+                    if (Math.Abs(finalAx - startAx) > 1e-6)
+                    {
+                        CommitKeyframeValueChange(primary, PropKey.AnchorX, startAx, finalAx);
+                        startAx = finalAx;
+                    }
+                }, step: 0.01, decimals: 2, tooltip: "Anchor Point X (0.0 to 1.0)");
+                var axBox = CreateAnimatedPropertyField(axField, primary, PropKey.AnchorX);
 
-                var ayBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Ay", currentAnchorY, val =>
+                double startAy = currentAnchorY;
+                var ayField = ScrubControls.CreateScrubField("Ay", currentAnchorY, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     primary.RenderTransform.AnchorY = val;
                     InvalidateAndRefresh(primary);
-                    AutoKeyProperty(primary, PropKey.AnchorY, val);
-                }, step: 0.01, decimals: 2, tooltip: "Anchor Point Y (0.0 to 1.0)"), primary, PropKey.AnchorY);
+                }, onDragComplete: () =>
+                {
+                    double finalAy = primary.RenderTransform != null ? primary.RenderTransform.AnchorY : 0.5;
+                    if (Math.Abs(finalAy - startAy) > 1e-6)
+                    {
+                        CommitKeyframeValueChange(primary, PropKey.AnchorY, startAy, finalAy);
+                        startAy = finalAy;
+                    }
+                }, step: 0.01, decimals: 2, tooltip: "Anchor Point Y (0.0 to 1.0)");
+                var ayBox = CreateAnimatedPropertyField(ayField, primary, PropKey.AnchorY);
 
                 Grid.SetColumn(axBox, 0); Grid.SetColumn(ayBox, 2);
                 anchorRow.Children.Add(axBox); anchorRow.Children.Add(ayBox);
@@ -3932,12 +4218,35 @@ namespace Kerf.UI
             }
 
             // Layer Opacity Smooth Slider
+            double startOpacity = primary.Opacity;
             var opacitySlider = ScrubControls.CreateSmoothSlider("Layer Opacity", Math.Round(primary.Opacity * 100), 0, 100, val =>
             {
                 primary.Opacity = val / 100.0;
                 InvalidateAndRefresh(primary);
-                AutoKeyProperty(primary, PropKey.Opacity, primary.Opacity);
-            }, "%");
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    AutoKeyPropertyLivePreview(primary, PropKey.Opacity, primary.Opacity);
+                }
+            }, "%", onDragComplete: () =>
+            {
+                double finalOpacity = primary.Opacity;
+                if (Math.Abs(finalOpacity - startOpacity) > 1e-4)
+                {
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        CommitKeyframeValueChange(primary, PropKey.Opacity, startOpacity, finalOpacity);
+                    }
+                    else
+                    {
+                        History.Execute(new ModifyOpacityCommand(primary, startOpacity, finalOpacity, () =>
+                        {
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        }));
+                    }
+                    startOpacity = finalOpacity;
+                }
+            });
             _propertyInspectorStack.Children.Add(CreateAnimatedPropertyField(opacitySlider, primary, PropKey.Opacity));
 
             // 2. Auto Layout (if Frame or Group)
@@ -16168,6 +16477,86 @@ namespace Kerf.UI
                     return layer.CornerRadius;
                 default:
                     return 0.0;
+            }
+        }
+
+        private void AutoKeyPropertyLivePreview(LayerNode layer, PropKey property, double value)
+        {
+            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
+            if (_sceneGraph != null) _sceneGraph.InvalidateSubtree(layer.Id);
+            RefreshCanvas();
+        }
+
+        public void CommitKeyframeValueChange(LayerNode layer, PropKey property, double startVal, double finalVal)
+        {
+            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
+            if (Math.Abs(finalVal - startVal) <= 1e-6) return;
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (_timelineController == null) return;
+
+            var clip = _timelineController.ActiveClip;
+            if (clip == null)
+            {
+                clip = new Clip(100, "Default Animation", _timelineController.Duration);
+                _timelineController.ActiveClip = clip;
+            }
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
+            Document.Animation.ActiveClipId = clip.Id;
+
+            uint nodeId = PropertyBinder.GetNumericNodeId(layer.Id);
+            AnimTrack track = null;
+            if (clip.Tracks != null)
+            {
+                for (int i = 0; i < clip.Tracks.Count; i++)
+                {
+                    if (clip.Tracks[i].NodeId == nodeId && clip.Tracks[i].Prop == (ushort)property)
+                    {
+                        track = clip.Tracks[i];
+                        break;
+                    }
+                }
+            }
+
+            bool isNewTrack = false;
+            if (track == null)
+            {
+                track = new AnimTrack(nodeId, (ushort)property);
+                isNewTrack = true;
+            }
+
+            double curTime = _timelineController.CurrentTime;
+            Keyframe existing = track.FindKeyframeAt(curTime, 0.02);
+
+            Action onRender = () =>
+            {
+                InvalidateAndRefresh(layer);
+                RefreshTimelineCanvas();
+                RefreshTimelineTracks();
+                RefreshGraphEditor();
+            };
+
+            if (existing != null)
+            {
+                var cmd = new ModifyKeyframeValueCommand(existing, startVal, finalVal, onRender);
+                History.Execute(cmd);
+            }
+            else
+            {
+                var newKf = new Keyframe(curTime, finalVal, _defaultInterpolationMode, _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2);
+                if (isNewTrack)
+                {
+                    bool wasBatching = History.IsBatching;
+                    if (!wasBatching) History.BeginBatch("Add Track & Keyframe");
+                    History.Execute(new AddTrackCommand(clip, track, null));
+                    History.Execute(new AddKeyframeCommand(track, newKf, onRender));
+                    if (!wasBatching) History.EndBatch();
+                }
+                else
+                {
+                    History.Execute(new AddKeyframeCommand(track, newKf, onRender));
+                }
             }
         }
 

@@ -5663,6 +5663,70 @@ namespace Kerf.Tests
             Assert(batchClip.Tracks.Count == 3, "Single Redo re-applied all 3 tracks");
             Assert(bTrack1.Keys.Count == 2 && bTrack2.Keys.Count == 2 && bTrack3.Keys.Count == 2, "Single Redo re-applied all 6 keyframes");
             Assert(bk2.Value == 150.0 && bk4.Value == 250.0, "Single Redo re-applied modified keyframe values");
+
+            // 4. Task 1 (05-02): Inspector Numeric Scrub & Blur Transaction Batching (D-03, HIST-04)
+            // (A) Scrub gesture generating 50 intermediate values creates 0 history entries during drag, exactly 1 command on commit
+            var scrubHistory = new CommandHistory();
+            var scrubTrack = new Track(50, (ushort)PropKey.X);
+            var scrubKf = Keyframe.Linear(1.0, 100.0);
+            scrubTrack.AddKeyframe(scrubKf);
+
+            double scrubStartVal = scrubKf.Value; // 100.0
+            double scrubCurrentVal = scrubStartVal;
+
+            Action<double> scrubOnChanged = val =>
+            {
+                // Live preview simulation - 60 FPS canvas update without pushing history
+                scrubCurrentVal = val;
+                // Assert no command pushed during drag
+                Assert(scrubHistory.CanUndo == false, "0 commands pushed to history during continuous scrub drag");
+            };
+
+            Action scrubOnDragComplete = () =>
+            {
+                if (Math.Abs(scrubCurrentVal - scrubStartVal) > 1e-6)
+                {
+                    scrubHistory.Execute(new ModifyKeyframeValueCommand(scrubKf, scrubStartVal, scrubCurrentVal, null));
+                    scrubStartVal = scrubCurrentVal;
+                }
+            };
+
+            // Generate 50 intermediate drag events
+            for (int step = 1; step <= 50; step++)
+            {
+                scrubOnChanged(100.0 + step * 2.0); // 102.0 ... 200.0
+            }
+            Assert(scrubHistory.CanUndo == false, "After 50 move events during drag, CanUndo remains false");
+            Assert(scrubCurrentVal == 200.0, "Current scrubbed value reached 200.0");
+
+            // Pointer release / blur commit
+            scrubOnDragComplete();
+            Assert(scrubHistory.CanUndo == true, "Exactly 1 command committed to CommandHistory on pointer release");
+            Assert(scrubKf.Value == 200.0, "Keyframe value committed to 200.0");
+
+            // Execute Undo() - reverts directly to initial value in a single step
+            scrubHistory.Undo();
+            Assert(scrubKf.Value == 100.0, "Undo() restored initial value 100.0 in a single step");
+            Assert(scrubHistory.CanUndo == false, "CanUndo is false after single Undo()");
+
+            // Redo() restores 200.0
+            scrubHistory.Redo();
+            Assert(scrubKf.Value == 200.0, "Redo() re-applied 200.0");
+
+            // (B) Aspect ratio locked scrub batches paired changes into CompositeCommand (D-04)
+            var aspectLayer = new LayerNode { Name = "Box", X = 0, Y = 0, Width = 100, Height = 50, LockAspectRatio = true };
+            double startW = aspectLayer.Width;
+            double startH = aspectLayer.Height;
+            double finalW = 200.0;
+            double finalH = 100.0;
+
+            scrubHistory.BeginBatch("Modify Width and Height (Locked Aspect)");
+            scrubHistory.Execute(new ModifyBoundsCommand(aspectLayer, new Rect(0, 0, startW, startH), new Rect(0, 0, finalW, finalH), null));
+            scrubHistory.EndBatch();
+
+            Assert(aspectLayer.Width == 200.0 && aspectLayer.Height == 100.0, "Aspect ratio batch applied new dimensions");
+            scrubHistory.Undo();
+            Assert(aspectLayer.Width == 100.0 && aspectLayer.Height == 50.0, "Single Ctrl+Z reversed both Width and Height in one step");
         }
     }
 }
