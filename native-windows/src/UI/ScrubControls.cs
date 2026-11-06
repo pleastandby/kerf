@@ -28,9 +28,22 @@ namespace Kerf.UI
             double max = double.MaxValue,
             double step = 1.0,
             string suffix = "",
-            string tooltip = null)
+            string tooltip = null,
+            int decimals = 1,
+            Action onDragComplete = null)
         {
             var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 6), ToolTip = tooltip ?? label };
+
+            int effDecimals = decimals;
+            if (step < 0.1 && effDecimals < 2) effDecimals = 2;
+            if (step < 0.01 && effDecimals < 3) effDecimals = 3;
+
+            Func<double, string> formatVal = v =>
+            {
+                if (effDecimals == 0) return Math.Round(v, 0).ToString("0", CultureInfo.InvariantCulture) + (suffix ?? string.Empty);
+                string fmt = "0." + new string('#', effDecimals);
+                return Math.Round(v, effDecimals).ToString(fmt, CultureInfo.InvariantCulture) + (suffix ?? string.Empty);
+            };
 
             var container = new Border
             {
@@ -64,7 +77,7 @@ namespace Kerf.UI
             // 2. Value TextBox
             var tb = new TextBox
             {
-                Text = Math.Round(initialValue, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix,
+                Text = formatVal(initialValue),
                 FontSize = 11.5,
                 Foreground = KerfBrand.TextWhiteBrush,
                 Background = Brushes.Transparent,
@@ -83,6 +96,14 @@ namespace Kerf.UI
             Point startMouse = new Point(0, 0);
             double startVal = initialValue;
             bool isScrubbing = false;
+
+            // Direct external updater callback stored on dock.Tag for smooth lockstep pairing without UI rebuilds
+            Action<double> externalUpdater = v =>
+            {
+                currentValue = Math.Max(min, Math.Min(max, v));
+                tb.Text = formatVal(currentValue);
+            };
+            dock.Tag = externalUpdater;
 
             lbl.MouseLeftButtonDown += (s, e) =>
             {
@@ -112,7 +133,7 @@ namespace Kerf.UI
                         newVal = Math.Max(min, Math.Min(max, newVal));
                         currentValue = newVal;
 
-                        tb.Text = Math.Round(newVal, 1).ToString("0.#", CultureInfo.InvariantCulture) + (suffix ?? string.Empty);
+                        tb.Text = formatVal(newVal);
 
                         if (onChanged != null)
                         {
@@ -129,6 +150,7 @@ namespace Kerf.UI
                     lbl.ReleaseMouseCapture();
                     isScrubbing = false;
                     container.BorderBrush = KerfBrand.TealBrush;
+                    if (onDragComplete != null) onDragComplete();
                 }
             };
 
@@ -140,6 +162,7 @@ namespace Kerf.UI
                 }
                 isScrubbing = false;
                 container.BorderBrush = KerfBrand.TealBrush;
+                if (onDragComplete != null) onDragComplete();
             };
 
             Action commitText = () =>
@@ -153,12 +176,13 @@ namespace Kerf.UI
                     {
                         parsed = Math.Max(min, Math.Min(max, parsed));
                         currentValue = parsed;
-                        tb.Text = Math.Round(parsed, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix;
+                        tb.Text = formatVal(parsed);
                         if (onChanged != null) onChanged(parsed);
+                        if (onDragComplete != null) onDragComplete();
                     }
                     else
                     {
-                        tb.Text = Math.Round(currentValue, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix;
+                        tb.Text = formatVal(currentValue);
                     }
                 }
                 catch (Exception)
@@ -242,9 +266,18 @@ namespace Kerf.UI
             double max,
             Action<double> onChanged,
             string suffix = "",
-            string tooltip = null)
+            string tooltip = null,
+            int decimals = 0,
+            Action onDragComplete = null)
         {
             var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 8), LastChildFill = true };
+
+            Func<double, string> formatBadge = v =>
+            {
+                if (decimals == 0) return Math.Round(v, 0).ToString("0", CultureInfo.InvariantCulture) + (suffix ?? string.Empty);
+                string fmt = "0." + new string('#', decimals);
+                return Math.Round(v, decimals).ToString(fmt, CultureInfo.InvariantCulture) + (suffix ?? string.Empty);
+            };
 
             // Label
             bool isShort = (label != null && label.Length <= 2);
@@ -264,7 +297,7 @@ namespace Kerf.UI
             // Readout Badge
             var badge = new TextBlock
             {
-                Text = Math.Round(initialValue, 0) + suffix,
+                Text = formatBadge(initialValue),
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
                 Foreground = KerfBrand.MintBrush,
@@ -292,11 +325,16 @@ namespace Kerf.UI
             slider.ValueChanged += (s, e) =>
             {
                 double val = slider.Value;
-                badge.Text = Math.Round(val, 0) + suffix;
+                badge.Text = formatBadge(val);
                 if (onChanged != null)
                 {
                     onChanged(val);
                 }
+            };
+
+            slider.PreviewMouseLeftButtonUp += (s, e) =>
+            {
+                if (onDragComplete != null) onDragComplete();
             };
 
             dock.Children.Add(slider);

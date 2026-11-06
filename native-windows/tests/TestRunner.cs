@@ -81,6 +81,7 @@ namespace Kerf.Tests
             RunTest("Independent Transform Architecture & Deterministic Animation Evaluator", TestIndependentTransformArchitectureAndAnimationEvaluator);
             RunTest("Timeline & Keyframe Engine Reconstruction & Authoring System", TestTimelineAndKeyframeEngineAuthoringSystem);
             RunTest("Scale Crash Fix, Non-Destructive Frame Content Scaling, Empty Preset & State Timeline Header", TestScaleCrashFixFrameScalingNoPresetAndStateTimelineHeader);
+            RunTest("Anchor Point System, Stationary Pan-Behind & Raster Scaling", TestAnchorPointAndRasterScaling);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -4613,6 +4614,183 @@ namespace Kerf.Tests
             });
 
             Assert(dirtyClip.Tracks.Count == 0, "Sanitization successfully purged all uninvited legacy demo rotation and opacity tracks");
+        }
+
+        private static void TestAnchorPointAndRasterScaling()
+        {
+            // 1. Rive-Style Anchor Point & Stationary Pan-Behind Compensation
+            // Layer at (100, 100), size 200x200, rotated 30 degrees, scaled 1.5x
+            var layer = new LayerNode
+            {
+                Id = "anchor-test-layer",
+                Type = ElementType.Frame,
+                X = 100,
+                Y = 100,
+                Width = 200,
+                Height = 200,
+                RenderTransform = new RenderTransform
+                {
+                    AnchorX = 0.5,
+                    AnchorY = 0.5,
+                    ScaleX = 1.5,
+                    ScaleY = 1.5,
+                    Rotation = 30.0,
+                    TranslationX = 0.0,
+                    TranslationY = 0.0
+                }
+            };
+
+            Matrix initialMatrix = layer.GetRenderTransformMatrix();
+            Point initialTopLeft = initialMatrix.Transform(new Point(100, 100));
+            Point initialCenter = initialMatrix.Transform(new Point(200, 200));
+            Point initialBottomRight = initialMatrix.Transform(new Point(300, 300));
+
+            // Pan-Behind: Move Anchor to Top-Left (0.0, 0.0) without moving the shape visually
+            double oldAncX = layer.RenderTransform.AnchorX;
+            double oldAncY = layer.RenderTransform.AnchorY;
+            double newAncX = 0.0;
+            double newAncY = 0.0;
+
+            Point oldPivot = new Point(layer.X + oldAncX * layer.Width, layer.Y + oldAncY * layer.Height);
+            Point newPivot = new Point(layer.X + newAncX * layer.Width, layer.Y + newAncY * layer.Height);
+
+            double dPx = oldPivot.X - newPivot.X;
+            double dPy = oldPivot.Y - newPivot.Y;
+
+            double rad = (layer.Rotation + layer.RenderTransform.Rotation) * Math.PI / 180.0;
+            double cos = Math.Cos(rad);
+            double sin = Math.Sin(rad);
+            double sx = layer.RenderTransform.ScaleX;
+            double sy = layer.RenderTransform.ScaleY;
+
+            double m11 = sx * cos;
+            double m12 = -sy * sin;
+            double m21 = sx * sin;
+            double m22 = sy * cos;
+
+            double transDeltaX = dPx - (m11 * dPx + m12 * dPy);
+            double transDeltaY = dPy - (m21 * dPx + m22 * dPy);
+
+            layer.RenderTransform.AnchorX = newAncX;
+            layer.RenderTransform.AnchorY = newAncY;
+            layer.RenderTransform.TranslationX += transDeltaX;
+            layer.RenderTransform.TranslationY += transDeltaY;
+
+            Matrix compensatedMatrix = layer.GetRenderTransformMatrix();
+            Point compensatedTopLeft = compensatedMatrix.Transform(new Point(100, 100));
+            Point compensatedCenter = compensatedMatrix.Transform(new Point(200, 200));
+            Point compensatedBottomRight = compensatedMatrix.Transform(new Point(300, 300));
+
+            Assert(Math.Abs(initialTopLeft.X - compensatedTopLeft.X) < 1e-4 && Math.Abs(initialTopLeft.Y - compensatedTopLeft.Y) < 1e-4,
+                "Rive pan-behind relocation: TopLeft pixel stays in identical world position after moving anchor");
+            Assert(Math.Abs(initialCenter.X - compensatedCenter.X) < 1e-4 && Math.Abs(initialCenter.Y - compensatedCenter.Y) < 1e-4,
+                "Rive pan-behind relocation: Center pixel stays in identical world position after moving anchor");
+            Assert(Math.Abs(initialBottomRight.X - compensatedBottomRight.X) < 1e-4 && Math.Abs(initialBottomRight.Y - compensatedBottomRight.Y) < 1e-4,
+                "Rive pan-behind relocation: BottomRight pixel stays in identical world position after moving anchor");
+
+            // 2. Raster Scaling Around Anchor Point
+            // Test Top-Left Anchor (0, 0)
+            var scaleLayerTL = new LayerNode
+            {
+                Id = "scale-tl",
+                Type = ElementType.Frame,
+                X = 50,
+                Y = 50,
+                Width = 100,
+                Height = 100,
+                RenderTransform = new RenderTransform { AnchorX = 0.0, AnchorY = 0.0, ScaleX = 1.0, ScaleY = 1.0 }
+            };
+
+            // Scale to 2.0x from Top-Left
+            scaleLayerTL.RenderTransform.ScaleX = 2.0;
+            scaleLayerTL.RenderTransform.ScaleY = 2.0;
+            Matrix matTL = scaleLayerTL.GetRenderTransformMatrix();
+            Point scaledTL = matTL.Transform(new Point(50, 50));
+            Point scaledBR = matTL.Transform(new Point(150, 150));
+
+            Assert(Math.Abs(scaledTL.X - 50.0) < 1e-4 && Math.Abs(scaledTL.Y - 50.0) < 1e-4,
+                "Top-Left anchor point stays invariant at (50, 50) when scaling up");
+            Assert(Math.Abs(scaledBR.X - 250.0) < 1e-4 && Math.Abs(scaledBR.Y - 250.0) < 1e-4,
+                "Bottom-Right expanded to (250, 250) representing a 200x200 visual area from top-left anchor");
+
+            // 3. Center Anchor (0.5, 0.5) Symmetric Scaling
+            var scaleLayerCenter = new LayerNode
+            {
+                Id = "scale-center",
+                Type = ElementType.Frame,
+                X = 100,
+                Y = 100,
+                Width = 200,
+                Height = 200,
+                RenderTransform = new RenderTransform { AnchorX = 0.5, AnchorY = 0.5, ScaleX = 2.0, ScaleY = 2.0 }
+            };
+            Matrix matCenter = scaleLayerCenter.GetRenderTransformMatrix();
+            Point centerPt = matCenter.Transform(new Point(200, 200));
+            Point tlFromCenter = matCenter.Transform(new Point(100, 100));
+            Point brFromCenter = matCenter.Transform(new Point(300, 300));
+
+            Assert(Math.Abs(centerPt.X - 200.0) < 1e-4 && Math.Abs(centerPt.Y - 200.0) < 1e-4,
+                "Center anchor point stays invariant at (200, 200) when scaling up");
+            Assert(Math.Abs(tlFromCenter.X - 0.0) < 1e-4 && Math.Abs(tlFromCenter.Y - 0.0) < 1e-4,
+                "Top-Left expanded symmetrically outward to (0, 0)");
+            Assert(Math.Abs(brFromCenter.X - 400.0) < 1e-4 && Math.Abs(brFromCenter.Y - 400.0) < 1e-4,
+                "Bottom-Right expanded symmetrically outward to (400, 400)");
+
+            // 4. Uniform Dual Keyframing when LockAspectRatio is true
+            var animClip = new Clip(200, "UniformDualKeyTest", 2.0, 60.0);
+            var aspectLayer = new LayerNode
+            {
+                Id = "aspect-test-layer",
+                X = 10,
+                Y = 20,
+                Width = 100,
+                Height = 50, // 2:1 ratio
+                LockAspectRatio = true,
+                RenderTransform = new RenderTransform { ScaleX = 1.0, ScaleY = 1.0 }
+            };
+
+            uint nId = PropertyBinder.GetNumericNodeId(aspectLayer.Id);
+
+            // Adding a keyframe for Width must pair with Height
+            double testTime = 1.0;
+            aspectLayer.Width = 200;
+            aspectLayer.Height = 100;
+            animClip.GetOrCreateTrack(nId, (ushort)PropKey.Width).AddKeyframe(Keyframe.Linear(testTime, aspectLayer.Width));
+            animClip.GetOrCreateTrack(nId, (ushort)PropKey.Height).AddKeyframe(Keyframe.Linear(testTime, aspectLayer.Height));
+
+            var wTrack = animClip.GetTrack(nId, (ushort)PropKey.Width);
+            var hTrack = animClip.GetTrack(nId, (ushort)PropKey.Height);
+
+            Assert(wTrack != null && wTrack.Keys.Count == 1, "Width track contains recorded keyframe");
+            Assert(hTrack != null && hTrack.Keys.Count == 1, "Height track automatically contains paired keyframe at same timestamp");
+            Assert(Math.Abs(wTrack.Keys[0].Value - 200.0) < 1e-4, "Width keyframe value is 200");
+            Assert(Math.Abs(hTrack.Keys[0].Value - 100.0) < 1e-4, "Height keyframe value is 100 preserving 2:1 aspect ratio");
+
+            // 5. Uninvited Demo Tracks Clean Purge (Matching remaining 180° or 360° keyframes)
+            var clipWithRemainingDemo = new Clip(201, "Default Animation", 2.0, 60.0);
+            var partialRotTrack = new Track(nId, (ushort)PropKey.Rotation);
+            partialRotTrack.AddKeyframe(Keyframe.Linear(1.0, 180.0));
+            partialRotTrack.AddKeyframe(Keyframe.Linear(2.0, 360.0));
+            clipWithRemainingDemo.Tracks.Add(partialRotTrack);
+
+            var partialOpTrack = new Track(nId, (ushort)PropKey.Opacity);
+            partialOpTrack.AddKeyframe(Keyframe.Linear(1.0, 0.5));
+            clipWithRemainingDemo.Tracks.Add(partialOpTrack);
+
+            Assert(clipWithRemainingDemo.Tracks.Count == 2, "Clip contains 2 lingering demo tracks with remaining keyframes");
+
+            // Purge matching legacy preset
+            clipWithRemainingDemo.Tracks.RemoveAll(t =>
+            {
+                if (t == null || t.Keys == null) return false;
+                if (t.Prop == (ushort)PropKey.Rotation && t.Keys.Any(k => Math.Abs(k.Value - 180.0) < 0.1 || Math.Abs(k.Value - 360.0) < 0.1))
+                    return true;
+                if (t.Prop == (ushort)PropKey.Opacity && t.Keys.Any(k => Math.Abs(k.Time - 1.0) < 0.1 && Math.Abs(k.Value - 0.5) < 0.05))
+                    return true;
+                return false;
+            });
+
+            Assert(clipWithRemainingDemo.Tracks.Count == 0, "Enhanced sanitization completely removed lingering demo rotation and opacity tracks");
         }
     }
 }

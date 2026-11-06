@@ -19,7 +19,8 @@ namespace Kerf.Tools
         Pen,
         Text,
         Line,
-        Arrow
+        Arrow,
+        Anchor
     }
 
     public enum HandleType
@@ -34,7 +35,8 @@ namespace Kerf.Tools
         BottomCenter,
         BottomRight,
         Rotate,
-        CornerRadius
+        CornerRadius,
+        AnchorPoint
     }
 
     public class TransformResult

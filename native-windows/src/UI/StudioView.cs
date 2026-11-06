@@ -183,6 +183,8 @@ namespace Kerf.UI
         private Rect _transformStartBounds;
         private double _transformStartRot;
         private Point _transformStartMouse;
+        private double _startScaleX = 1.0;
+        private double _startScaleY = 1.0;
         private Point _dragStartPoint;
         private bool _isTransforming = false;
         private bool _isDrawingNew = false;
@@ -1087,8 +1089,9 @@ namespace Kerf.UI
                 _canvasHost.Cursor = (tool == ToolType.Hand) ? Cursors.Hand :
                                      (tool == ToolType.Pen) ? Cursors.Pen :
                                      (tool == ToolType.Text) ? Cursors.IBeam :
-                                     (tool == ToolType.Marquee) ? Cursors.Cross : Cursors.Arrow;
+                                     (tool == ToolType.Marquee || tool == ToolType.Anchor) ? Cursors.Cross : Cursors.Arrow;
             }
+            RefreshCanvas();
         }
 
         #endregion
@@ -3111,7 +3114,10 @@ namespace Kerf.UI
             row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
             row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var wBox = ScrubControls.CreateScrubField("W", primary.Width, val =>
+            FrameworkElement wBox = null;
+            FrameworkElement hBox = null;
+
+            wBox = ScrubControls.CreateScrubField("W", primary.Width, val =>
             {
                 double oldW = Math.Max(0.001, primary.Width);
                 double oldH = Math.Max(0.001, primary.Height);
@@ -3120,6 +3126,8 @@ namespace Kerf.UI
                 {
                     primary.Height = Math.Max(1, Math.Round(primary.Width * (oldH / oldW), 1));
                     AutoKeyProperty(primary, PropKey.Height, primary.Height);
+                    var hUp = hBox != null ? hBox.Tag as Action<double> : null;
+                    if (hUp != null) hUp(primary.Height);
                 }
                 SetParentAutoLayoutSizingFixed(primary, true);
                 if (primary.AutoLayout != null && primary.AutoLayout.Mode != AutoLayoutMode.None)
@@ -3130,8 +3138,7 @@ namespace Kerf.UI
                 }
                 AutoKeyProperty(primary, PropKey.Width, primary.Width);
                 InvalidateAndRefresh(primary);
-                if (primary.LockAspectRatio) RefreshPropertyInspector();
-            }, min: 1);
+            }, min: 1, onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); });
 
             var lockBtn = new Border
             {
@@ -3164,7 +3171,7 @@ namespace Kerf.UI
                 History.MarkDirty();
             };
 
-            var hBox = ScrubControls.CreateScrubField("H", primary.Height, val =>
+            hBox = ScrubControls.CreateScrubField("H", primary.Height, val =>
             {
                 double oldW = Math.Max(0.001, primary.Width);
                 double oldH = Math.Max(0.001, primary.Height);
@@ -3173,6 +3180,8 @@ namespace Kerf.UI
                 {
                     primary.Width = Math.Max(1, Math.Round(primary.Height * (oldW / oldH), 1));
                     AutoKeyProperty(primary, PropKey.Width, primary.Width);
+                    var wUp = wBox != null ? wBox.Tag as Action<double> : null;
+                    if (wUp != null) wUp(primary.Width);
                 }
                 SetParentAutoLayoutSizingFixed(primary, false);
                 if (primary.AutoLayout != null && primary.AutoLayout.Mode != AutoLayoutMode.None)
@@ -3183,8 +3192,7 @@ namespace Kerf.UI
                 }
                 AutoKeyProperty(primary, PropKey.Height, primary.Height);
                 InvalidateAndRefresh(primary);
-                if (primary.LockAspectRatio) RefreshPropertyInspector();
-            }, min: 1);
+            }, min: 1, onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); });
             wBox = CreateAnimatedPropertyField(wBox, primary, PropKey.Width);
             hBox = CreateAnimatedPropertyField(hBox, primary, PropKey.Height);
             Grid.SetColumn(wBox, 0); Grid.SetColumn(lockBtn, 1); Grid.SetColumn(hBox, 2);
@@ -3212,7 +3220,10 @@ namespace Kerf.UI
                 double currentScaleX = primary.RenderTransform != null ? primary.RenderTransform.ScaleX : 1.0;
                 double currentScaleY = primary.RenderTransform != null ? primary.RenderTransform.ScaleY : 1.0;
 
-                var sxBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("ScaleX", currentScaleX, val =>
+                FrameworkElement sxField = null;
+                FrameworkElement syField = null;
+
+                sxField = ScrubControls.CreateScrubField("ScaleX", currentScaleX, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     double oldSx = Math.Max(0.001, primary.RenderTransform.ScaleX);
@@ -3224,10 +3235,11 @@ namespace Kerf.UI
                         double ratio = oldSy / oldSx;
                         primary.RenderTransform.ScaleY = Math.Max(0.01, Math.Round(val * ratio, 3));
                         AutoKeyProperty(primary, PropKey.ScaleY, primary.RenderTransform.ScaleY);
+                        var syUp = syField != null ? syField.Tag as Action<double> : null;
+                        if (syUp != null) syUp(primary.RenderTransform.ScaleY);
                     }
                     InvalidateAndRefresh(primary);
-                    if (primary.LockAspectRatio) RefreshPropertyInspector();
-                }, min: 0.01, max: 100.0, step: 0.05), primary, PropKey.ScaleX);
+                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); });
 
                 var scaleLockBtn = new Border
                 {
@@ -3260,7 +3272,7 @@ namespace Kerf.UI
                     History.MarkDirty();
                 };
 
-                var syBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("ScaleY", currentScaleY, val =>
+                syField = ScrubControls.CreateScrubField("ScaleY", currentScaleY, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     double oldSx = Math.Max(0.001, primary.RenderTransform.ScaleX);
@@ -3272,10 +3284,14 @@ namespace Kerf.UI
                         double ratio = oldSx / oldSy;
                         primary.RenderTransform.ScaleX = Math.Max(0.01, Math.Round(val * ratio, 3));
                         AutoKeyProperty(primary, PropKey.ScaleX, primary.RenderTransform.ScaleX);
+                        var sxUp = sxField != null ? sxField.Tag as Action<double> : null;
+                        if (sxUp != null) sxUp(primary.RenderTransform.ScaleX);
                     }
                     InvalidateAndRefresh(primary);
-                    if (primary.LockAspectRatio) RefreshPropertyInspector();
-                }, min: 0.01, max: 100.0, step: 0.05), primary, PropKey.ScaleY);
+                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); });
+
+                var sxBox = CreateAnimatedPropertyField(sxField, primary, PropKey.ScaleX);
+                var syBox = CreateAnimatedPropertyField(syField, primary, PropKey.ScaleY);
 
                 Grid.SetColumn(sxBox, 0); Grid.SetColumn(scaleLockBtn, 1); Grid.SetColumn(syBox, 2);
                 scaleRow.Children.Add(sxBox); scaleRow.Children.Add(scaleLockBtn); scaleRow.Children.Add(syBox);
@@ -3286,8 +3302,8 @@ namespace Kerf.UI
                 anchorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
                 anchorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                double currentAnchorX = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.0;
-                double currentAnchorY = primary.RenderTransform != null ? primary.RenderTransform.AnchorY : 0.0;
+                double currentAnchorX = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.5;
+                double currentAnchorY = primary.RenderTransform != null ? primary.RenderTransform.AnchorY : 0.5;
 
                 var axBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Anc X", currentAnchorX, val =>
                 {
@@ -3295,7 +3311,7 @@ namespace Kerf.UI
                     primary.RenderTransform.AnchorX = val;
                     InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.AnchorX, val);
-                }, min: 0.0, max: 1.0, step: 0.05), primary, PropKey.AnchorX);
+                }, step: 0.01, decimals: 2), primary, PropKey.AnchorX);
 
                 var ayBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Anc Y", currentAnchorY, val =>
                 {
@@ -3303,7 +3319,7 @@ namespace Kerf.UI
                     primary.RenderTransform.AnchorY = val;
                     InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.AnchorY, val);
-                }, min: 0.0, max: 1.0, step: 0.05), primary, PropKey.AnchorY);
+                }, step: 0.01, decimals: 2), primary, PropKey.AnchorY);
 
                 Grid.SetColumn(axBox, 0); Grid.SetColumn(ayBox, 2);
                 anchorRow.Children.Add(axBox); anchorRow.Children.Add(ayBox);
@@ -7235,43 +7251,81 @@ namespace Kerf.UI
                     }
                 }
 
-                // 3. Transform handles
-                if (_selectedLayers.Count > 0 && _activeTool == ToolType.Select)
+                // 3. Anchor point & Transform handles
+                if (_selectedLayers.Count > 0 && (_activeTool == ToolType.Select || _activeTool == ToolType.Anchor))
                 {
-                    var union = TransformEngine.UnionBounds(_selectedLayers);
-                    double rot = (_selectedLayers.Count == 1) ? _selectedLayers[0].Rotation : 0;
-                    Rect effectiveBounds = union;
-
-                    if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1 && _selectedLayers[0].RenderTransform != null && !_selectedLayers[0].RenderTransform.IsIdentity)
+                    if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1)
                     {
                         var primary = _selectedLayers[0];
-                        double curSx = Math.Max(0.001, primary.RenderTransform.ScaleX);
-                        double curSy = Math.Max(0.001, primary.RenderTransform.ScaleY);
-                        double visualW = primary.Width * curSx;
-                        double visualH = primary.Height * curSy;
-                        double visualCenterX = primary.X + primary.Width / 2.0 + primary.RenderTransform.TranslationX;
-                        double visualCenterY = primary.Y + primary.Height / 2.0 + primary.RenderTransform.TranslationY;
-                        effectiveBounds = new Rect(visualCenterX - visualW / 2.0, visualCenterY - visualH / 2.0, visualW, visualH);
-                        rot = primary.Rotation + primary.RenderTransform.Rotation;
+                        double ancX = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.5;
+                        double ancY = primary.RenderTransform != null ? primary.RenderTransform.AnchorY : 0.5;
+                        double tx = primary.RenderTransform != null ? primary.RenderTransform.TranslationX : 0.0;
+                        double ty = primary.RenderTransform != null ? primary.RenderTransform.TranslationY : 0.0;
+                        Point anchorWorld = new Point(primary.X + ancX * primary.Width + tx, primary.Y + ancY * primary.Height + ty);
+
+                        double distToAnchor = Math.Sqrt(Math.Pow(canvasPt.X - anchorWorld.X, 2) + Math.Pow(canvasPt.Y - anchorWorld.Y, 2));
+                        double hitRadius = (_activeTool == ToolType.Anchor ? 20.0 : 12.0) / _zoomScale;
+
+                        if (distToAnchor <= hitRadius || _activeTool == ToolType.Anchor)
+                        {
+                            _activeHandle = HandleType.AnchorPoint;
+                            _isTransforming = true;
+                            _transformStartBounds = primary.GetBounds();
+                            _transformStartRot = primary.Rotation + (primary.RenderTransform != null ? primary.RenderTransform.Rotation : 0.0);
+                            _transformStartMouse = canvasPt;
+                            if (_canvasHost != null) _canvasHost.CaptureMouse();
+                            return;
+                        }
                     }
 
-                    var handle = TransformEngine.HitTestHandle(canvasPt, effectiveBounds, rot, _zoomScale);
-                    if (handle != HandleType.None)
+                    if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1)
                     {
-                        _activeHandle = handle;
-                        _isTransforming = true;
-                        _transformStartBounds = effectiveBounds;
-                        _transformStartRot = rot;
-                        _transformStartMouse = canvasPt;
-                        _dragInitialPositions.Clear();
-                        _dragInitialBounds.Clear();
-                        _dragInitialRotations.Clear();
-                        _dragInitialGeometries.Clear();
-                        foreach (var l in _selectedLayers)
+                        var primary = _selectedLayers[0];
+                        Point localPt = RetainedSceneGraph.CanvasToLocalPoint(primary, canvasPt);
+                        double curSx = primary.RenderTransform != null ? primary.RenderTransform.ScaleX : 1.0;
+                        double curSy = primary.RenderTransform != null ? primary.RenderTransform.ScaleY : 1.0;
+                        double scaleMag = Math.Max(0.001, Math.Max(curSx, curSy));
+                        var handle = TransformEngine.HitTestHandle(localPt, primary.GetBounds(), 0, _zoomScale * scaleMag);
+                        if (handle != HandleType.None)
                         {
-                            CollectDragInitialPositions(l, _dragInitialPositions);
+                            _activeHandle = handle;
+                            _isTransforming = true;
+                            _transformStartBounds = primary.GetBounds();
+                            _transformStartRot = primary.Rotation + (primary.RenderTransform != null ? primary.RenderTransform.Rotation : 0.0);
+                            _transformStartMouse = canvasPt;
+                            _startScaleX = curSx;
+                            _startScaleY = curSy;
+                            _dragInitialPositions.Clear();
+                            _dragInitialBounds.Clear();
+                            _dragInitialRotations.Clear();
+                            _dragInitialGeometries.Clear();
+                            foreach (var l in _selectedLayers) CollectDragInitialPositions(l, _dragInitialPositions);
+                            if (_canvasHost != null) _canvasHost.CaptureMouse();
+                            return;
                         }
-                        return;
+                    }
+                    else
+                    {
+                        var union = TransformEngine.UnionBounds(_selectedLayers);
+                        double rot = (_selectedLayers.Count == 1) ? _selectedLayers[0].Rotation : 0;
+                        var handle = TransformEngine.HitTestHandle(canvasPt, union, rot, _zoomScale);
+                        if (handle != HandleType.None)
+                        {
+                            _activeHandle = handle;
+                            _isTransforming = true;
+                            _transformStartBounds = union;
+                            _transformStartRot = rot;
+                            _transformStartMouse = canvasPt;
+                            _startScaleX = 1.0;
+                            _startScaleY = 1.0;
+                            _dragInitialPositions.Clear();
+                            _dragInitialBounds.Clear();
+                            _dragInitialRotations.Clear();
+                            _dragInitialGeometries.Clear();
+                            foreach (var l in _selectedLayers) CollectDragInitialPositions(l, _dragInitialPositions);
+                            if (_canvasHost != null) _canvasHost.CaptureMouse();
+                            return;
+                        }
                     }
                 }
 
@@ -7619,6 +7673,72 @@ namespace Kerf.UI
 
             if (_isTransforming && _selectedLayers.Count > 0)
             {
+                // Interactive Anchor Point Dragging (Rive-style Pan Behind & Relocation)
+                if (_activeHandle == HandleType.AnchorPoint && _selectedLayers.Count == 1)
+                {
+                    var primary = _selectedLayers[0];
+                    if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
+
+                    double curTx = primary.RenderTransform.TranslationX;
+                    double curTy = primary.RenderTransform.TranslationY;
+                    double rawAncX = (canvasPt.X - primary.X - curTx) / Math.Max(1.0, primary.Width);
+                    double rawAncY = (canvasPt.Y - primary.Y - curTy) / Math.Max(1.0, primary.Height);
+
+                    // Snapping to the 9 cardinal points within 8px
+                    double snapTolX = 8.0 / (_zoomScale * Math.Max(1.0, primary.Width));
+                    double snapTolY = 8.0 / (_zoomScale * Math.Max(1.0, primary.Height));
+                    double newAncX = rawAncX;
+                    double newAncY = rawAncY;
+
+                    if (Math.Abs(rawAncX - 0.0) < snapTolX) newAncX = 0.0;
+                    else if (Math.Abs(rawAncX - 0.5) < snapTolX) newAncX = 0.5;
+                    else if (Math.Abs(rawAncX - 1.0) < snapTolX) newAncX = 1.0;
+
+                    if (Math.Abs(rawAncY - 0.0) < snapTolY) newAncY = 0.0;
+                    else if (Math.Abs(rawAncY - 0.5) < snapTolY) newAncY = 0.5;
+                    else if (Math.Abs(rawAncY - 1.0) < snapTolY) newAncY = 1.0;
+
+                    // Rive pan-behind stationary compensation:
+                    // When moving anchor point, adjust TranslationX/Y so the rendered pixels DO NOT MOVE!
+                    double oldAncX = primary.RenderTransform.AnchorX;
+                    double oldAncY = primary.RenderTransform.AnchorY;
+                    Point oldPivot = new Point(primary.X + oldAncX * primary.Width, primary.Y + oldAncY * primary.Height);
+                    Point newPivot = new Point(primary.X + newAncX * primary.Width, primary.Y + newAncY * primary.Height);
+
+                    double dPx = oldPivot.X - newPivot.X;
+                    double dPy = oldPivot.Y - newPivot.Y;
+
+                    double rad = (primary.Rotation + primary.RenderTransform.Rotation) * Math.PI / 180.0;
+                    double cos = Math.Cos(rad);
+                    double sin = Math.Sin(rad);
+                    double sx = primary.RenderTransform.ScaleX;
+                    double sy = primary.RenderTransform.ScaleY;
+
+                    double m11 = sx * cos;
+                    double m12 = -sy * sin;
+                    double m21 = sx * sin;
+                    double m22 = sy * cos;
+
+                    double transDeltaX = dPx - (m11 * dPx + m12 * dPy);
+                    double transDeltaY = dPy - (m21 * dPx + m22 * dPy);
+
+                    primary.RenderTransform.AnchorX = Math.Round(newAncX, 3);
+                    primary.RenderTransform.AnchorY = Math.Round(newAncY, 3);
+                    primary.RenderTransform.TranslationX += transDeltaX;
+                    primary.RenderTransform.TranslationY += transDeltaY;
+
+                    AutoKeyProperty(primary, PropKey.AnchorX, primary.RenderTransform.AnchorX);
+                    AutoKeyProperty(primary, PropKey.AnchorY, primary.RenderTransform.AnchorY);
+                    AutoKeyProperty(primary, PropKey.X, primary.X + primary.RenderTransform.TranslationX);
+                    AutoKeyProperty(primary, PropKey.Y, primary.Y + primary.RenderTransform.TranslationY);
+
+                    _sceneGraph.InvalidateSubtree(primary.Id);
+                    RefreshCanvas();
+                    RefreshPropertyInspector();
+                    _lastMousePos = screenPt;
+                    return;
+                }
+
                 // Interactive Corner Radius Dragging
                 if (_activeHandle == HandleType.CornerRadius && _selectedLayers.Count == 1)
                 {
@@ -7663,24 +7783,90 @@ namespace Kerf.UI
                         if (_currentStudioMode == StudioMode.Animate)
                         {
                             // In Animate Mode: scaling a Frame/layer must scale its entire visual contents non-destructively
-                            // via RenderTransform.ScaleX/Y and translation offsets, without mutating persistent layout dimensions.
+                            // from its Anchor Point via RenderTransform.ScaleX/Y without mutating persistent layout dimensions.
                             if (n.RenderTransform == null) n.RenderTransform = new RenderTransform();
-                            double sx = res.Bounds.Width / Math.Max(0.001, n.Width);
-                            double sy = res.Bounds.Height / Math.Max(0.001, n.Height);
-                            n.RenderTransform.ScaleX = Math.Max(0.001, sx);
-                            n.RenderTransform.ScaleY = Math.Max(0.001, sy);
-                            double newCenterX = res.Bounds.X + res.Bounds.Width / 2.0;
-                            double newCenterY = res.Bounds.Y + res.Bounds.Height / 2.0;
-                            n.RenderTransform.TranslationX = newCenterX - (n.X + n.Width / 2.0);
-                            n.RenderTransform.TranslationY = newCenterY - (n.Y + n.Height / 2.0);
-                            n.RenderTransform.Rotation = res.Rotation - n.Rotation;
+
+                            double ancX = n.RenderTransform.AnchorX;
+                            double ancY = n.RenderTransform.AnchorY;
+                            Point anchorWorld = new Point(
+                                n.X + ancX * n.Width + n.RenderTransform.TranslationX,
+                                n.Y + ancY * n.Height + n.RenderTransform.TranslationY);
+
+                            double totalRot = n.Rotation + n.RenderTransform.Rotation;
+                            double rad = -totalRot * Math.PI / 180.0;
+                            double cos = Math.Cos(rad);
+                            double sin = Math.Sin(rad);
+
+                            double dxCur = canvasPt.X - anchorWorld.X;
+                            double dyCur = canvasPt.Y - anchorWorld.Y;
+                            double unrotCurX = dxCur * cos - dyCur * sin;
+                            double unrotCurY = dxCur * sin + dyCur * cos;
+
+                            double dxStart = _transformStartMouse.X - anchorWorld.X;
+                            double dyStart = _transformStartMouse.Y - anchorWorld.Y;
+                            double unrotStartX = dxStart * cos - dyStart * sin;
+                            double unrotStartY = dxStart * sin + dyStart * cos;
+
+                            double newScaleX = n.RenderTransform.ScaleX;
+                            double newScaleY = n.RenderTransform.ScaleY;
+
+                            bool affectsX = (_activeHandle == HandleType.TopLeft || _activeHandle == HandleType.TopRight ||
+                                             _activeHandle == HandleType.BottomLeft || _activeHandle == HandleType.BottomRight ||
+                                             _activeHandle == HandleType.MiddleLeft || _activeHandle == HandleType.MiddleRight);
+
+                            bool affectsY = (_activeHandle == HandleType.TopLeft || _activeHandle == HandleType.TopRight ||
+                                             _activeHandle == HandleType.BottomLeft || _activeHandle == HandleType.BottomRight ||
+                                             _activeHandle == HandleType.TopCenter || _activeHandle == HandleType.BottomCenter);
+
+                            if (affectsX && Math.Abs(unrotStartX) > 1.0)
+                            {
+                                double factorX = unrotCurX / unrotStartX;
+                                newScaleX = Math.Max(0.01, Math.Round(_startScaleX * factorX, 3));
+                            }
+                            if (affectsY && Math.Abs(unrotStartY) > 1.0)
+                            {
+                                double factorY = unrotCurY / unrotStartY;
+                                newScaleY = Math.Max(0.01, Math.Round(_startScaleY * factorY, 3));
+                            }
+
+                            if (keepAspect)
+                            {
+                                if (affectsX && affectsY)
+                                {
+                                    double changeX = Math.Abs(newScaleX - _startScaleX);
+                                    double changeY = Math.Abs(newScaleY - _startScaleY);
+                                    if (changeX >= changeY)
+                                    {
+                                        newScaleY = Math.Max(0.01, Math.Round(newScaleX * (_startScaleY / Math.Max(0.001, _startScaleX)), 3));
+                                    }
+                                    else
+                                    {
+                                        newScaleX = Math.Max(0.01, Math.Round(newScaleY * (_startScaleX / Math.Max(0.001, _startScaleY)), 3));
+                                    }
+                                }
+                                else if (affectsX)
+                                {
+                                    newScaleY = Math.Max(0.01, Math.Round(newScaleX * (_startScaleY / Math.Max(0.001, _startScaleX)), 3));
+                                }
+                                else if (affectsY)
+                                {
+                                    newScaleX = Math.Max(0.01, Math.Round(newScaleY * (_startScaleX / Math.Max(0.001, _startScaleY)), 3));
+                                }
+                            }
+
+                            n.RenderTransform.ScaleX = newScaleX;
+                            n.RenderTransform.ScaleY = newScaleY;
+                            AutoKeyProperty(n, PropKey.ScaleX, newScaleX);
+                            AutoKeyProperty(n, PropKey.ScaleY, newScaleY);
+
                             _sceneGraph.InvalidateSubtree(n.Id);
                             RefreshCanvas();
                             RefreshPropertyInspector();
+                            _lastMousePos = screenPt;
+                            return;
                         }
-                        else
-                        {
-                            Rect oldBounds = new Rect(n.X, n.Y, n.Width, n.Height);
+
+                        Rect oldBounds = new Rect(n.X, n.Y, n.Width, n.Height);
                             bool reflowOwnAutoLayout = false;
                             n.X = res.Bounds.X;
                             n.Y = res.Bounds.Y;
@@ -7740,7 +7926,6 @@ namespace Kerf.UI
                         if (reflowOwnAutoLayout) AutoLayoutEngine.ReflowRecursive(n);
                         ReflowAutoLayoutAncestors(n);
                         InvalidateLayoutFrameVisuals(n);
-                        }
                     }
                     else
                     {
@@ -9027,6 +9212,55 @@ namespace Kerf.UI
             pillBg.Freeze();
             dc.DrawRoundedRectangle(pillBg, null, pillRect, 4 / _zoomScale, 4 / _zoomScale);
             dc.DrawText(ft, new Point(center.X - ft.Width / 2.0, union.Y + union.Height + 10 / _zoomScale));
+
+            // Rive-style Anchor Point Crosshair Handle in Animate Mode
+            if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1)
+            {
+                var primary = _selectedLayers[0];
+                double ancX = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.5;
+                double ancY = primary.RenderTransform != null ? primary.RenderTransform.AnchorY : 0.5;
+                var anchorPt = new Point(primary.X + ancX * primary.Width, primary.Y + ancY * primary.Height);
+
+                bool isAnchorActive = (_activeTool == ToolType.Anchor);
+                double rOut = (isAnchorActive ? 9.0 : 7.0) / _zoomScale;
+                double rHalo = rOut + 3.0 / _zoomScale;
+                double rDot = 2.5 / _zoomScale;
+                double crossLen = (isAnchorActive ? 15.0 : 12.0) / _zoomScale;
+
+                // Dark semi-transparent halo for contrast against any canvas background
+                var haloBrush = new SolidColorBrush(Color.FromArgb(140, 5, 20, 25));
+                haloBrush.Freeze();
+                dc.DrawEllipse(haloBrush, null, anchorPt, rHalo, rHalo);
+
+                // Outer ring
+                var anchorRingPen = new Pen(KerfBrand.MintBrush, 2.0 / _zoomScale);
+                anchorRingPen.Freeze();
+                var anchorFillBrush = isAnchorActive ? new SolidColorBrush(Color.FromArgb(70, 70, 239, 177)) : Brushes.Transparent;
+                dc.DrawEllipse(anchorFillBrush, anchorRingPen, anchorPt, rOut, rOut);
+
+                // Crosshair lines: North, South, West, East
+                var crossPen = new Pen(KerfBrand.MintBrush, 1.5 / _zoomScale);
+                crossPen.Freeze();
+                dc.DrawLine(crossPen, new Point(anchorPt.X, anchorPt.Y - crossLen), new Point(anchorPt.X, anchorPt.Y - rOut + 1.0 / _zoomScale));
+                dc.DrawLine(crossPen, new Point(anchorPt.X, anchorPt.Y + rOut - 1.0 / _zoomScale), new Point(anchorPt.X, anchorPt.Y + crossLen));
+                dc.DrawLine(crossPen, new Point(anchorPt.X - crossLen, anchorPt.Y), new Point(anchorPt.X - rOut + 1.0 / _zoomScale, anchorPt.Y));
+                dc.DrawLine(crossPen, new Point(anchorPt.X + rOut - 1.0 / _zoomScale, anchorPt.Y), new Point(anchorPt.X + crossLen, anchorPt.Y));
+
+                // Center white bullseye dot
+                dc.DrawEllipse(Brushes.White, null, anchorPt, rDot, rDot);
+
+                // If anchor tool active, draw floating badge "ANCHOR (Y)"
+                if (isAnchorActive)
+                {
+                    var anchorTag = new FormattedText("ANCHOR (Y)", CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                        new Typeface("Segoe UI Bold"), 10 / _zoomScale, KerfBrand.MintBrush);
+                    var tagRect = new Rect(anchorPt.X + rOut + 5 / _zoomScale, anchorPt.Y - anchorTag.Height / 2.0 - 2 / _zoomScale, anchorTag.Width + 8 / _zoomScale, anchorTag.Height + 4 / _zoomScale);
+                    var tagBg = new SolidColorBrush(Color.FromArgb(220, 12, 66, 71));
+                    tagBg.Freeze();
+                    dc.DrawRoundedRectangle(tagBg, anchorRingPen, tagRect, 3 / _zoomScale, 3 / _zoomScale);
+                    dc.DrawText(anchorTag, new Point(tagRect.X + 4 / _zoomScale, tagRect.Y + 2 / _zoomScale));
+                }
+            }
 
             dc.Pop(); // pop transform
 
@@ -10804,6 +11038,12 @@ namespace Kerf.UI
                 }
                 else if (e.Key == Key.Escape)
                 {
+                    if (_activeTool == ToolType.Anchor)
+                    {
+                        SetActiveTool(ToolType.Select);
+                        e.Handled = true;
+                        return;
+                    }
                     if (_editingGradientPaint != null)
                     {
                         ClearEditingGradient();
@@ -10885,6 +11125,12 @@ namespace Kerf.UI
                     else if (e.Key == Key.O) { SetActiveTool(ToolType.Ellipse); }
                     else if (e.Key == Key.F) { SetActiveTool(ToolType.Frame); }
                     else if (e.Key == Key.P || e.Key == Key.B) { SetActiveTool(ToolType.Pen); }
+                    else if (e.Key == Key.Y)
+                    {
+                        if (_activeTool == ToolType.Anchor) SetActiveTool(ToolType.Select);
+                        else SetActiveTool(ToolType.Anchor);
+                        e.Handled = true;
+                    }
                     else if (e.Key == Key.X && _isVectorEditing && _editingVectorNode != null && _editingVectorNode.Geometry != null)
                     {
                         if (_selectedNodeIndex >= 0 && _selectedNodeIndex < _editingVectorNode.Geometry.Nodes.Count)
@@ -14043,32 +14289,20 @@ namespace Kerf.UI
         private static bool IsLegacyPresetDemoTrack(AnimTrack track)
         {
             if (track == null || track.Keys == null) return false;
-            // Legacy preset rotation: 0s -> 0, 1s -> 180, 2s -> 360
+            // Legacy preset rotation: any track containing 180° or 360° keyframes from the starter demo
             if (track.Prop == (ushort)PropKey.Rotation)
             {
-                if (track.Keys.Count == 3)
+                if (track.Keys.Any(k => Math.Abs(k.Value - 180.0) < 0.1 || Math.Abs(k.Value - 360.0) < 0.1))
                 {
-                    bool matchTimes = Math.Abs(track.Keys[0].Time - 0.0) < 0.05 &&
-                                      Math.Abs(track.Keys[1].Time - 1.0) < 0.05 &&
-                                      Math.Abs(track.Keys[2].Time - 2.0) < 0.05;
-                    bool matchVals = Math.Abs(track.Keys[0].Value - 0.0) < 0.05 &&
-                                     Math.Abs(track.Keys[1].Value - 180.0) < 0.05 &&
-                                     Math.Abs(track.Keys[2].Value - 360.0) < 0.05;
-                    if (matchTimes && matchVals) return true;
+                    return true;
                 }
             }
-            // Legacy preset opacity: 0s -> 1.0, 1s -> 0.5, 2s -> 1.0
+            // Legacy preset opacity: any track containing 0.5 opacity at 1.0s from the starter demo
             if (track.Prop == (ushort)PropKey.Opacity)
             {
-                if (track.Keys.Count == 3)
+                if (track.Keys.Any(k => Math.Abs(k.Time - 1.0) < 0.1 && Math.Abs(k.Value - 0.5) < 0.05))
                 {
-                    bool matchTimes = Math.Abs(track.Keys[0].Time - 0.0) < 0.05 &&
-                                      Math.Abs(track.Keys[1].Time - 1.0) < 0.05 &&
-                                      Math.Abs(track.Keys[2].Time - 2.0) < 0.05;
-                    bool matchVals = Math.Abs(track.Keys[0].Value - 1.0) < 0.05 &&
-                                     Math.Abs(track.Keys[1].Value - 0.5) < 0.05 &&
-                                     Math.Abs(track.Keys[2].Value - 1.0) < 0.05;
-                    if (matchTimes && matchVals) return true;
+                    return true;
                 }
             }
             return false;
@@ -14321,6 +14555,22 @@ namespace Kerf.UI
                     if (track != null)
                     {
                         track.RemoveKeyframeAt(currentTime, 0.02);
+                        if (layer != null && layer.LockAspectRatio)
+                        {
+                            PropKey pairedProp = PropKey.X;
+                            bool hasPaired = false;
+                            if (property == PropKey.Width) { pairedProp = PropKey.Height; hasPaired = true; }
+                            else if (property == PropKey.Height) { pairedProp = PropKey.Width; hasPaired = true; }
+                            else if (property == PropKey.VisualWidth) { pairedProp = PropKey.VisualHeight; hasPaired = true; }
+                            else if (property == PropKey.VisualHeight) { pairedProp = PropKey.VisualWidth; hasPaired = true; }
+                            else if (property == PropKey.ScaleX) { pairedProp = PropKey.ScaleY; hasPaired = true; }
+                            else if (property == PropKey.ScaleY) { pairedProp = PropKey.ScaleX; hasPaired = true; }
+                            if (hasPaired && clip != null)
+                            {
+                                var pairedTrack = clip.GetTrack(nodeId, (ushort)pairedProp);
+                                if (pairedTrack != null) pairedTrack.RemoveKeyframeAt(currentTime, 0.02);
+                            }
+                        }
                         if (_timelineController != null) _timelineController.Seek(currentTime);
                         RefreshTimelineUI();
                         RefreshPropertyInspector();
@@ -14430,6 +14680,43 @@ namespace Kerf.UI
         }
 
         private void AddKeyframeForProperty(LayerNode layer, PropKey property, double value)
+        {
+            AddKeyframeForPropertyInternal(layer, property, value);
+
+            if (layer != null && layer.LockAspectRatio)
+            {
+                if (property == PropKey.Width)
+                {
+                    AddKeyframeForPropertyInternal(layer, PropKey.Height, layer.Height);
+                }
+                else if (property == PropKey.Height)
+                {
+                    AddKeyframeForPropertyInternal(layer, PropKey.Width, layer.Width);
+                }
+                else if (property == PropKey.VisualWidth)
+                {
+                    double vh = layer.RenderTransform != null && layer.RenderTransform.VisualHeight > 0 ? layer.RenderTransform.VisualHeight : layer.Height;
+                    AddKeyframeForPropertyInternal(layer, PropKey.VisualHeight, vh);
+                }
+                else if (property == PropKey.VisualHeight)
+                {
+                    double vw = layer.RenderTransform != null && layer.RenderTransform.VisualWidth > 0 ? layer.RenderTransform.VisualWidth : layer.Width;
+                    AddKeyframeForPropertyInternal(layer, PropKey.VisualWidth, vw);
+                }
+                else if (property == PropKey.ScaleX)
+                {
+                    double sy = layer.RenderTransform != null ? layer.RenderTransform.ScaleY : 1.0;
+                    AddKeyframeForPropertyInternal(layer, PropKey.ScaleY, sy);
+                }
+                else if (property == PropKey.ScaleY)
+                {
+                    double sx = layer.RenderTransform != null ? layer.RenderTransform.ScaleX : 1.0;
+                    AddKeyframeForPropertyInternal(layer, PropKey.ScaleX, sx);
+                }
+            }
+        }
+
+        private void AddKeyframeForPropertyInternal(LayerNode layer, PropKey property, double value)
         {
             if (_timelineController == null) EnsureTimelineControllerInitialized();
             if (_timelineController == null || layer == null) return;

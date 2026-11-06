@@ -714,8 +714,8 @@ namespace Kerf.Model
 
             double w = Math.Max(1.0, layerWidth);
             double h = Math.Max(1.0, layerHeight);
-            double ox = Math.Max(0.0, Math.Min(1.0, OriginX));
-            double oy = Math.Max(0.0, Math.Min(1.0, OriginY));
+            double ox = (double.IsNaN(OriginX) || double.IsInfinity(OriginX)) ? 0.5 : OriginX;
+            double oy = (double.IsNaN(OriginY) || double.IsInfinity(OriginY)) ? 0.5 : OriginY;
             double pivotX = layerX + ox * w;
             double pivotY = layerY + oy * h;
 
