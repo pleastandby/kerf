@@ -4900,37 +4900,217 @@ namespace Kerf.Tests
 
         private static void TestEasingEngineClosedFormSpringsAndGraphEditor()
         {
-            // 1. Tracer End-to-End Assertion: Bézier overshoot evaluation via Track.Sample
-            var trackBezier = new Track(1, (ushort)PropKey.X);
-            // Anticipation / overshoot curve: y1 = -0.4, y2 = 1.4
-            var kf0 = Keyframe.Cubic(0.0, 100.0, 0.25, -0.4, 0.75, 1.4);
-            var kf1 = Keyframe.Linear(1.0, 200.0);
-            trackBezier.AddKeyframe(kf0);
-            trackBezier.AddKeyframe(kf1);
+            // 1. Root solver precision: Assert |x(s) - u| < 10^-6 across steep tangents and boundary conditions
+            double[][] tangentPairs = new double[][]
+            {
+                new double[] { 0.0, 1.0 },
+                new double[] { 0.99, 0.01 },
+                new double[] { 0.0, 0.0 },
+                new double[] { 1.0, 1.0 },
+                new double[] { 0.1, 0.9 },
+                new double[] { 0.85, 0.15 }
+            };
 
-            // Test anticipation dip: at t = 0.15, value should dip below 100.0
-            double sampleDip = trackBezier.Sample(0.15);
-            Assert(sampleDip < 100.0, string.Format("Bézier anticipation dip: expected < 100.0, got {0:F4}", sampleDip));
+            double[] testProgressValues = new double[] { 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99 };
+            for (int i = 0; i < tangentPairs.Length; i++)
+            {
+                double x1 = tangentPairs[i][0];
+                double x2 = tangentPairs[i][1];
+                for (int j = 0; j < testProgressValues.Length; j++)
+                {
+                    double u = testProgressValues[j];
+                    // Passing y1 = x1, y2 = x2 evaluates x(s), which must match u within root solver tolerance
+                    double evaluatedX = CubicBezierEase.Evaluate(u, x1, x1, x2, x2);
+                    double err = Math.Abs(evaluatedX - u);
+                    Assert(err < 1e-6, string.Format("Root solver precision: at u={0}, tangents ({1}, {2}), err={3:E4} must be < 1e-6", u, x1, x2, err));
+                }
+            }
 
-            // Test overshoot: at t = 0.85, value should overshoot above 200.0
-            double sampleOvershoot = trackBezier.Sample(0.85);
-            Assert(sampleOvershoot > 200.0, string.Format("Bézier overshoot: expected > 200.0, got {0:F4}", sampleOvershoot));
+            // 2. Vertical overshoot verification: Evaluate curve with y1 = 1.5, y2 = 1.2 and assert evaluated y > 1.0;
+            // evaluate curve with y1 = -0.5 and assert y < 0.0 (anticipation dip)
+            double overshotY = CubicBezierEase.Evaluate(0.5, 0.25, 1.5, 0.75, 1.2);
+            Assert(overshotY > 1.0, string.Format("Vertical overshoot: expected y > 1.0, got {0:F4}", overshotY));
 
-            // 2. Tracer End-to-End Assertion: Closed-Form Harmonic Spring via Track.Sample
-            var trackSpring = new Track(2, (ushort)PropKey.Y);
-            // Underdamped / bouncy spring: m=1.0, k=150.0, c=10.0 (zeta ~ 0.41, produces peak overshoot)
-            var kfSpring = Keyframe.Spring(0.0, 50.0, 1.0, 150.0, 10.0, 0.0);
-            var kfEnd = Keyframe.Linear(2.0, 150.0);
-            trackSpring.AddKeyframe(kfSpring);
-            trackSpring.AddKeyframe(kfEnd);
+            double dippedY = CubicBezierEase.Evaluate(0.2, 0.25, -0.5, 0.75, 0.5);
+            Assert(dippedY < 0.0, string.Format("Anticipation dip: expected y < 0.0, got {0:F4}", dippedY));
 
-            // At t = 0.0, displacement is 0 -> value 50.0
-            double springStart = trackSpring.Sample(0.0);
-            Assert(Math.Abs(springStart - 50.0) < 1e-4, string.Format("Spring initial value at t=0: expected 50.0, got {0:F4}", springStart));
+            // Boundary values at endpoints
+            Assert(Math.Abs(CubicBezierEase.Evaluate(0.0, 0.25, 1.5, 0.75, 1.2) - 0.0) < 1e-7, "Bézier u=0 returns 0.0");
+            Assert(Math.Abs(CubicBezierEase.Evaluate(1.0, 0.25, 1.5, 0.75, 1.2) - 1.0) < 1e-7, "Bézier u=1 returns 1.0");
 
-            // At peak overshoot (t ~ 0.25s), value overshoots 150.0
-            double springPeak = trackSpring.Sample(0.25);
-            Assert(springPeak > 150.0, string.Format("Spring overshoot peak at t=0.25: expected > 150.0, got {0:F4}", springPeak));
+            // 3. Analytical closed-form spring solver verification across all 3 regimes
+            // Regime A: Underdamped (zeta < 1.0, e.g. Bouncy m=1.0, k=150.0, c=10.0, zeta ~ 0.408)
+            double pUnder0 = EasingEngine.EvaluateSpring(0.0, 1.0, 150.0, 10.0, 0.0);
+            Assert(Math.Abs(pUnder0 - 0.0) < 1e-6, string.Format("Underdamped spring at t=0: expected 0.0, got {0:F4}", pUnder0));
+
+            // Peak overshoot occurs around t = 0.25s
+            double pUnderPeak = EasingEngine.EvaluateSpring(0.25, 1.0, 150.0, 10.0, 0.0);
+            Assert(pUnderPeak > 1.0, string.Format("Underdamped spring peak overshoot: expected > 1.0, got {0:F4}", pUnderPeak));
+
+            // Asymptotic settlement toward 1.0 at large t
+            double pUnderLate = EasingEngine.EvaluateSpring(4.0, 1.0, 150.0, 10.0, 0.0);
+            Assert(Math.Abs(pUnderLate - 1.0) < 0.005, string.Format("Underdamped spring settlement at t=4s: expected ~1.0, got {0:F4}", pUnderLate));
+
+            // Regime B: Critically damped (zeta = 1.0, m=1.0, k=100.0, c=20.0, c^2 = 4mk = 400)
+            double pCrit0 = EasingEngine.EvaluateSpring(0.0, 1.0, 100.0, 20.0, 0.0);
+            Assert(Math.Abs(pCrit0 - 0.0) < 1e-6, "Critically damped spring at t=0 returns 0.0");
+
+            double pCrit1 = EasingEngine.EvaluateSpring(0.1, 1.0, 100.0, 20.0, 0.0);
+            double pCrit2 = EasingEngine.EvaluateSpring(0.3, 1.0, 100.0, 20.0, 0.0);
+            double pCrit3 = EasingEngine.EvaluateSpring(0.6, 1.0, 100.0, 20.0, 0.0);
+            double pCrit4 = EasingEngine.EvaluateSpring(1.5, 1.0, 100.0, 20.0, 0.0);
+
+            // Monotonic approach without overshoot
+            Assert(pCrit1 < pCrit2 && pCrit2 < pCrit3 && pCrit3 < pCrit4, "Critically damped spring approaches monotonically");
+            Assert(pCrit1 <= 1.0 && pCrit2 <= 1.0 && pCrit3 <= 1.0 && pCrit4 <= 1.0, "Critically damped spring has zero overshoot");
+            Assert(pCrit4 > 0.99, "Critically damped spring reaches target asymptotically");
+
+            // Regime C: Overdamped (zeta > 1.0, m=1.0, k=50.0, c=30.0, c^2 = 900 > 200)
+            double pOver0 = EasingEngine.EvaluateSpring(0.0, 1.0, 50.0, 30.0, 0.0);
+            Assert(Math.Abs(pOver0 - 0.0) < 1e-6, "Overdamped spring at t=0 returns 0.0");
+
+            double pOver1 = EasingEngine.EvaluateSpring(0.2, 1.0, 50.0, 30.0, 0.0);
+            double pOver2 = EasingEngine.EvaluateSpring(0.5, 1.0, 50.0, 30.0, 0.0);
+            double pOver3 = EasingEngine.EvaluateSpring(1.0, 1.0, 50.0, 30.0, 0.0);
+            Assert(pOver1 < pOver2 && pOver2 < pOver3 && pOver3 <= 1.0, "Overdamped spring exhibits smooth monotonic progression without oscillation");
+            // Compare overdamped with critically damped at t = 0.3 to demonstrate slower exponential convergence
+            double pCritAt03 = EasingEngine.EvaluateSpring(0.3, 1.0, 100.0, 20.0, 0.0);
+            double pOverAt03 = EasingEngine.EvaluateSpring(0.3, 1.0, 50.0, 30.0, 0.0);
+            Assert(pOverAt03 < pCritAt03, "Overdamped spring exhibits slower exponential convergence than critically damped");
+
+            // Negative or zero time guards
+            Assert(EasingEngine.EvaluateSpring(-1.0, 1.0, 100.0, 10.0, 0.0) == 0.0, "EvaluateSpring with t < 0 returns 0.0");
+
+            // 4. Spring presets (Gentle, Snappy, Bouncy, Stiff) deterministic random-access evaluation
+            SpringPreset[] presets = new SpringPreset[] { SpringPreset.Gentle, SpringPreset.Snappy, SpringPreset.Bouncy, SpringPreset.Stiff };
+            double[] probeTimes = new double[] { 0.1, 0.5, 2.0, 5.0 };
+
+            for (int i = 0; i < presets.Length; i++)
+            {
+                SpringPreset sp = presets[i];
+                double m, k, c, v0;
+                EasingEngine.GetSpringPreset(sp, out m, out k, out c, out v0);
+                Assert(m > 0 && k > 0 && c > 0, "Spring preset parameters are positive");
+
+                // Evaluate forward
+                double[] forwardVals = new double[probeTimes.Length];
+                for (int tIdx = 0; tIdx < probeTimes.Length; tIdx++)
+                {
+                    forwardVals[tIdx] = EasingEngine.EvaluateSpring(probeTimes[tIdx], m, k, c, v0);
+                }
+
+                // Evaluate reverse (random access)
+                for (int tIdx = probeTimes.Length - 1; tIdx >= 0; tIdx--)
+                {
+                    double revVal = EasingEngine.EvaluateSpring(probeTimes[tIdx], m, k, c, v0);
+                    Assert(Math.Abs(revVal - forwardVals[tIdx]) < 1e-12, "Spring preset random-access evaluation is deterministic with 0 drift");
+                }
+
+                // Test Keyframe application
+                var testKf = new Keyframe();
+                EasingEngine.ApplySpringPreset(testKf, sp);
+                Assert(testKf.Interp == InterpMode.Spring, "ApplySpringPreset sets InterpMode.Spring");
+                Assert(Math.Abs(testKf.Mass - m) < 1e-6 && Math.Abs(testKf.Stiffness - k) < 1e-6 && Math.Abs(testKf.Damping - c) < 1e-6, "ApplySpringPreset populates physical constants");
+            }
+
+            // 5. Full 21 easing presets: loop through all presets and assert boundaries and progress
+            for (int pIdx = 0; pIdx <= (int)EasingPreset.CustomBezier; pIdx++)
+            {
+                EasingPreset ep = (EasingPreset)pIdx;
+                double px1, py1, px2, py2;
+                EasingEngine.GetPresetControlPoints(ep, out px1, out py1, out px2, out py2);
+
+                // Horizontal time bounds must be strictly within [0.0, 1.0]
+                Assert(px1 >= 0.0 && px1 <= 1.0, string.Format("Preset {0} x1 must be within [0, 1]", ep));
+                Assert(px2 >= 0.0 && px2 <= 1.0, string.Format("Preset {0} x2 must be within [0, 1]", ep));
+
+                // Boundary values: u = 0.0 => 0.0, u = 1.0 => 1.0
+                double vZero = EasingEngine.EvaluatePreset(ep, 0.0);
+                double vOne = EasingEngine.EvaluatePreset(ep, 1.0);
+                Assert(Math.Abs(vZero - 0.0) < 1e-6, string.Format("Preset {0} at u=0 must return 0.0, got {1}", ep, vZero));
+                Assert(Math.Abs(vOne - 1.0) < 1e-6, string.Format("Preset {0} at u=1 must return 1.0, got {1}", ep, vOne));
+
+                // Intermediate progress
+                double vMid = EasingEngine.EvaluatePreset(ep, 0.5);
+                Assert(!double.IsNaN(vMid) && !double.IsInfinity(vMid), string.Format("Preset {0} at u=0.5 must be a finite number", ep));
+
+                // ApplyPreset test
+                var kfPreset = new Keyframe(0.0, 0.0, InterpMode.Linear);
+                EasingEngine.ApplyPreset(kfPreset, ep);
+                Assert(kfPreset.Preset == ep, string.Format("ApplyPreset sets Preset metadata for {0}", ep));
+                Assert(Math.Abs(kfPreset.X1 - px1) < 1e-6 && Math.Abs(kfPreset.Y1 - py1) < 1e-6, string.Format("ApplyPreset sets X1, Y1 for {0}", ep));
+                Assert(Math.Abs(kfPreset.X2 - px2) < 1e-6 && Math.Abs(kfPreset.Y2 - py2) < 1e-6, string.Format("ApplyPreset sets X2, Y2 for {0}", ep));
+                if (ep == EasingPreset.Linear)
+                {
+                    Assert(kfPreset.Interp == InterpMode.Linear, "Linear preset sets InterpMode.Linear");
+                }
+                else
+                {
+                    Assert(kfPreset.Interp == InterpMode.Cubic, "Non-linear preset sets InterpMode.Cubic");
+                }
+            }
+
+            // Polynomial and special preset verification
+            Assert(Math.Abs(EasingEngine.EvaluatePreset(EasingPreset.QuadIn, 0.5) - 0.25) < 1e-6, "QuadIn at 0.5 is 0.25");
+            Assert(Math.Abs(EasingEngine.EvaluatePreset(EasingPreset.QuadOut, 0.5) - 0.75) < 1e-6, "QuadOut at 0.5 is 0.75");
+            Assert(Math.Abs(EasingEngine.EvaluatePreset(EasingPreset.CubicIn, 0.5) - 0.125) < 1e-6, "CubicIn at 0.5 is 0.125");
+            Assert(Math.Abs(EasingEngine.EvaluatePreset(EasingPreset.CubicOut, 0.5) - 0.875) < 1e-6, "CubicOut at 0.5 is 0.875");
+            Assert(Math.Abs(EasingEngine.EvaluatePreset(EasingPreset.Smooth, 0.5) - 0.5) < 1e-6, "Smooth step at 0.5 is 0.5");
+            Assert(EasingEngine.EvaluatePreset(EasingPreset.Back, 0.8) > 1.0, "Back preset overshoots 1.0");
+
+            // 6. Track.Sample integration: Multi-segment track containing Hold, Linear, Cubic, and Spring keyframes
+            var multiTrack = new Track(10, (ushort)PropKey.X);
+            var k0 = Keyframe.Hold(0.0, 10.0);
+            var k1 = Keyframe.Linear(1.0, 20.0);
+            var k2 = Keyframe.Cubic(2.0, 50.0, 0.25, -0.5, 0.75, 1.5);
+            var k3 = Keyframe.Spring(3.0, 100.0, 1.0, 150.0, 10.0, 0.0);
+            var k4 = Keyframe.Linear(5.0, 200.0);
+
+            multiTrack.AddKeyframe(k0);
+            multiTrack.AddKeyframe(k1);
+            multiTrack.AddKeyframe(k2);
+            multiTrack.AddKeyframe(k3);
+            multiTrack.AddKeyframe(k4);
+
+            // Clamp before start / after end
+            Assert(multiTrack.Sample(-1.0) == 10.0, "Sample before start clamps to first key value");
+            Assert(multiTrack.Sample(6.0) == 200.0, "Sample after end clamps to last key value");
+
+            // Hold segment: t in [0.0, 1.0) returns 10.0
+            Assert(multiTrack.Sample(0.0) == 10.0, "Sample at t=0 returns 10.0");
+            Assert(multiTrack.Sample(0.5) == 10.0, "Sample during Hold segment returns 10.0");
+
+            // Linear segment: t in [1.0, 2.0] interpolates linearly from 20.0 to 50.0
+            Assert(Math.Abs(multiTrack.Sample(1.0) - 20.0) < 1e-4, "Sample at t=1.0 returns 20.0");
+            Assert(Math.Abs(multiTrack.Sample(1.5) - 35.0) < 1e-4, "Sample at t=1.5 returns linear midpoint 35.0");
+            Assert(Math.Abs(multiTrack.Sample(2.0) - 50.0) < 1e-4, "Sample at t=2.0 returns 50.0");
+
+            // Cubic segment with overshoot: t in [2.0, 3.0] from 50.0 to 100.0
+            double cubicDipVal = multiTrack.Sample(2.15);
+            Assert(cubicDipVal < 50.0, string.Format("Cubic segment anticipation dip: expected < 50.0, got {0:F4}", cubicDipVal));
+            double cubicOvershootVal = multiTrack.Sample(2.85);
+            Assert(cubicOvershootVal > 100.0, string.Format("Cubic segment overshoot: expected > 100.0, got {0:F4}", cubicOvershootVal));
+
+            // Spring segment: t in [3.0, 5.0] from 100.0 to 200.0
+            Assert(Math.Abs(multiTrack.Sample(3.0) - 100.0) < 1e-4, "Sample at spring start t=3.0 returns 100.0");
+            double springPeakVal = multiTrack.Sample(3.25);
+            Assert(springPeakVal > 200.0, string.Format("Spring segment peak overshoot: expected > 200.0, got {0:F4}", springPeakVal));
+
+            // End keyframe
+            Assert(Math.Abs(multiTrack.Sample(5.0) - 200.0) < 1e-4, "Sample at t=5.0 returns 200.0");
+
+            // Duplicate timestamp resolution
+            var dupKey = Keyframe.Linear(1.0, 25.0);
+            multiTrack.AddKeyframe(dupKey);
+            Assert(multiTrack.Keys.Count == 5, "Duplicate timestamp does not add extra keyframe");
+            Assert(Math.Abs(multiTrack.Sample(1.0) - 25.0) < 1e-4, "Duplicate timestamp updates existing keyframe value to 25.0");
+
+            // Zero-length segment handling
+            var zeroTrack = new Track(20, (ushort)PropKey.ScaleX);
+            zeroTrack.AddKeyframe(Keyframe.Linear(1.0, 1.0));
+            zeroTrack.AddKeyframe(new Keyframe(1.0 + 1e-7, 2.0, InterpMode.Linear));
+            double zeroSample = zeroTrack.Sample(1.0);
+            Assert(!double.IsNaN(zeroSample) && !double.IsInfinity(zeroSample), "Zero-length segment handled safely without division by zero");
         }
     }
 }
