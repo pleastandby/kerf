@@ -87,8 +87,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: Implement enhanced `BezierCurve` evaluation with custom tangents, overshoot clamping, and preset profiles.
-- [ ] 04-02: Build the interactive Direct2D Graph Editor canvas widget with selectable keyframe nodes and draggable tangent handles.
+- [ ] 04-01-PLAN.md — Mathematical easing engine, closed-form analytical springs, 21 presets, and Track.Sample dispatch
+- [ ] 04-02-PLAN.md — Interactive Graph Editor split panel, Value Graph framing, tangent handle dragging, and preset grid popover
 
 ---
 

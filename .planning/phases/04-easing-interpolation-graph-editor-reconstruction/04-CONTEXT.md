@@ -129,3 +129,4 @@ Build a mathematically correct easing, interpolation, and interactive Graph Edit
 
 *Phase: 04-Easing, Interpolation and Graph Editor Reconstruction*
 *Context gathered: 2026-11-06*
+

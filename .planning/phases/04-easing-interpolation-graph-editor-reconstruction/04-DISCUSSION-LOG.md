@@ -83,3 +83,4 @@
 - State machine transition blend curves (Phase 6).
 - Velocity / speed curve editing mode (Phase 6/7).
 - Undo/redo integration into CommandHistory (Phase 5).
+
