@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using Kerf.Engine;
 using Kerf.Engine.Animation;
 using AnimTrack = Kerf.Engine.Animation.Track;
 
@@ -191,10 +192,30 @@ namespace Kerf.UI
         private HandleHitInfo _activeDragHandle = null;
         private Point _dragStartMouse;
         private double _origX1, _origY1, _origX2, _origY2;
+        private KeyframeBezierSnapshot _handleDragStartSnapshot;
+        private List<KeyframeBezierSnapshot> _dragStartSnapshots;
 
         public event Action<Keyframe, AnimTrack> KeyframeModified;
         public event Action<AnimTrack> TrackModified;
         public event Action<Keyframe> KeyframeSelectionChanged;
+        public event Action<KeyframeBezierSnapshot, KeyframeBezierSnapshot> TangentHandleDragCommitted;
+        public event Action<List<KeyframeBezierSnapshot>, List<KeyframeBezierSnapshot>> TangentHandlesDragCommitted;
+
+        public KeyframeBezierSnapshot HandleDragStartSnapshot { get { return _handleDragStartSnapshot; } }
+        public List<KeyframeBezierSnapshot> DragStartSnapshots { get { return _dragStartSnapshots; } }
+
+        private List<KeyframeBezierSnapshot> CaptureTrackBezierSnapshots(AnimTrack track)
+        {
+            var list = new List<KeyframeBezierSnapshot>();
+            if (track != null && track.Keys != null)
+            {
+                for (int i = 0; i < track.Keys.Count; i++)
+                {
+                    list.Add(new KeyframeBezierSnapshot(track.Keys[i]));
+                }
+            }
+            return list;
+        }
 
         public GraphViewport Viewport
         {
@@ -763,16 +784,7 @@ namespace Kerf.UI
             HandleHitInfo hitHandle = FindHandleNearPoint(pt, 12.0);
             if (hitHandle != null)
             {
-                _activeDragHandle = hitHandle;
-                _dragStartMouse = pt;
-                _origX1 = hitHandle.OwnerKeyframe.X1;
-                _origY1 = hitHandle.OwnerKeyframe.Y1;
-                _origX2 = hitHandle.OwnerKeyframe.X2;
-                _origY2 = hitHandle.OwnerKeyframe.Y2;
-
-                _selectedKeyframe = hitHandle.AttachedKeyframe;
-                if (KeyframeSelectionChanged != null) KeyframeSelectionChanged(_selectedKeyframe);
-
+                StartHandleDragInternal(hitHandle, pt);
                 CaptureMouse();
                 e.Handled = true;
                 return;
@@ -785,6 +797,101 @@ namespace Kerf.UI
             _panStartVMax = _viewport.VMax;
             CaptureMouse();
             e.Handled = true;
+        }
+
+        public void StartHandleDrag(Keyframe ownerKf, HandleKind kind, Point? startMouse = null)
+        {
+            if (ownerKf == null || _activeTrack == null || _activeTrack.Keys == null) return;
+            int segIdx = _activeTrack.Keys.IndexOf(ownerKf);
+            if (segIdx < 0) return;
+            Point mousePt = startMouse.HasValue ? startMouse.Value : new Point(0, 0);
+            var hit = new HandleHitInfo
+            {
+                Kind = kind,
+                OwnerKeyframe = ownerKf,
+                AttachedKeyframe = (kind == HandleKind.Incoming && segIdx + 1 < _activeTrack.Keys.Count) ? _activeTrack.Keys[segIdx + 1] : ownerKf,
+                SegmentIndex = segIdx,
+                KnobPoint = mousePt
+            };
+            StartHandleDragInternal(hit, mousePt);
+        }
+
+        private void StartHandleDragInternal(HandleHitInfo hitHandle, Point mousePt)
+        {
+            _activeDragHandle = hitHandle;
+            _dragStartMouse = mousePt;
+            _origX1 = hitHandle.OwnerKeyframe.X1;
+            _origY1 = hitHandle.OwnerKeyframe.Y1;
+            _origX2 = hitHandle.OwnerKeyframe.X2;
+            _origY2 = hitHandle.OwnerKeyframe.Y2;
+
+            _selectedKeyframe = hitHandle.AttachedKeyframe;
+            if (KeyframeSelectionChanged != null) KeyframeSelectionChanged(_selectedKeyframe);
+
+            _handleDragStartSnapshot = new KeyframeBezierSnapshot(hitHandle.OwnerKeyframe);
+            _dragStartSnapshots = CaptureTrackBezierSnapshots(_activeTrack);
+        }
+
+        public void MoveHandleDrag(Point currentMouse)
+        {
+            if (_activeDragHandle != null)
+            {
+                ProcessHandleDrag(currentMouse);
+            }
+        }
+
+        public void CompleteHandleDrag()
+        {
+            if (_activeDragHandle != null)
+            {
+                var beforeSingle = _handleDragStartSnapshot;
+                var afterSingle = (_activeDragHandle.OwnerKeyframe != null) ? new KeyframeBezierSnapshot(_activeDragHandle.OwnerKeyframe) : null;
+                var beforeList = _dragStartSnapshots;
+                var afterList = CaptureTrackBezierSnapshots(_activeTrack);
+
+                _activeDragHandle = null;
+                try { ReleaseMouseCapture(); } catch { }
+
+                bool changed = false;
+                if (beforeSingle != null && afterSingle != null)
+                {
+                    if (Math.Abs(beforeSingle.X1 - afterSingle.X1) > 1e-6 || Math.Abs(beforeSingle.Y1 - afterSingle.Y1) > 1e-6 ||
+                        Math.Abs(beforeSingle.X2 - afterSingle.X2) > 1e-6 || Math.Abs(beforeSingle.Y2 - afterSingle.Y2) > 1e-6 ||
+                        beforeSingle.Preset != afterSingle.Preset || beforeSingle.IsTangentBroken != afterSingle.IsTangentBroken)
+                    {
+                        changed = true;
+                    }
+                }
+                if (!changed && beforeList != null && afterList != null && beforeList.Count == afterList.Count)
+                {
+                    for (int i = 0; i < beforeList.Count; i++)
+                    {
+                        var b = beforeList[i];
+                        var a = afterList[i];
+                        if (Math.Abs(b.X1 - a.X1) > 1e-6 || Math.Abs(b.Y1 - a.Y1) > 1e-6 ||
+                            Math.Abs(b.X2 - a.X2) > 1e-6 || Math.Abs(b.Y2 - a.Y2) > 1e-6 ||
+                            b.Preset != a.Preset || b.IsTangentBroken != a.IsTangentBroken)
+                        {
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    if (TangentHandleDragCommitted != null)
+                    {
+                        TangentHandleDragCommitted(beforeSingle, afterSingle);
+                    }
+                    if (TangentHandlesDragCommitted != null)
+                    {
+                        TangentHandlesDragCommitted(beforeList, afterList);
+                    }
+                }
+
+                if (TrackModified != null) TrackModified(_activeTrack);
+            }
         }
 
         private void OnMouseMove(object sender, MouseEventArgs e)
@@ -816,9 +923,7 @@ namespace Kerf.UI
         {
             if (_activeDragHandle != null)
             {
-                _activeDragHandle = null;
-                ReleaseMouseCapture();
-                if (TrackModified != null) TrackModified(_activeTrack);
+                CompleteHandleDrag();
                 e.Handled = true;
                 return;
             }

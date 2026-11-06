@@ -5727,6 +5727,111 @@ namespace Kerf.Tests
             Assert(aspectLayer.Width == 200.0 && aspectLayer.Height == 100.0, "Aspect ratio batch applied new dimensions");
             scrubHistory.Undo();
             Assert(aspectLayer.Width == 100.0 && aspectLayer.Height == 50.0, "Single Ctrl+Z reversed both Width and Height in one step");
+
+            // 5. Task 2 (05-02): Graph Editor Tangent Handle Drag Commit & Multi-Keyframe Pointer Release (D-03, D-04, HIST-02)
+            // (A) Tangent handle drag start, 20 move events, and release: verify 0 commands on move, exactly 1 ModifyBezierHandlesCommand on release, single Undo() restores original handles
+            var graphCanvas = new GraphEditorCanvas();
+            var graphTrack = new Track(60, (ushort)PropKey.X);
+            var gKf1 = Keyframe.Cubic(0.0, 10.0, 0.25, 0.1, 0.25, 1.0);
+            var gKf2 = Keyframe.Cubic(1.0, 50.0, 0.25, 0.1, 0.25, 1.0);
+            graphTrack.AddKeyframe(gKf1);
+            graphTrack.AddKeyframe(gKf2);
+            graphCanvas.ActiveTrack = graphTrack;
+
+            var graphHistory = new CommandHistory();
+            graphCanvas.TangentHandleDragCommitted += (bSnap, aSnap) =>
+            {
+                graphHistory.Execute(new ModifyBezierHandlesCommand(bSnap, aSnap, () => graphCanvas.Redraw()));
+            };
+
+            // Capture initial handle values
+            double origX1 = gKf1.X1; // 0.25
+            double origY1 = gKf1.Y1; // 0.1
+
+            // Start handle drag
+            graphCanvas.StartHandleDrag(gKf1, HandleKind.Outgoing, new Point(0, 0));
+            Assert(graphHistory.CanUndo == false, "CanUndo is false at start of handle drag");
+
+            // 20 move events
+            for (int m = 1; m <= 20; m++)
+            {
+                double simTime = 0.0 + m * 0.02;
+                double simVal = 10.0 + m * 1.5;
+                Point mousePt = new Point(graphCanvas.Viewport.TimeToX(simTime), graphCanvas.Viewport.ValueToY(simVal));
+                graphCanvas.MoveHandleDrag(mousePt);
+                Assert(graphHistory.CanUndo == false, "0 commands pushed to history during continuous handle drag");
+            }
+
+            Assert(graphHistory.CanUndo == false, "After 20 move events, CanUndo is still false");
+            Assert(gKf1.X1 != origX1, "gKf1.X1 modified in real-time during live drag");
+
+            // Release pointer / complete handle drag
+            graphCanvas.CompleteHandleDrag();
+            Assert(graphHistory.CanUndo == true, "Exactly 1 ModifyBezierHandlesCommand committed on pointer release");
+
+            double draggedX1 = gKf1.X1;
+            double draggedY1 = gKf1.Y1;
+
+            // Undo() restores original handles in 1 step
+            graphHistory.Undo();
+            Assert(Math.Abs(gKf1.X1 - origX1) < 1e-4 && Math.Abs(gKf1.Y1 - origY1) < 1e-4, "Undo() restored initial handle coordinates in a single step");
+            Assert(graphHistory.CanUndo == false, "CanUndo is false after single Undo()");
+
+            // Redo() re-applies dragged coordinates
+            graphHistory.Redo();
+            Assert(Math.Abs(gKf1.X1 - draggedX1) < 1e-4 && Math.Abs(gKf1.Y1 - draggedY1) < 1e-4, "Redo() re-applied dragged handle coordinates");
+
+            // (B) Applying preset via ChangeKeyframeEasingCommand restores prior preset and control points
+            var presetKey = Keyframe.Cubic(0.0, 0.0, 0.25, 0.1, 0.25, 1.0);
+            presetKey.Preset = EasingPreset.Ease;
+            var presetHistory = new CommandHistory();
+
+            var prevPreset = presetKey.Preset;
+            var prevInterp = presetKey.Interp;
+            var newPreset = EasingPreset.BackOut;
+
+            presetHistory.Execute(new ChangeKeyframeEasingCommand(presetKey, prevInterp, InterpMode.Cubic, prevPreset, newPreset, null));
+            Assert(presetKey.Preset == EasingPreset.BackOut, "Preset changed to BackOut");
+            Assert(presetKey.Interp == InterpMode.Cubic, "Interp is Cubic");
+
+            presetHistory.Undo();
+            Assert(presetKey.Preset == EasingPreset.Ease, "Undo() restored prior preset Ease");
+            Assert(Math.Abs(presetKey.X1 - 0.25) < 1e-4 && Math.Abs(presetKey.Y1 - 0.1) < 1e-4, "Undo() restored prior control points");
+
+            presetHistory.Redo();
+            Assert(presetKey.Preset == EasingPreset.BackOut, "Redo() re-applied BackOut preset");
+
+            // (C) Multi-keyframe delete across 2 tracks with 4 keyframes: single Undo() restores all 4 keyframes
+            var multiTrack1 = new Track(70, (ushort)PropKey.X);
+            var multiTrack2 = new Track(70, (ushort)PropKey.Y);
+            var mk1 = Keyframe.Linear(0.0, 10.0);
+            var mk2 = Keyframe.Linear(1.0, 20.0);
+            var mk3 = Keyframe.Linear(0.0, 30.0);
+            var mk4 = Keyframe.Linear(1.0, 40.0);
+            multiTrack1.AddKeyframe(mk1);
+            multiTrack1.AddKeyframe(mk2);
+            multiTrack2.AddKeyframe(mk3);
+            multiTrack2.AddKeyframe(mk4);
+
+            var multiHistory = new CommandHistory();
+            var deleteKeysDict = new Dictionary<Keyframe, Track>();
+            deleteKeysDict[mk1] = multiTrack1;
+            deleteKeysDict[mk2] = multiTrack1;
+            deleteKeysDict[mk3] = multiTrack2;
+            deleteKeysDict[mk4] = multiTrack2;
+
+            multiHistory.Execute(new DeleteKeyframesCommand(deleteKeysDict, null));
+            Assert(multiTrack1.Keys.Count == 0, "multiTrack1 has 0 keyframes after DeleteKeyframesCommand");
+            Assert(multiTrack2.Keys.Count == 0, "multiTrack2 has 0 keyframes after DeleteKeyframesCommand");
+
+            multiHistory.Undo();
+            Assert(multiTrack1.Keys.Count == 2, "multiTrack1 has 2 keyframes restored after single Undo()");
+            Assert(multiTrack2.Keys.Count == 2, "multiTrack2 has 2 keyframes restored after single Undo()");
+            Assert(multiTrack1.Keys.Contains(mk1) && multiTrack1.Keys.Contains(mk2), "multiTrack1 contains original keys mk1, mk2");
+            Assert(multiTrack2.Keys.Contains(mk3) && multiTrack2.Keys.Contains(mk4), "multiTrack2 contains original keys mk3, mk4");
+
+            multiHistory.Redo();
+            Assert(multiTrack1.Keys.Count == 0 && multiTrack2.Keys.Count == 0, "Redo() re-deleted all 4 keyframes");
         }
     }
 }

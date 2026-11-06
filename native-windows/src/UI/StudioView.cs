@@ -159,11 +159,36 @@ namespace Kerf.UI
         private AnimTrack _editingInterpolationTrack;
         private int _interpolationControlHandle = -1;
         private bool _isRefreshingInterpolationPanels;
+        private KeyframeBezierSnapshot _interpolationGraphStartSnapshot;
         private Border _canvasInteractBtn;
         private TextBlock _canvasInteractText;
 
         // Graph Editor Components
         private Popup _presetPickerPopup;
+        private GraphEditorCanvas _graphEditorCanvas;
+        public GraphEditorCanvas GraphEditor
+        {
+            get
+            {
+                if (_graphEditorCanvas == null)
+                {
+                    _graphEditorCanvas = new GraphEditorCanvas();
+                    _graphEditorCanvas.TangentHandleDragCommitted += (beforeSnap, afterSnap) =>
+                    {
+                        if (History != null)
+                        {
+                            History.Execute(new ModifyBezierHandlesCommand(beforeSnap, afterSnap, () =>
+                            {
+                                _graphEditorCanvas.Redraw();
+                                SyncRealtimeEvaluator();
+                                RefreshPropertyInspector();
+                            }));
+                        }
+                    };
+                }
+                return _graphEditorCanvas;
+            }
+        }
 
         // Document & Engine
         public KerfDocument Document { get; private set; }
@@ -12780,6 +12805,19 @@ namespace Kerf.UI
         {
             if (_editingInterpolationKeyframe != null)
             {
+                var beforeSnapshots = new List<KeyframeBezierSnapshot>();
+                beforeSnapshots.Add(new KeyframeBezierSnapshot(_editingInterpolationKeyframe));
+                Keyframe prevKf = null;
+                if (smooth && _editingInterpolationTrack != null && _editingInterpolationTrack.Keys != null)
+                {
+                    int idx = _editingInterpolationTrack.Keys.IndexOf(_editingInterpolationKeyframe);
+                    if (idx > 0 && idx < _editingInterpolationTrack.Keys.Count - 1)
+                    {
+                        prevKf = _editingInterpolationTrack.Keys[idx - 1];
+                        beforeSnapshots.Add(new KeyframeBezierSnapshot(prevKf));
+                    }
+                }
+
                 _editingInterpolationKeyframe.IsTangentBroken = !smooth;
                 if (smooth && _editingInterpolationTrack != null && _editingInterpolationTrack.Keys != null)
                 {
@@ -12793,9 +12831,30 @@ namespace Kerf.UI
                         GraphEditorCanvas.AlignIncomingHandleCollinear(_editingInterpolationKeyframe, prev, _editingInterpolationKeyframe.X1, _editingInterpolationKeyframe.Y1, dtOut, dvOut);
                     }
                 }
-                UpdateTangentButtonsState();
-                RefreshGraphEditor();
-                RefreshPropertyInspector();
+
+                var afterSnapshots = new List<KeyframeBezierSnapshot>();
+                afterSnapshots.Add(new KeyframeBezierSnapshot(_editingInterpolationKeyframe));
+                if (prevKf != null)
+                {
+                    afterSnapshots.Add(new KeyframeBezierSnapshot(prevKf));
+                }
+
+                Action renderCallback = () =>
+                {
+                    UpdateTangentButtonsState();
+                    RefreshGraphEditor();
+                    RefreshPropertyInspector();
+                    SyncRealtimeEvaluator();
+                };
+
+                if (History != null)
+                {
+                    History.Execute(new ModifyBezierHandlesCommand(beforeSnapshots, afterSnapshots, renderCallback));
+                }
+                else
+                {
+                    renderCallback();
+                }
             }
         }
 
@@ -12974,10 +13033,24 @@ namespace Kerf.UI
                 {
                     if (_editingInterpolationKeyframe != null)
                     {
-                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, p);
-                        SyncRealtimeEvaluator();
-                        RefreshGraphEditor();
-                        RefreshPropertyInspector();
+                        var kf = _editingInterpolationKeyframe;
+                        var prevInterp = kf.Interp;
+                        var prevPreset = kf.Preset;
+                        Action renderCallback = () =>
+                        {
+                            SyncRealtimeEvaluator();
+                            RefreshGraphEditor();
+                            RefreshPropertyInspector();
+                        };
+                        if (History != null)
+                        {
+                            History.Execute(new ChangeKeyframeEasingCommand(kf, prevInterp, InterpMode.Cubic, prevPreset, p, renderCallback));
+                        }
+                        else
+                        {
+                            EasingEngine.ApplyPreset(kf, p);
+                            renderCallback();
+                        }
                     }
                     _presetPickerPopup.IsOpen = false;
                 });
@@ -13665,6 +13738,10 @@ namespace Kerf.UI
             Point p1 = new Point(left + x1 * (right - left), bottom - y1 * (bottom - top));
             Point p2 = new Point(left + x2 * (right - left), bottom - y2 * (bottom - top));
             _interpolationControlHandle = (point - p1).Length < (point - p2).Length ? 1 : 2;
+            if (!stateMachine && _editingInterpolationKeyframe != null)
+            {
+                _interpolationGraphStartSnapshot = new KeyframeBezierSnapshot(_editingInterpolationKeyframe);
+            }
             canvas.CaptureMouse();
             e.Handled = true;
         }
@@ -13709,7 +13786,7 @@ namespace Kerf.UI
             GetInterpolationControlPoints(stateMachine, out x1, out y1, out x2, out y2);
             InterpMode mode = stateMachine && _selectedGraphTransition != null ? _selectedGraphTransition.Interpolation : (_editingInterpolationKeyframe != null ? _editingInterpolationKeyframe.Interp : InterpMode.Cubic);
             DrawInterpolationCurve(canvas, true, mode, x1, y1, x2, y2);
-            if (History != null) History.MarkDirty();
+            if (stateMachine && History != null) History.MarkDirty();
             e.Handled = true;
         }
 
@@ -13721,6 +13798,33 @@ namespace Kerf.UI
             if (canvas != null)
             {
                 bool stateMachine = canvas.Tag is bool && (bool)canvas.Tag;
+                if (!stateMachine && _interpolationGraphStartSnapshot != null && _editingInterpolationKeyframe != null)
+                {
+                    var beforeSnap = _interpolationGraphStartSnapshot;
+                    _interpolationGraphStartSnapshot = null;
+                    if (Math.Abs(beforeSnap.X1 - _editingInterpolationKeyframe.X1) > 1e-6 ||
+                        Math.Abs(beforeSnap.Y1 - _editingInterpolationKeyframe.Y1) > 1e-6 ||
+                        Math.Abs(beforeSnap.X2 - _editingInterpolationKeyframe.X2) > 1e-6 ||
+                        Math.Abs(beforeSnap.Y2 - _editingInterpolationKeyframe.Y2) > 1e-6 ||
+                        beforeSnap.Preset != _editingInterpolationKeyframe.Preset)
+                    {
+                        var afterSnap = new KeyframeBezierSnapshot(_editingInterpolationKeyframe);
+                        if (History != null)
+                        {
+                            History.Execute(new ModifyBezierHandlesCommand(beforeSnap, afterSnap, () =>
+                            {
+                                SyncRealtimeEvaluator();
+                                RefreshInterpolationGraphPanels();
+                                RefreshTimelineCanvas();
+                            }));
+                        }
+                    }
+                }
+                else
+                {
+                    _interpolationGraphStartSnapshot = null;
+                }
+
                 RefreshInterpolationGraphPanel(stateMachine);
                 if (stateMachine) TriggerStateMachineStep();
             }
@@ -17569,21 +17673,38 @@ namespace Kerf.UI
         private void DuplicateSelectedTimelineKeyframes()
         {
             if (_timelineController == null || _timelineController.ActiveClip == null || _selectedTimelineKeyframes.Count == 0) return;
-            var pairs = new List<Tuple<AnimTrack, Keyframe>>();
-            foreach (var kf in _selectedTimelineKeyframes)
+            var owners = new Dictionary<Keyframe, AnimTrack>();
+            var sourceKeys = new List<Keyframe>(_selectedTimelineKeyframes);
+            foreach (var kf in sourceKeys)
             {
                 AnimTrack track;
-                if (_timelineKeyframeOwners.TryGetValue(kf, out track))
+                if (_timelineKeyframeOwners.TryGetValue(kf, out track) && track != null)
                 {
-                    pairs.Add(Tuple.Create(track, kf));
+                    owners[kf] = track;
                 }
             }
+            if (owners.Count == 0) return;
             double offset = 1.0 / Math.Max(1.0, _timelineController.Fps);
-            var duplicated = KeyframeClipboard.Duplicate(_timelineController.ActiveClip, pairs, offset);
-            if (duplicated.Count > 0)
+            Action renderCallback = () =>
+            {
+                if (_timelineController != null) _timelineController.Seek(_timelineController.CurrentTime);
+                RefreshTimelineUI();
+            };
+
+            var cmd = new DuplicateKeyframesCommand(sourceKeys, owners, offset, renderCallback);
+            if (History != null)
+            {
+                History.Execute(cmd);
+            }
+            else
+            {
+                cmd.Execute();
+            }
+
+            if (cmd.DuplicatedKeys.Count > 0)
             {
                 _selectedTimelineKeyframes.Clear();
-                foreach (var kf in duplicated)
+                foreach (var kf in cmd.DuplicatedKeys)
                 {
                     _selectedTimelineKeyframes.Add(kf);
                 }
