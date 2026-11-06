@@ -175,6 +175,7 @@ namespace Kerf.UI
         private bool _isGraphEditorOpen = true;
         private GridLength _lastGraphRowHeight = new GridLength(180);
         private bool _isSyncingHorizontalScroll = false;
+        private Popup _presetPickerPopup;
 
         // Document & Engine
         public KerfDocument Document { get; private set; }
@@ -2945,6 +2946,10 @@ namespace Kerf.UI
 
             if (_selectedLayers.Count == 0)
             {
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    _propertyInspectorStack.Children.Add(BuildKeyframeMotionInspectorSection());
+                }
                 // Page settings
                 _propertyInspectorStack.Children.Add(CreateInspectorSection("Page Settings"));
                 _propertyInspectorStack.Children.Add(CreateColorRow("Canvas BG", page.BackgroundColor, hex =>
@@ -3541,6 +3546,11 @@ namespace Kerf.UI
             // Keep selection-level styles at the end of the inspector, after object properties.
             if (_selectedLayers.Count > 1 || primary.Type == ElementType.Frame || primary.Type == ElementType.Group)
                 BuildSelectionColorsSection(_selectedLayers);
+
+            if (_currentStudioMode == StudioMode.Animate)
+            {
+                _propertyInspectorStack.Children.Add(BuildKeyframeMotionInspectorSection());
+            }
         }
 
         private void BuildVectorNodeInspector()
@@ -11744,10 +11754,7 @@ namespace Kerf.UI
             _graphEditorCanvas = new GraphEditorCanvas();
             _graphEditorCanvas.KeyframeModified += (kf, trk) =>
             {
-                if (_timelineController != null)
-                {
-                    _timelineController.Seek(_timelineController.CurrentTime);
-                }
+                SyncRealtimeEvaluator();
                 RefreshPropertyInspector();
             };
             _graphEditorCanvas.KeyframeSelectionChanged += (kf) =>
@@ -12193,6 +12200,30 @@ namespace Kerf.UI
             };
             stack.Children.Add(_graphAutoFitBtn);
 
+            // Presets Popover Button
+            var presetsBtn = new Border
+            {
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 4, 6, 4),
+                Margin = new Thickness(0, 0, 0, 8),
+                Cursor = Cursors.Hand
+            };
+            var presetsBtnText = new TextBlock
+            {
+                Text = "∿ Easing Presets [21]",
+                FontSize = 10,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            presetsBtn.Child = presetsBtnText;
+            presetsBtn.MouseEnter += (s, e) => presetsBtn.Background = KerfBrand.FigmaBorderBrush;
+            presetsBtn.MouseLeave += (s, e) => presetsBtn.Background = KerfBrand.FigmaPanelBrush;
+            presetsBtn.MouseLeftButtonUp += (s, e) => ShowPresetPickerPopover(presetsBtn);
+            stack.Children.Add(presetsBtn);
+
             // Tangent Continuity Row: [ Smooth ] vs [ Broken ] per D-06
             var tangentLabel = new TextBlock
             {
@@ -12273,6 +12304,592 @@ namespace Kerf.UI
             _graphBrokenBtn.Background = isBroken ? KerfBrand.AmberBrush : KerfBrand.FigmaPanelBrush;
             var bt = _graphBrokenBtn.Child as TextBlock;
             if (bt != null) bt.Foreground = isBroken ? KerfBrand.TextBlackBrush : Brushes.White;
+        }
+
+        public void SyncRealtimeEvaluator()
+        {
+            if (_timelineController != null && _timelineController.ActiveClip != null)
+            {
+                _timelineController.Seek(_timelineController.CurrentTime);
+            }
+            else if (_editingInterpolationTrack != null && _selectedLayers.Count > 0)
+            {
+                double t = (_timelineController != null) ? _timelineController.CurrentTime : 0.0;
+                uint numId = PropertyBinder.GetNumericNodeId(_selectedLayers[0].Id);
+                var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+                var propDict = new Dictionary<ushort, double>();
+                propDict[(ushort)_editingInterpolationTrack.Prop] = _editingInterpolationTrack.Sample(t);
+                pose[numId] = propDict;
+                var page = Document != null ? Document.GetActivePage() : null;
+                if (page != null)
+                {
+                    ApplyAnimationPose(page, pose);
+                }
+            }
+
+            if (_sceneGraph != null)
+            {
+                _sceneGraph.InvalidateAll();
+            }
+            RefreshCanvas();
+            if (_graphEditorCanvas != null)
+            {
+                _graphEditorCanvas.Redraw();
+            }
+        }
+
+        private static readonly EasingPreset[] All21EasingPresets = new EasingPreset[]
+        {
+            EasingPreset.Linear, EasingPreset.Ease, EasingPreset.EaseIn,
+            EasingPreset.EaseOut, EasingPreset.EaseInOut, EasingPreset.QuadIn,
+            EasingPreset.QuadOut, EasingPreset.QuadInOut, EasingPreset.CubicIn,
+            EasingPreset.CubicOut, EasingPreset.CubicInOut, EasingPreset.QuartIn,
+            EasingPreset.QuartOut, EasingPreset.QuartInOut, EasingPreset.QuintIn,
+            EasingPreset.QuintOut, EasingPreset.QuintInOut, EasingPreset.Back,
+            EasingPreset.Elastic, EasingPreset.Bounce, EasingPreset.Smooth
+        };
+
+        private static string GetPresetDisplayName(EasingPreset preset)
+        {
+            switch (preset)
+            {
+                case EasingPreset.Linear: return "Linear";
+                case EasingPreset.Ease: return "Ease";
+                case EasingPreset.EaseIn: return "Ease In";
+                case EasingPreset.EaseOut: return "Ease Out";
+                case EasingPreset.EaseInOut: return "Ease In Out";
+                case EasingPreset.QuadIn: return "Quad In";
+                case EasingPreset.QuadOut: return "Quad Out";
+                case EasingPreset.QuadInOut: return "Quad In Out";
+                case EasingPreset.CubicIn: return "Cubic In";
+                case EasingPreset.CubicOut: return "Cubic Out";
+                case EasingPreset.CubicInOut: return "Cubic In Out";
+                case EasingPreset.QuartIn: return "Quart In";
+                case EasingPreset.QuartOut: return "Quart Out";
+                case EasingPreset.QuartInOut: return "Quart In Out";
+                case EasingPreset.QuintIn: return "Quint In";
+                case EasingPreset.QuintOut: return "Quint Out";
+                case EasingPreset.QuintInOut: return "Quint In Out";
+                case EasingPreset.Back: return "Back";
+                case EasingPreset.Elastic: return "Elastic";
+                case EasingPreset.Bounce: return "Bounce";
+                case EasingPreset.Smooth: return "Smooth";
+                case EasingPreset.CustomBezier: return "Custom Bézier";
+                default: return preset.ToString();
+            }
+        }
+
+        public void ShowPresetPickerPopover(FrameworkElement target)
+        {
+            if (target == null) return;
+
+            if (_presetPickerPopup == null)
+            {
+                _presetPickerPopup = new Popup
+                {
+                    AllowsTransparency = true,
+                    StaysOpen = false,
+                    Placement = PlacementMode.Bottom
+                };
+            }
+
+            _presetPickerPopup.PlacementTarget = target;
+
+            var container = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(20, 23, 34)),
+                BorderBrush = KerfBrand.TealBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10, 8, 10, 10),
+                Effect = new DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 20,
+                    ShadowDepth = 5,
+                    Opacity = 0.7
+                }
+            };
+
+            var rootStack = new StackPanel();
+
+            // Header
+            var headerDock = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var headerTitle = new TextBlock
+            {
+                Text = "MOTION & EASING PRESETS [21]",
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = KerfBrand.MintBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(headerTitle, Dock.Left);
+            headerDock.Children.Add(headerTitle);
+
+            var closeBtn = new Border
+            {
+                Width = 18,
+                Height = 18,
+                Background = Brushes.Transparent,
+                CornerRadius = new CornerRadius(3),
+                Cursor = Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            var closeTxt = new TextBlock
+            {
+                Text = "✕",
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            closeBtn.Child = closeTxt;
+            closeBtn.MouseLeftButtonUp += (s, e) => { _presetPickerPopup.IsOpen = false; };
+            closeBtn.MouseEnter += (s, e) => closeTxt.Foreground = Brushes.White;
+            closeBtn.MouseLeave += (s, e) => closeTxt.Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175));
+            headerDock.Children.Add(closeBtn);
+            rootStack.Children.Add(headerDock);
+
+            // 7 rows x 3 columns = 21 presets grid
+            var grid = new UniformGrid
+            {
+                Columns = 3,
+                Rows = 7
+            };
+
+            EasingPreset currentPreset = (_editingInterpolationKeyframe != null) ? _editingInterpolationKeyframe.Preset : EasingPreset.Ease;
+
+            foreach (var preset in All21EasingPresets)
+            {
+                var p = preset;
+                var tile = CreatePresetThumbnailTile(p, p == currentPreset, () =>
+                {
+                    if (_editingInterpolationKeyframe != null)
+                    {
+                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, p);
+                        SyncRealtimeEvaluator();
+                        RefreshGraphEditor();
+                        RefreshPropertyInspector();
+                    }
+                    _presetPickerPopup.IsOpen = false;
+                });
+                grid.Children.Add(tile);
+            }
+
+            rootStack.Children.Add(grid);
+            container.Child = rootStack;
+            _presetPickerPopup.Child = container;
+            _presetPickerPopup.IsOpen = true;
+        }
+
+        private Border CreatePresetThumbnailTile(EasingPreset preset, bool isSelected, Action onClick)
+        {
+            var tile = new Border
+            {
+                Width = 68,
+                Height = 52,
+                Margin = new Thickness(2),
+                CornerRadius = new CornerRadius(5),
+                Background = isSelected ? new SolidColorBrush(Color.FromArgb(50, 6, 182, 212)) : new SolidColorBrush(Color.FromRgb(26, 30, 40)),
+                BorderBrush = isSelected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(45, 53, 68)),
+                BorderThickness = new Thickness(isSelected ? 1.2 : 1.0),
+                Cursor = Cursors.Hand,
+                ToolTip = string.Format("{0} Easing Preset", GetPresetDisplayName(preset))
+            };
+
+            var stack = new StackPanel();
+
+            // 48x32 miniature preview curve canvas
+            var canvas = new Canvas
+            {
+                Width = 48,
+                Height = 32,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 3, 0, 1),
+                ClipToBounds = true
+            };
+
+            // Subtle baseline (0.0) and ceiling (1.0)
+            canvas.Children.Add(new Line
+            {
+                X1 = 4, Y1 = 26, X2 = 44, Y2 = 26,
+                Stroke = new SolidColorBrush(Color.FromRgb(45, 52, 66)),
+                StrokeThickness = 1
+            });
+            canvas.Children.Add(new Line
+            {
+                X1 = 4, Y1 = 6, X2 = 44, Y2 = 6,
+                Stroke = new SolidColorBrush(Color.FromRgb(36, 42, 54)),
+                StrokeThickness = 1,
+                StrokeDashArray = new DoubleCollection(new double[] { 2, 2 })
+            });
+
+            // Evaluated polyline curve
+            var polyline = new Polyline
+            {
+                Stroke = isSelected ? KerfBrand.MintBrush : KerfBrand.TealBrush,
+                StrokeThickness = 1.5,
+                StrokeLineJoin = PenLineJoin.Round
+            };
+
+            int sampleCount = 16;
+            for (int i = 0; i <= sampleCount; i++)
+            {
+                double u = (double)i / sampleCount;
+                double p = EasingEngine.EvaluatePreset(preset, u);
+                double px = 4.0 + u * 40.0;
+                double py = 26.0 - p * 20.0;
+                polyline.Points.Add(new Point(px, py));
+            }
+            canvas.Children.Add(polyline);
+
+            stack.Children.Add(canvas);
+
+            // Preset label text
+            var label = new TextBlock
+            {
+                Text = GetPresetDisplayName(preset),
+                FontSize = 8.5,
+                Foreground = isSelected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(180, 190, 210)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(2, 0, 2, 2)
+            };
+            stack.Children.Add(label);
+
+            tile.Child = stack;
+
+            tile.MouseEnter += (s, e) =>
+            {
+                if (!isSelected)
+                {
+                    tile.Background = new SolidColorBrush(Color.FromRgb(38, 44, 58));
+                    tile.BorderBrush = KerfBrand.MintBrush;
+                }
+            };
+            tile.MouseLeave += (s, e) =>
+            {
+                if (!isSelected)
+                {
+                    tile.Background = new SolidColorBrush(Color.FromRgb(26, 30, 40));
+                    tile.BorderBrush = new SolidColorBrush(Color.FromRgb(45, 53, 68));
+                }
+            };
+            tile.MouseLeftButtonUp += (s, e) =>
+            {
+                if (onClick != null) onClick();
+            };
+
+            return tile;
+        }
+
+        private Border CreateSmallTextButton(string label, bool active, Action onClick)
+        {
+            var btn = new Border
+            {
+                Background = active ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush,
+                BorderBrush = active ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 3, 6, 3),
+                Margin = new Thickness(0, 0, 4, 0),
+                Cursor = Cursors.Hand
+            };
+            var text = new TextBlock
+            {
+                Text = label,
+                FontSize = 9,
+                FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
+                Foreground = active ? KerfBrand.TextBlackBrush : Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            btn.Child = text;
+            btn.MouseLeftButtonUp += (s, e) =>
+            {
+                if (onClick != null) onClick();
+            };
+            return btn;
+        }
+
+        private Border CreateSpringPresetButton(string label, SpringPreset preset)
+        {
+            var btn = new Border
+            {
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 3, 6, 3),
+                Margin = new Thickness(0, 0, 4, 0),
+                Cursor = Cursors.Hand
+            };
+            var text = new TextBlock
+            {
+                Text = label,
+                FontSize = 9,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            btn.Child = text;
+            btn.MouseEnter += (s, e) => btn.Background = KerfBrand.FigmaBorderBrush;
+            btn.MouseLeave += (s, e) => btn.Background = KerfBrand.FigmaPanelBrush;
+            btn.MouseLeftButtonUp += (s, e) =>
+            {
+                if (_editingInterpolationKeyframe != null)
+                {
+                    EasingEngine.ApplySpringPreset(_editingInterpolationKeyframe, preset);
+                    SyncRealtimeEvaluator();
+                    RefreshGraphEditor();
+                    RefreshPropertyInspector();
+                }
+            };
+            return btn;
+        }
+
+        private FrameworkElement BuildKeyframeMotionInspectorSection()
+        {
+            var stack = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
+            stack.Children.Add(CreateInspectorSection("Keyframe Motion & Easing"));
+
+            FindTimelineInterpolationKey();
+
+            var card = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(8, 6, 8, 8),
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+            var cardStack = new StackPanel();
+
+            if (_editingInterpolationKeyframe == null)
+            {
+                cardStack.Children.Add(new TextBlock
+                {
+                    Text = "Select a keyframe in timeline or graph editor to adjust interpolation & curves.",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(Color.FromRgb(110, 125, 150)),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                card.Child = cardStack;
+                stack.Children.Add(card);
+                return stack;
+            }
+
+            var kf = _editingInterpolationKeyframe;
+            string propName = _editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Property";
+            var headerDock = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+            var infoText = new TextBlock
+            {
+                Text = string.Format("{0} · {1:F2}s", propName, kf.Time),
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = KerfBrand.MintBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(infoText, Dock.Left);
+            headerDock.Children.Add(infoText);
+            cardStack.Children.Add(headerDock);
+
+            // Mode Selector: [ Hold ] [ Linear ] [ Cubic ] [ Spring ]
+            var modeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            modeRow.Children.Add(CreateSmallTextButton("Hold", kf.Interp == InterpMode.Hold, () =>
+            {
+                kf.Interp = InterpMode.Hold;
+                SyncRealtimeEvaluator();
+                RefreshPropertyInspector();
+                RefreshGraphEditor();
+            }));
+            modeRow.Children.Add(CreateSmallTextButton("Linear", kf.Interp == InterpMode.Linear, () =>
+            {
+                kf.Interp = InterpMode.Linear;
+                kf.Preset = EasingPreset.Linear;
+                SyncRealtimeEvaluator();
+                RefreshPropertyInspector();
+                RefreshGraphEditor();
+            }));
+            modeRow.Children.Add(CreateSmallTextButton("Cubic", kf.Interp == InterpMode.Cubic, () =>
+            {
+                kf.Interp = InterpMode.Cubic;
+                if (kf.Preset == EasingPreset.Linear) kf.Preset = EasingPreset.Ease;
+                SyncRealtimeEvaluator();
+                RefreshPropertyInspector();
+                RefreshGraphEditor();
+            }));
+            modeRow.Children.Add(CreateSmallTextButton("Spring", kf.Interp == InterpMode.Spring, () =>
+            {
+                kf.Interp = InterpMode.Spring;
+                if (kf.Mass <= 0.0001) kf.Mass = 1.0;
+                if (kf.Stiffness <= 0.0001) kf.Stiffness = 100.0;
+                if (kf.Damping < 0.0) kf.Damping = 10.0;
+                SyncRealtimeEvaluator();
+                RefreshPropertyInspector();
+                RefreshGraphEditor();
+            }));
+            cardStack.Children.Add(modeRow);
+
+            if (kf.Interp == InterpMode.Cubic)
+            {
+                // Preset button opening 21-preset popover per D-11
+                var presetBtn = new Button
+                {
+                    Content = string.Format("∿ Preset: {0}", GetPresetDisplayName(kf.Preset)),
+                    FontSize = 10.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Height = 26,
+                    Background = KerfBrand.DarkSlateBrush,
+                    Foreground = KerfBrand.MintBrush,
+                    BorderBrush = KerfBrand.TealBrush,
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand,
+                    Margin = new Thickness(0, 0, 0, 8),
+                    Template = CreateRoundedButtonTemplate(5)
+                };
+                presetBtn.Click += (s, e) => ShowPresetPickerPopover(presetBtn);
+                cardStack.Children.Add(presetBtn);
+
+                // Control points X1, Y1, X2, Y2
+                var cpRow1 = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                cpRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                cpRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                cpRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var x1Field = ScrubControls.CreateScrubField("X1", kf.X1, val =>
+                {
+                    kf.X1 = Math.Max(0.0, Math.Min(1.0, val));
+                    kf.Preset = EasingPreset.CustomBezier;
+                    SyncRealtimeEvaluator();
+                }, min: 0.0, max: 1.0, step: 0.02, decimals: 2);
+
+                var y1Field = ScrubControls.CreateScrubField("Y1", kf.Y1, val =>
+                {
+                    kf.Y1 = val;
+                    kf.Preset = EasingPreset.CustomBezier;
+                    SyncRealtimeEvaluator();
+                }, step: 0.05, decimals: 2);
+
+                Grid.SetColumn(x1Field, 0); Grid.SetColumn(y1Field, 2);
+                cpRow1.Children.Add(x1Field); cpRow1.Children.Add(y1Field);
+                cardStack.Children.Add(cpRow1);
+
+                var cpRow2 = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                cpRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                cpRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                cpRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var x2Field = ScrubControls.CreateScrubField("X2", kf.X2, val =>
+                {
+                    kf.X2 = Math.Max(0.0, Math.Min(1.0, val));
+                    kf.Preset = EasingPreset.CustomBezier;
+                    SyncRealtimeEvaluator();
+                }, min: 0.0, max: 1.0, step: 0.02, decimals: 2);
+
+                var y2Field = ScrubControls.CreateScrubField("Y2", kf.Y2, val =>
+                {
+                    kf.Y2 = val;
+                    kf.Preset = EasingPreset.CustomBezier;
+                    SyncRealtimeEvaluator();
+                }, step: 0.05, decimals: 2);
+
+                Grid.SetColumn(x2Field, 0); Grid.SetColumn(y2Field, 2);
+                cpRow2.Children.Add(x2Field); cpRow2.Children.Add(y2Field);
+                cardStack.Children.Add(cpRow2);
+
+                // Tangent Continuity Buttons
+                var tanRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+                var smoothBtn = CreateSmallTextButton("Smooth (180°)", !kf.IsTangentBroken, () => SetKeyframeTangentMode(true));
+                var brokenBtn = CreateSmallTextButton("Broken (Alt)", kf.IsTangentBroken, () => SetKeyframeTangentMode(false));
+                smoothBtn.Width = 85; brokenBtn.Width = 85;
+                tanRow.Children.Add(smoothBtn);
+                tanRow.Children.Add(brokenBtn);
+                cardStack.Children.Add(tanRow);
+            }
+            else if (kf.Interp == InterpMode.Spring)
+            {
+                var springPresetsLabel = new TextBlock
+                {
+                    Text = "Spring Presets (D-09):",
+                    FontSize = 9.5,
+                    Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175)),
+                    Margin = new Thickness(0, 2, 0, 4)
+                };
+                cardStack.Children.Add(springPresetsLabel);
+
+                var spRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+                spRow.Children.Add(CreateSpringPresetButton("Gentle", SpringPreset.Gentle));
+                spRow.Children.Add(CreateSpringPresetButton("Snappy", SpringPreset.Snappy));
+                spRow.Children.Add(CreateSpringPresetButton("Bouncy", SpringPreset.Bouncy));
+                spRow.Children.Add(CreateSpringPresetButton("Stiff", SpringPreset.Stiff));
+                cardStack.Children.Add(spRow);
+
+                var paramRow1 = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                paramRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                paramRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                paramRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var massField = ScrubControls.CreateScrubField("Mass (m)", kf.Mass, val =>
+                {
+                    kf.Mass = Math.Max(0.01, val);
+                    SyncRealtimeEvaluator();
+                }, min: 0.01, step: 0.1, decimals: 2);
+
+                var stiffField = ScrubControls.CreateScrubField("Stiff (k)", kf.Stiffness, val =>
+                {
+                    kf.Stiffness = Math.Max(0.1, val);
+                    SyncRealtimeEvaluator();
+                }, min: 0.1, step: 5.0, decimals: 1);
+
+                Grid.SetColumn(massField, 0); Grid.SetColumn(stiffField, 2);
+                paramRow1.Children.Add(massField); paramRow1.Children.Add(stiffField);
+                cardStack.Children.Add(paramRow1);
+
+                var paramRow2 = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                paramRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                paramRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                paramRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var dampField = ScrubControls.CreateScrubField("Damp (c)", kf.Damping, val =>
+                {
+                    kf.Damping = Math.Max(0.0, val);
+                    SyncRealtimeEvaluator();
+                }, min: 0.0, step: 1.0, decimals: 1);
+
+                var velField = ScrubControls.CreateScrubField("Vel (v0)", kf.InitialVelocity, val =>
+                {
+                    kf.InitialVelocity = val;
+                    SyncRealtimeEvaluator();
+                }, step: 0.5, decimals: 1);
+
+                Grid.SetColumn(dampField, 0); Grid.SetColumn(velField, 2);
+                paramRow2.Children.Add(dampField); paramRow2.Children.Add(velField);
+                cardStack.Children.Add(paramRow2);
+            }
+            else if (kf.Interp == InterpMode.Linear)
+            {
+                cardStack.Children.Add(new TextBlock
+                {
+                    Text = "Linear: Constant rate of change across keyframe segment.",
+                    FontSize = 9.5,
+                    Foreground = new SolidColorBrush(Color.FromRgb(120, 135, 160)),
+                    Margin = new Thickness(0, 2, 0, 4)
+                });
+            }
+            else if (kf.Interp == InterpMode.Hold)
+            {
+                cardStack.Children.Add(new TextBlock
+                {
+                    Text = "Hold: Maintains constant value until next keyframe.",
+                    FontSize = 9.5,
+                    Foreground = new SolidColorBrush(Color.FromRgb(120, 135, 160)),
+                    Margin = new Thickness(0, 2, 0, 4)
+                });
+            }
+
+            card.Child = cardStack;
+            stack.Children.Add(card);
+            return stack;
         }
 
         private void ToggleGraphEditor()
@@ -12417,6 +13034,7 @@ namespace Kerf.UI
             mode.Items.Add(new ComboBoxItem { Content = "Hold", Tag = InterpMode.Hold });
             mode.Items.Add(new ComboBoxItem { Content = "Linear", Tag = InterpMode.Linear });
             mode.Items.Add(new ComboBoxItem { Content = "Cubic", Tag = InterpMode.Cubic });
+            mode.Items.Add(new ComboBoxItem { Content = "Spring", Tag = InterpMode.Spring });
             if (stateMachine) _stateMachineInterpolationModeCombo = mode; else _timelineInterpolationModeCombo = mode;
             mode.SelectionChanged += (s, e) => ApplyInterpolationMode(stateMachine, mode);
             DockPanel.SetDock(mode, Dock.Right);
@@ -12571,6 +13189,27 @@ namespace Kerf.UI
             {
                 figure.Segments.Add(new LineSegment(end, true));
             }
+            else if (mode == InterpMode.Spring)
+            {
+                double mass = 1.0, stiffness = 100.0, damping = 10.0, v0 = 0.0;
+                if (_editingInterpolationKeyframe != null)
+                {
+                    mass = _editingInterpolationKeyframe.Mass;
+                    stiffness = _editingInterpolationKeyframe.Stiffness;
+                    damping = _editingInterpolationKeyframe.Damping;
+                    v0 = _editingInterpolationKeyframe.InitialVelocity;
+                }
+                int steps = 40;
+                for (int i = 1; i <= steps; i++)
+                {
+                    double tNorm = (double)i / steps;
+                    double t = tNorm * 1.5;
+                    double p = EasingEngine.EvaluateSpring(t, mass, stiffness, damping, v0);
+                    double px = left + tNorm * (right - left);
+                    double py = bottom - p * (bottom - top);
+                    figure.Segments.Add(new LineSegment(new Point(px, py), true));
+                }
+            }
             else
             {
                 Point c1 = new Point(left + x1 * (right - left), bottom - y1 * (bottom - top));
@@ -12647,6 +13286,8 @@ namespace Kerf.UI
             {
                 if (_interpolationControlHandle == 1) { _editingInterpolationKeyframe.X1 = x; _editingInterpolationKeyframe.Y1 = y; }
                 else { _editingInterpolationKeyframe.X2 = x; _editingInterpolationKeyframe.Y2 = y; }
+                _editingInterpolationKeyframe.Preset = EasingPreset.CustomBezier;
+                SyncRealtimeEvaluator();
             }
             double x1, y1, x2, y2;
             GetInterpolationControlPoints(stateMachine, out x1, out y1, out x2, out y2);

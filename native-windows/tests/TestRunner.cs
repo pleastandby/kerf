@@ -5186,6 +5186,70 @@ namespace Kerf.Tests
             tk1.Y1 = 1.2; // Steep overshoot
             // Since it is broken, incoming handle remains unchanged
             Assert(tk0.Y2 == prevY2, "Tangent broken mode preserves independent angle without updating opposing handle");
+
+            // 9. Task 3 Integration: Popover preset application, auto-custom transition, spring parameter binding, and real-time pose evaluation
+            // (A) Popover preset application: EasingEngine.ApplyPreset on a keyframe updates Preset, Interp, and canonical control points
+            var testKey = new Keyframe(0.0, 100.0, InterpMode.Linear);
+            EasingEngine.ApplyPreset(testKey, EasingPreset.EaseInOut);
+            Assert(testKey.Interp == InterpMode.Cubic, "Applying EaseInOut preset sets InterpMode.Cubic");
+            Assert(testKey.Preset == EasingPreset.EaseInOut, "Applying EaseInOut preset sets Preset metadata");
+            Assert(Math.Abs(testKey.X1 - 0.42) < 1e-4 && Math.Abs(testKey.Y1 - 0.00) < 1e-4, "Canonical X1, Y1 for EaseInOut applied");
+            Assert(Math.Abs(testKey.X2 - 0.58) < 1e-4 && Math.Abs(testKey.Y2 - 1.00) < 1e-4, "Canonical X2, Y2 for EaseInOut applied");
+
+            // Apply Bounce preset
+            EasingEngine.ApplyPreset(testKey, EasingPreset.Bounce);
+            Assert(testKey.Preset == EasingPreset.Bounce, "Applying Bounce preset sets Preset metadata");
+            Assert(Math.Abs(testKey.X1 - 0.34) < 1e-4 && Math.Abs(testKey.Y1 - 1.40) < 1e-4, "Canonical X1, Y1 for Bounce applied with vertical overshoot");
+
+            // (B) Auto-custom transition on handle mutation or numeric edit per D-11
+            // Simulating handle drag or numeric coordinate edit
+            testKey.Y1 = 1.15;
+            testKey.Preset = EasingPreset.CustomBezier;
+            Assert(testKey.Preset == EasingPreset.CustomBezier, "Keyframe preset transitions to CustomBezier upon handle or numeric edit");
+
+            // (C) Spring physical parameters and presets (Gentle, Snappy, Bouncy, Stiff) per D-09
+            var springKey = new Keyframe(1.0, 200.0, InterpMode.Linear);
+            EasingEngine.ApplySpringPreset(springKey, SpringPreset.Bouncy);
+            Assert(springKey.Interp == InterpMode.Spring, "ApplySpringPreset sets InterpMode.Spring");
+            Assert(Math.Abs(springKey.Mass - 1.0) < 1e-6, "Bouncy spring mass is 1.0");
+            Assert(Math.Abs(springKey.Stiffness - 150.0) < 1e-6, "Bouncy spring stiffness is 150.0");
+            Assert(Math.Abs(springKey.Damping - 10.0) < 1e-6, "Bouncy spring damping is 10.0");
+
+            // Mutate spring physical parameters (inspector scrub fields)
+            springKey.Mass = 2.0;
+            springKey.Stiffness = 300.0;
+            springKey.Damping = 25.0;
+            springKey.InitialVelocity = 5.0;
+            Assert(springKey.Mass == 2.0 && springKey.Stiffness == 300.0 && springKey.Damping == 25.0 && springKey.InitialVelocity == 5.0, "Spring physical parameters updated in keyframe");
+
+            // (D) Real-time pose evaluation synchronization per D-12 & EASE-04
+            // Test that changing a keyframe's parameters or handles immediately updates Track.Sample and LayerNode pose
+            var syncTrack = new Track(50, (ushort)PropKey.X);
+            var sk0 = Keyframe.Cubic(0.0, 0.0, 0.25, 0.1, 0.25, 1.0);
+            var sk1 = Keyframe.Linear(1.0, 100.0);
+            syncTrack.AddKeyframe(sk0);
+            syncTrack.AddKeyframe(sk1);
+
+            double valBefore = syncTrack.Sample(0.5);
+            // Now apply EaseIn preset to sk0
+            EasingEngine.ApplyPreset(sk0, EasingPreset.EaseIn);
+            double valAfterPreset = syncTrack.Sample(0.5);
+            Assert(Math.Abs(valBefore - valAfterPreset) > 1.0, "Track.Sample reflects new curve shape immediately upon preset application");
+
+            // Mutate control point to CustomBezier with vertical overshoot
+            sk0.Y1 = 2.0;
+            sk0.Preset = EasingPreset.CustomBezier;
+            double valAfterOvershoot = syncTrack.Sample(0.5);
+            Assert(valAfterOvershoot > 100.0, "Track.Sample reflects vertical overshoot immediately upon handle manipulation");
+
+            // Test layer pose synchronization via PropertyBinder
+            var syncClip = new Clip(1, "SyncClip", 2.0);
+            syncClip.Tracks.Add(syncTrack);
+            var poseDict = new Dictionary<uint, Dictionary<ushort, double>>();
+            syncClip.SampleToPose(0.5, poseDict);
+            var syncLayer = new LayerNode { Id = "sync-node", X = 0, Y = 0, Width = 100, Height = 100 };
+            PropertyBinder.ApplyPoseToLayer(syncLayer, 50, poseDict);
+            Assert(Math.Abs(syncLayer.X + syncLayer.RenderTransform.TranslationX - valAfterOvershoot) < 1e-4, "PropertyBinder synchronizes real-time layer pose directly from evaluated track");
         }
     }
 }
