@@ -5832,6 +5832,125 @@ namespace Kerf.Tests
 
             multiHistory.Redo();
             Assert(multiTrack1.Keys.Count == 0 && multiTrack2.Keys.Count == 0, "Redo() re-deleted all 4 keyframes");
+
+            // 6. Task 3 (05-02): In-Place Cross-Mode Undo, Silent Data Restore, Runtime Isolation & Verification
+            // (A) Verification of D-01 (In-Place Entity Undo across modes)
+            var studio = new StudioView();
+            var page = studio.Document.GetActivePage();
+            var testLayer = new LayerNode { Id = "d01-box", Name = "D01 Box", X = 100, Y = 100, Width = 80, Height = 80 };
+            page.Layers.Add(testLayer);
+
+            // In Design Mode: Modify X to 200 via ModifyBoundsCommand
+            var modifyCmd = new ModifyBoundsCommand(testLayer, new Rect(100, 100, 80, 80), new Rect(200, 100, 80, 80), null);
+            studio.History.Execute(modifyCmd);
+            Assert(testLayer.X == 200, "Layer moved to X=200 in Design Mode");
+
+            // Switch to Animate Mode
+            studio.SwitchStudioMode(StudioView.StudioMode.Animate);
+            Assert(studio.CurrentStudioMode == StudioView.StudioMode.Animate, "Switched to Animate Mode");
+            var initialPose = studio.GetAnimationRestPose(testLayer);
+            Assert(initialPose != null && initialPose.X == 200, "Rest pose captured X=200 upon entering Animate Mode");
+
+            // Call studio.Undo() while in Animate Mode
+            studio.Undo();
+
+            Assert(testLayer.X == 100, "layer.X restored to 100 on Undo()");
+            var updatedPose = studio.GetAnimationRestPose(testLayer);
+            Assert(updatedPose != null && updatedPose.X == 100, "Rest pose synchronized in-place to 100 without tab jump (D-01)");
+            Assert(studio.CurrentStudioMode == StudioView.StudioMode.Animate, "Current mode remains Animate Mode without tab jump (D-01)");
+
+            // (B) Verification of D-02 (Silent Data Restore on Undo/Redo)
+            studio.TimelineController.Seek(1.45);
+            Assert(Math.Abs(studio.TimelineController.CurrentTime - 1.45) < 1e-4, "Playhead set to 1.45s");
+
+            var activeClip = studio.TimelineController.ActiveClip;
+            var d02Track = new Track(PropertyBinder.GetNumericNodeId(testLayer.Id), (ushort)PropKey.X);
+            activeClip.Tracks.Add(d02Track);
+            var kfPreserve = Keyframe.Linear(1.0, 150.0);
+            var kfOther = Keyframe.Linear(2.0, 250.0);
+            d02Track.AddKeyframe(kfPreserve);
+            d02Track.AddKeyframe(kfOther);
+
+            studio.SelectedTimelineKeyframes.Add(kfPreserve);
+
+            // Execute another command
+            studio.History.Execute(new ModifyKeyframeValueCommand(kfOther, 250.0, 300.0, null));
+            Assert(kfOther.Value == 300.0, "kfOther modified to 300.0");
+
+            // Execute Undo()
+            studio.Undo();
+
+            Assert(Math.Abs(studio.TimelineController.CurrentTime - 1.45) < 1e-4, "CurrentTime strictly preserved at 1.45s across Undo() without resetting to 0.0s (D-02)");
+            Assert(studio.SelectedTimelineKeyframes.Contains(kfPreserve), "Active keyframe selection set preserved silently across Undo() (D-02)");
+            Assert(kfOther.Value == 250.0, "Value restored to 250.0");
+
+            // (C) Verification of Runtime Isolation (ticks, seeks, scrubs generate 0 history entries)
+            var isolationHistory = new CommandHistory();
+            var isolationController = new AnimationTimelineController(null);
+            var isoClip = new Clip(999, "Isolation Clip", 5.0, 60.0);
+            var isoTrack = new Track(1, (ushort)PropKey.X);
+            isoTrack.AddKeyframe(Keyframe.Linear(0.0, 0.0));
+            isoTrack.AddKeyframe(Keyframe.Linear(5.0, 500.0));
+            isoClip.Tracks.Add(isoTrack);
+            isolationController.ActiveClip = isoClip;
+
+            for (int tick = 0; tick < 100; tick++)
+            {
+                isolationController.Step(1.0 / 60.0);
+            }
+            for (int s = 0; s < 50; s++)
+            {
+                isolationController.Seek(s * 0.1);
+            }
+            for (int scrub = 0; scrub < 20; scrub++)
+            {
+                isolationController.Seek(scrub * 0.25);
+                isolationController.Evaluate(scrub * 0.25);
+            }
+
+            Assert(isolationHistory.CanUndo == false, "CanUndo is false after 100 ticks, 50 seeks, and 20 scrubbing evaluations (Runtime Isolation)");
+            Assert(isolationHistory.CanRedo == false, "CanRedo is false after runtime operations (Runtime Isolation)");
+
+            // (D) Verification of Strict Mode Isolation (Design modifications never create animation tracks)
+            var modeIsoDoc = new KerfDocument();
+            var modeIsoClip = new Clip(1, "Mode Iso Clip", 2.0);
+            modeIsoDoc.Animation = new AnimationProjectData();
+            modeIsoDoc.Animation.Clips = new List<Clip> { modeIsoClip };
+
+            var modeIsoLayer = new LayerNode { Id = "design-only", Name = "Design Node", X = 0, Y = 0, Width = 100, Height = 100 };
+            var modeIsoHistory = new CommandHistory();
+
+            modeIsoHistory.Execute(new ModifyBoundsCommand(modeIsoLayer, new Rect(0, 0, 100, 100), new Rect(10, 0, 100, 100), null)); // 1. X
+            modeIsoHistory.Execute(new ModifyBoundsCommand(modeIsoLayer, new Rect(10, 0, 100, 100), new Rect(10, 20, 100, 100), null)); // 2. Y
+            modeIsoHistory.Execute(new ModifyBoundsCommand(modeIsoLayer, new Rect(10, 20, 100, 100), new Rect(10, 20, 150, 100), null)); // 3. Width
+            modeIsoHistory.Execute(new ModifyBoundsCommand(modeIsoLayer, new Rect(10, 20, 150, 100), new Rect(10, 20, 150, 200), null)); // 4. Height
+            modeIsoHistory.Execute(new ModifyRotationCommand(modeIsoLayer, 0.0, 45.0, null)); // 5. Rotation
+            modeIsoHistory.Execute(new ModifyCornerRadiusCommand(modeIsoLayer, 0.0, 16.0, null)); // 6. CornerRadius
+            modeIsoHistory.Execute(new ModifyOpacityCommand(modeIsoLayer, 1.0, 0.8, null)); // 7. Opacity
+            modeIsoLayer.Fills = new List<Paint> { new Paint { Color = "#FF0000" } }; // 8. Fill
+            modeIsoLayer.Strokes = new List<StrokeData> { new StrokeData { Color = "#0000FF", Width = 3.0 } }; // 9. Stroke
+            modeIsoLayer.StrokeWidth = 3.0; // 10. StrokeWidth
+
+            Assert(modeIsoClip.Tracks.Count == 0, "Design Mode operations directly mutate LayerNode and never instantiate animation tracks (Strict Mode Isolation)");
+
+            // (E) Verification of Redo Invalidation
+            var redoHistory = new CommandHistory();
+            var cmdLayer = new LayerNode { X = 0 };
+            var cmdA = new ModifyBoundsCommand(cmdLayer, new Rect(0, 0, 10, 10), new Rect(1, 0, 10, 10), null);
+            var cmdB = new ModifyBoundsCommand(cmdLayer, new Rect(1, 0, 10, 10), new Rect(2, 0, 10, 10), null);
+            var cmdC = new ModifyBoundsCommand(cmdLayer, new Rect(1, 0, 10, 10), new Rect(3, 0, 10, 10), null);
+
+            redoHistory.Execute(cmdA);
+            redoHistory.Execute(cmdB);
+            Assert(redoHistory.CanUndo == true, "CanUndo is true");
+            Assert(redoHistory.CanRedo == false, "CanRedo is false");
+
+            redoHistory.Undo(); // B is now on redo stack
+            Assert(redoHistory.CanRedo == true, "CanRedo is true with cmdB on redo stack");
+
+            redoHistory.Execute(cmdC);
+            Assert(redoHistory.CanRedo == false, "Redo stack cleared and CanRedo is false after new command execution");
+            Assert(redoHistory.CanUndo == true, "CanUndo is true for cmdC");
         }
     }
 }

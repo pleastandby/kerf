@@ -10759,22 +10759,73 @@ namespace Kerf.UI
 
         public void Undo()
         {
+            double preservedTime = (_timelineController != null) ? _timelineController.CurrentTime : 0.0;
             History.Undo();
-            var page = Document.GetActivePage();
-            _sceneGraph.Synchronize(page);
+            PostHistoryUndoRedo(preservedTime);
+        }
+
+        public void Redo()
+        {
+            double preservedTime = (_timelineController != null) ? _timelineController.CurrentTime : 0.0;
+            History.Redo();
+            PostHistoryUndoRedo(preservedTime);
+        }
+
+        private void PostHistoryUndoRedo(double preservedTime)
+        {
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (_sceneGraph != null && page != null)
+            {
+                _sceneGraph.Synchronize(page);
+            }
+
+            if (_currentStudioMode == StudioMode.Animate)
+            {
+                CaptureAnimationRestPose();
+                if (_timelineController != null)
+                {
+                    _timelineController.Seek(preservedTime);
+                }
+                PruneSelectedTimelineKeyframes();
+                UpdateTimelineKeyframeDiamondStyles();
+                RefreshTimelineCanvas();
+                RefreshTimelineTracks();
+                RefreshGraphEditor();
+                if (_graphEditorCanvas != null) _graphEditorCanvas.Redraw();
+            }
+
+            InvalidateAndRefresh(null);
             RefreshCanvas();
             RefreshLayersList();
             RefreshPropertyInspector();
         }
 
-        public void Redo()
+        private void PruneSelectedTimelineKeyframes()
         {
-            History.Redo();
-            var page = Document.GetActivePage();
-            _sceneGraph.Synchronize(page);
-            RefreshCanvas();
-            RefreshLayersList();
-            RefreshPropertyInspector();
+            if (_selectedTimelineKeyframes == null || _selectedTimelineKeyframes.Count == 0) return;
+            if (_timelineController == null || _timelineController.ActiveClip == null || _timelineController.ActiveClip.Tracks == null)
+            {
+                return;
+            }
+            var existingKeys = new HashSet<Keyframe>();
+            var tracks = _timelineController.ActiveClip.Tracks;
+            for (int i = 0; i < tracks.Count; i++)
+            {
+                var trk = tracks[i];
+                if (trk != null && trk.Keys != null)
+                {
+                    for (int k = 0; k < trk.Keys.Count; k++)
+                    {
+                        existingKeys.Add(trk.Keys[k]);
+                    }
+                }
+            }
+            _selectedTimelineKeyframes.RemoveWhere(kf => !existingKeys.Contains(kf));
+            if (_editingInterpolationKeyframe != null && !existingKeys.Contains(_editingInterpolationKeyframe))
+            {
+                _editingInterpolationKeyframe = null;
+                _editingInterpolationTrack = null;
+            }
         }
 
         public bool SaveCurrentDocument()
