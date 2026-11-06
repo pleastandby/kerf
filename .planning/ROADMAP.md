@@ -8,7 +8,7 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 
 - [x] **Phase 1: Independent Transform Pipeline & Render Separation** - Introduce decoupled render transforms so animation never destructively mutates layer dimensions or Auto Layout bounds.
 - [x] **Phase 2: Independent Transform Architecture and Animation Evaluator** - Eliminate destructive animation transformations and establish a reliable evaluation pipeline with hierarchical matrix composition, centralized clock, and renderer integration.
-- [ ] **Phase 3: Timeline and Keyframe Engine Reconstruction** - Build a structured, multi-track animation timeline with expandable object lanes, time ruler, stable keyframes, scrubbing, and inspector integration.
+- [x] **Phase 3: Timeline and Keyframe Engine Reconstruction** - Build a structured, multi-track animation timeline with expandable object lanes, time ruler, stable keyframes, scrubbing, and inspector integration.
 - [ ] **Phase 4: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
 - [ ] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [ ] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
@@ -92,7 +92,7 @@ Plans:
 
 ---
 
-### Phase 4: Animation Command History & Full Undo/Redo
+### Phase 5: Animation Command History & Full Undo/Redo
 **Goal**: Integrate all timeline, keyframe, curve manipulation, and track modifications into the centralized `CommandHistory` architecture.
 **Depends on**: Phase 3
 **Requirements**: HIST-01, HIST-02, HIST-03, HIST-04
