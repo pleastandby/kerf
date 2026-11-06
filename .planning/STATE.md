@@ -3,10 +3,10 @@ gsd_state_version: '1.0'
 status: ready
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 16
-  completed_plans: 9
-  percent: 56
+  completed_plans: 11
+  percent: 69
 ---
 
 # Project State
@@ -16,23 +16,23 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-11-05)
 
 **Core value:** An industrial-grade animation engine that operates with non-destructive independent transforms, stable keyframes, visual graph curve editing, transactional undo/redo, and interactive state machines without destabilizing or corrupting the design canvas.
-**Current focus:** Phase 5 — Animation Command History & Full Undo/Redo
+**Current focus:** Phase 6 — Interactive State Machine Engine
 
 ## Current Position
 
-Phase: 5 of 7 (Animation Command History & Full Undo/Redo) — IN PROGRESS
-Plan: 0 of 2 in Phase 5
-Status: Phase 5 context gathered and ready for planning.
-Last activity: 2026-11-06 — Completed Phase 5 discussion (05-CONTEXT.md, 05-DISCUSSION-LOG.md)
+Phase: 5 of 7 (Animation Command History & Full Undo/Redo) — COMPLETED
+Plan: 2 of 2 in Phase 5 completed
+Status: Phase 5 executed and verified. Ready for Phase 6 (or user verification).
+Last activity: 2026-11-06 — Completed Phase 5 execution & verification (11/11 must-haves verified, 59/59 tests passing)
 
-Progress: [██████░░░░] 56%
+Progress: [███████░░░] 69%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
+- Total plans completed: 11
 - Average duration: 15 min
-- Total execution time: 2.25 hours
+- Total execution time: 2.75 hours
 
 **By Phase:**
 
@@ -42,15 +42,15 @@ Progress: [██████░░░░] 56%
 | 2. Independent Transform Architecture and Animation Evaluator | 2/2 | 30m | 15m |
 | 3. Timeline and Keyframe Engine Reconstruction | 3/3 | 45m | 15m |
 | 4. Easing Engine & Interactive Graph Curve Editor | 2/2 | 30m | 15m |
-| 5. Animation Command History & Full Undo/Redo | 0/2 | - | - |
+| 5. Animation Command History & Full Undo/Redo | 2/2 | 30m | 15m |
 | 6. Interactive State Machine Engine | 0/3 | - | - |
 | 7. Verification, Legacy Migration & Safe Deprecation | 0/2 | - | - |
 
 **Recent Trend:**
-- Plan 04-01: Done (EasingEngine, unconstrained Bézier root solver, closed-form springs, 21 presets, Track.Sample dispatch)
-- Plan 04-02: Done (GraphEditorCanvas, split panel GridSplitter, Value Graph auto-fit, tangent handle dragging, 21-preset popover)
-- Verification: 10/10 must-haves verified (Test #56 added, 56/56 tests passing)
-- Trend: On Track (56/56 automated tests passing)
+- Plan 05-01: Done (Core reversible animation commands, CompositeCommand transaction batching, Test #59 scaffold)
+- Plan 05-02: Done (UI pointer release batching, cross-mode in-place undo, silent data restore, runtime isolation)
+- Verification: 11/11 must-haves verified (Test #59 passing, 59/59 automated tests passing)
+- Trend: On Track (59/59 automated tests passing)
 
 ## Accumulated Context
 

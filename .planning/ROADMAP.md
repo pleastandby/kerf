@@ -10,7 +10,7 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 - [x] **Phase 2: Independent Transform Architecture and Animation Evaluator** - Eliminate destructive animation transformations and establish a reliable evaluation pipeline with hierarchical matrix composition, centralized clock, and renderer integration.
 - [x] **Phase 3: Timeline and Keyframe Engine Reconstruction** - Build a structured, multi-track animation timeline with expandable object lanes, time ruler, stable keyframes, scrubbing, and inspector integration.
 - [x] **Phase 4: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
-- [ ] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
+- [x] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [ ] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
 - [ ] **Phase 7: Verification, Legacy Migration & Safe Deprecation** - End-to-end integration tests, legacy project file migration, and deprecation of old property binders with 0 regressions.
 
@@ -104,8 +104,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Core reversible animation commands, CompositeCommand transaction batching, and Test #59 scaffold
-- [ ] 05-02-PLAN.md — UI pointer release batching, cross-mode in-place undo, silent data restore, and runtime isolation
+- [x] 05-01-PLAN.md — Core reversible animation commands, CompositeCommand transaction batching, and Test #59 scaffold
+- [x] 05-02-PLAN.md — UI pointer release batching, cross-mode in-place undo, silent data restore, and runtime isolation
 
 ---
 
