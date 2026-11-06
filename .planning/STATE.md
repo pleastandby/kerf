@@ -20,10 +20,10 @@ See: `.planning/PROJECT.md` (updated 2026-11-05)
 
 ## Current Position
 
-Phase: 4 of 7 (Easing, Interpolation and Graph Editor Reconstruction) — COMPLETED
-Plan: 2 of 2 in Phase 4 completed (Wave 1: Plan 04-01, Wave 2: Plan 04-02)
-Status: Phase 4 verified (10/10 must-haves verified, 56/56 automated tests passing). Ready for Phase 5.
-Last activity: 2026-11-06 — Completed Phase 4 execution and verification (04-01, 04-02, 04-VERIFICATION.md)
+Phase: 5 of 7 (Animation Command History & Full Undo/Redo) — IN PROGRESS
+Plan: 0 of 2 in Phase 5
+Status: Phase 5 context gathered and ready for planning.
+Last activity: 2026-11-06 — Completed Phase 5 discussion (05-CONTEXT.md, 05-DISCUSSION-LOG.md)
 
 Progress: [██████░░░░] 56%
 

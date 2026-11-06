@@ -94,7 +94,7 @@ Plans:
 
 ### Phase 5: Animation Command History & Full Undo/Redo
 **Goal**: Integrate all timeline, keyframe, curve manipulation, and track modifications into the centralized `CommandHistory` architecture.
-**Depends on**: Phase 3
+**Depends on**: Phase 3, Phase 4
 **Requirements**: HIST-01, HIST-02, HIST-03, HIST-04
 **Success Criteria** (what must be TRUE):
   1. Adding, moving, deleting, or editing keyframe values can be undone (`Ctrl+Z`) and redone (`Ctrl+Y`) with immediate canvas and timeline synchronization.
@@ -104,25 +104,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: Implement atomic animation commands (`AddKeyframeCommand`, `ModifyKeyframeCommand`, `MoveKeyframesCommand`, `DeleteKeyframesCommand`, `ChangeEasingCommand`).
-- [ ] 04-02: Wire transaction batching on pointer interactions and connect undo/redo events to timeline and graph editor UI views.
-
----
-
-### Phase 5: Decoupled Animation Runtime Playback & Transport
-**Goal**: Build a deterministic runtime playback controller with isolated evaluation buffers that protects design canvas state from corruption.
-**Depends on**: Phase 4
-**Requirements**: PLAY-01, PLAY-02, PLAY-03, PLAY-04
-**Success Criteria** (what must be TRUE):
-  1. Timeline transport controls (Play, Pause, Stop, Seek, Step forward/back, FPS selection) run smoothly at target frame rates.
-  2. Animated playback computes values into an isolated runtime evaluation layer without altering underlying design document layer properties.
-  3. Playback supports Play Once, Loop, and Ping-Pong playback modes.
-  4. Stopping playback or switching back to Design mode immediately restores exact design rest poses with 0% drift or persistent offsets.
-**Plans**: 2 plans
-
-Plans:
-- [ ] 05-01: Build `AnimationRuntimeEvaluator` with decoupled rest pose caching and high-performance Direct2D frame rendering.
-- [ ] 05-02: Implement timeline transport controller with scrubbing, playhead tracking, looping, and mode switching.
+- [ ] 05-01: Implement atomic animation commands (`AddKeyframeCommand`, `ModifyKeyframeValueCommand`, `MoveKeyframesCommand`, `DeleteKeyframesCommand`, `ChangeKeyframeEasingCommand`, `ModifyBezierHandlesCommand`, `ModifySpringParamsCommand`, `AddTrackCommand`, `RemoveTrackCommand`, `AddClipCommand`, `RemoveClipCommand`).
+- [ ] 05-02: Wire transaction batching on pointer interactions and connect undo/redo events to timeline and graph editor UI views.
 
 ---
 
@@ -169,11 +152,11 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Independent Transform Pipeline & Render Separation | 0/2 | Not started | - |
-| 2. Core Animation Data Model | 0/2 | Not started | - |
-| 3. Easing Engine & Interactive Graph Curve Editor | 0/2 | Not started | - |
-| 4. Animation Command History & Full Undo/Redo | 0/2 | Not started | - |
-| 5. Decoupled Animation Runtime Playback & Transport | 0/2 | Not started | - |
+| 1. Independent Transform Pipeline & Render Separation | 2/2 | Complete | 2026-11-05 |
+| 2. Independent Transform Architecture and Animation Evaluator | 2/2 | Complete | 2026-11-05 |
+| 3. Timeline and Keyframe Engine Reconstruction | 3/3 | Complete | 2026-11-06 |
+| 4. Easing Engine & Interactive Graph Curve Editor | 2/2 | Complete | 2026-11-06 |
+| 5. Animation Command History & Full Undo/Redo | 0/2 | Ready for planning | - |
 | 6. Interactive State Machine Engine | 0/3 | Not started | - |
 | 7. Verification, Legacy Migration & Safe Deprecation | 0/2 | Not started | - |
 
