@@ -760,7 +760,9 @@ namespace Kerf.Engine
         {
             for (int i = 0; i < _keys.Count; i++) _keys[i].Time = times[i];
             foreach (var track in _tracks)
-                if (track.Keys != null) track.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+            {
+                if (track != null) track.SortKeys();
+            }
             if (_onRender != null) _onRender();
         }
     }
@@ -780,14 +782,287 @@ namespace Kerf.Engine
         public void Execute()
         {
             foreach (var pair in _keys)
-                if (pair.Value != null && pair.Value.Keys != null) pair.Value.Keys.Remove(pair.Key);
+            {
+                if (pair.Value != null && pair.Value.Keys != null)
+                {
+                    pair.Value.Keys.Remove(pair.Key);
+                    pair.Value.SortKeys();
+                }
+            }
             if (_onRender != null) _onRender();
         }
 
         public void Unexecute()
         {
             foreach (var pair in _keys)
-                if (pair.Value != null) pair.Value.AddKeyframe(pair.Key);
+            {
+                if (pair.Value != null)
+                {
+                    pair.Value.AddKeyframe(pair.Key);
+                    pair.Value.SortKeys();
+                }
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class DuplicateKeyframesCommand : ICommand
+    {
+        public string Description { get { return "Duplicate Keyframes"; } }
+        private readonly List<Keyframe> _duplicatedKeys;
+        private readonly Dictionary<Keyframe, Track> _owners;
+        private readonly Action _onRender;
+
+        public List<Keyframe> DuplicatedKeys { get { return _duplicatedKeys; } }
+
+        public DuplicateKeyframesCommand(List<Keyframe> duplicatedKeys, Dictionary<Keyframe, Track> owners, Action onRender = null)
+        {
+            _duplicatedKeys = duplicatedKeys != null ? new List<Keyframe>(duplicatedKeys) : new List<Keyframe>();
+            _owners = owners != null ? new Dictionary<Keyframe, Track>(owners) : new Dictionary<Keyframe, Track>();
+            _onRender = onRender;
+        }
+
+        public DuplicateKeyframesCommand(IEnumerable<Keyframe> sourceKeys, Dictionary<Keyframe, Track> owners, double deltaTime, Action onRender = null)
+        {
+            _duplicatedKeys = new List<Keyframe>();
+            _owners = new Dictionary<Keyframe, Track>();
+            _onRender = onRender;
+
+            if (sourceKeys != null && owners != null)
+            {
+                foreach (var kf in sourceKeys)
+                {
+                    Track track;
+                    if (owners.TryGetValue(kf, out track) && track != null)
+                    {
+                        var clone = kf.Clone(false);
+                        clone.Time = Math.Max(0.0, kf.Time + deltaTime);
+                        _duplicatedKeys.Add(clone);
+                        _owners[clone] = track;
+                    }
+                }
+            }
+        }
+
+        public void Execute()
+        {
+            for (int i = 0; i < _duplicatedKeys.Count; i++)
+            {
+                var kf = _duplicatedKeys[i];
+                Track track;
+                if (_owners.TryGetValue(kf, out track) && track != null)
+                {
+                    track.AddKeyframe(kf);
+                    track.SortKeys();
+                }
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            for (int i = 0; i < _duplicatedKeys.Count; i++)
+            {
+                var kf = _duplicatedKeys[i];
+                Track track;
+                if (_owners.TryGetValue(kf, out track) && track != null)
+                {
+                    track.RemoveKeyframe(kf.Id);
+                    track.SortKeys();
+                }
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class ChangeKeyframeEasingCommand : ICommand
+    {
+        public string Description { get { return "Change Keyframe Easing"; } }
+        private readonly Keyframe _keyframe;
+        private readonly InterpMode _beforeInterp;
+        private readonly InterpMode _afterInterp;
+        private readonly EasingPreset _beforePreset;
+        private readonly EasingPreset _afterPreset;
+        private readonly Action _onRender;
+
+        public ChangeKeyframeEasingCommand(Keyframe keyframe, InterpMode beforeInterp, InterpMode afterInterp, EasingPreset beforePreset, EasingPreset afterPreset, Action onRender = null)
+        {
+            _keyframe = keyframe;
+            _beforeInterp = beforeInterp;
+            _afterInterp = afterInterp;
+            _beforePreset = beforePreset;
+            _afterPreset = afterPreset;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_keyframe != null)
+            {
+                _keyframe.Interp = _afterInterp;
+                _keyframe.Preset = _afterPreset;
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_keyframe != null)
+            {
+                _keyframe.Interp = _beforeInterp;
+                _keyframe.Preset = _beforePreset;
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class KeyframeBezierSnapshot
+    {
+        public Keyframe Key { get; set; }
+        public double X1 { get; set; }
+        public double Y1 { get; set; }
+        public double X2 { get; set; }
+        public double Y2 { get; set; }
+        public EasingPreset Preset { get; set; }
+        public bool IsTangentBroken { get; set; }
+
+        public KeyframeBezierSnapshot() { }
+
+        public KeyframeBezierSnapshot(Keyframe key)
+        {
+            Key = key;
+            if (key != null)
+            {
+                X1 = key.X1;
+                Y1 = key.Y1;
+                X2 = key.X2;
+                Y2 = key.Y2;
+                Preset = key.Preset;
+                IsTangentBroken = key.IsTangentBroken;
+            }
+        }
+
+        public KeyframeBezierSnapshot(Keyframe key, double x1, double y1, double x2, double y2, EasingPreset preset, bool isTangentBroken)
+        {
+            Key = key;
+            X1 = x1;
+            Y1 = y1;
+            X2 = x2;
+            Y2 = y2;
+            Preset = preset;
+            IsTangentBroken = isTangentBroken;
+        }
+    }
+
+    public class ModifyBezierHandlesCommand : ICommand
+    {
+        public string Description { get { return "Modify Bézier Handles"; } }
+        private readonly List<KeyframeBezierSnapshot> _beforeSnapshots;
+        private readonly List<KeyframeBezierSnapshot> _afterSnapshots;
+        private readonly Action _onRender;
+
+        public ModifyBezierHandlesCommand(IEnumerable<KeyframeBezierSnapshot> beforeSnapshots, IEnumerable<KeyframeBezierSnapshot> afterSnapshots, Action onRender = null)
+        {
+            _beforeSnapshots = beforeSnapshots != null ? new List<KeyframeBezierSnapshot>(beforeSnapshots) : new List<KeyframeBezierSnapshot>();
+            _afterSnapshots = afterSnapshots != null ? new List<KeyframeBezierSnapshot>(afterSnapshots) : new List<KeyframeBezierSnapshot>();
+            _onRender = onRender;
+        }
+
+        public ModifyBezierHandlesCommand(KeyframeBezierSnapshot beforeSnapshot, KeyframeBezierSnapshot afterSnapshot, Action onRender = null)
+        {
+            _beforeSnapshots = new List<KeyframeBezierSnapshot>();
+            if (beforeSnapshot != null) _beforeSnapshots.Add(beforeSnapshot);
+            _afterSnapshots = new List<KeyframeBezierSnapshot>();
+            if (afterSnapshot != null) _afterSnapshots.Add(afterSnapshot);
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            ApplySnapshots(_afterSnapshots);
+        }
+
+        public void Unexecute()
+        {
+            ApplySnapshots(_beforeSnapshots);
+        }
+
+        private void ApplySnapshots(List<KeyframeBezierSnapshot> snapshots)
+        {
+            if (snapshots != null)
+            {
+                for (int i = 0; i < snapshots.Count; i++)
+                {
+                    var snap = snapshots[i];
+                    if (snap != null && snap.Key != null)
+                    {
+                        snap.Key.X1 = snap.X1;
+                        snap.Key.Y1 = snap.Y1;
+                        snap.Key.X2 = snap.X2;
+                        snap.Key.Y2 = snap.Y2;
+                        snap.Key.Preset = snap.Preset;
+                        snap.Key.IsTangentBroken = snap.IsTangentBroken;
+                    }
+                }
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class ModifySpringParamsCommand : ICommand
+    {
+        public string Description { get { return "Modify Spring Parameters"; } }
+        private readonly Keyframe _keyframe;
+        private readonly double _beforeMass;
+        private readonly double _afterMass;
+        private readonly double _beforeStiffness;
+        private readonly double _afterStiffness;
+        private readonly double _beforeDamping;
+        private readonly double _afterDamping;
+        private readonly double _beforeVelocity;
+        private readonly double _afterVelocity;
+        private readonly Action _onRender;
+
+        public ModifySpringParamsCommand(Keyframe keyframe,
+            double beforeMass, double afterMass,
+            double beforeStiffness, double afterStiffness,
+            double beforeDamping, double afterDamping,
+            double beforeVelocity, double afterVelocity,
+            Action onRender = null)
+        {
+            _keyframe = keyframe;
+            _beforeMass = beforeMass;
+            _afterMass = afterMass;
+            _beforeStiffness = beforeStiffness;
+            _afterStiffness = afterStiffness;
+            _beforeDamping = beforeDamping;
+            _afterDamping = afterDamping;
+            _beforeVelocity = beforeVelocity;
+            _afterVelocity = afterVelocity;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_keyframe != null)
+            {
+                _keyframe.Mass = _afterMass;
+                _keyframe.Stiffness = _afterStiffness;
+                _keyframe.Damping = _afterDamping;
+                _keyframe.InitialVelocity = _afterVelocity;
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_keyframe != null)
+            {
+                _keyframe.Mass = _beforeMass;
+                _keyframe.Stiffness = _beforeStiffness;
+                _keyframe.Damping = _beforeDamping;
+                _keyframe.InitialVelocity = _beforeVelocity;
+            }
             if (_onRender != null) _onRender();
         }
     }

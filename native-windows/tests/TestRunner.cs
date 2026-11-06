@@ -5439,6 +5439,105 @@ namespace Kerf.Tests
             Assert(track.Keys[0].Value == 10.0, "ModifyKeyframeValueCommand Undo restored 10.0");
             history.Redo();
             Assert(track.Keys[0].Value == 99.0, "ModifyKeyframeValueCommand Redo restored 99.0");
+
+            // 2. Task 2: Keyframe Removal, Movement, Duplication, and Easing/Curve Commands
+            // (A) MoveKeyframesCommand across multiple tracks maintaining sorted order
+            var track2 = new Track(2, (ushort)PropKey.Y);
+            var m1 = Keyframe.Linear(0.5, 50.0);
+            var m2 = Keyframe.Linear(1.5, 75.0);
+            track.AddKeyframe(m1);
+            track2.AddKeyframe(m2);
+
+            var beforeTimes = new Dictionary<Keyframe, double>();
+            beforeTimes[m1] = 0.5;
+            beforeTimes[m2] = 1.5;
+            var afterTimes = new Dictionary<Keyframe, double>();
+            afterTimes[m1] = 2.0;
+            afterTimes[m2] = 3.0;
+            var owners = new Dictionary<Keyframe, Track>();
+            owners[m1] = track;
+            owners[m2] = track2;
+
+            history.Execute(new MoveKeyframesCommand(beforeTimes, afterTimes, owners, null));
+            Assert(m1.Time == 2.0 && m2.Time == 3.0, "MoveKeyframesCommand shifted timestamps forward");
+            Assert(track.Keys[track.Keys.Count - 1] == m1, "Track keys sorted after move");
+
+            history.Undo();
+            Assert(m1.Time == 0.5 && m2.Time == 1.5, "MoveKeyframesCommand Undo restored original timestamps");
+            history.Redo();
+            Assert(m1.Time == 2.0 && m2.Time == 3.0, "MoveKeyframesCommand Redo re-applied new timestamps");
+
+            // (B) DuplicateKeyframesCommand: clone and offset by deltaTime
+            var dupCmd = new DuplicateKeyframesCommand(new Keyframe[] { m1, m2 }, owners, 0.5, null);
+            history.Execute(dupCmd);
+            Assert(dupCmd.DuplicatedKeys.Count == 2, "Duplicated 2 keyframes");
+            Assert(track.Keys.Count == 3, "Track now has 3 keyframes (t=0.0, t=2.0, t=2.5)");
+            Assert(track2.Keys.Count == 2, "Track2 now has 2 keyframes (t=3.0, t=3.5)");
+            Assert(Math.Abs(dupCmd.DuplicatedKeys[0].Time - 2.5) < 1e-6, "First duplicate shifted by +0.5s");
+            Assert(Math.Abs(dupCmd.DuplicatedKeys[1].Time - 3.5) < 1e-6, "Second duplicate shifted by +0.5s");
+
+            history.Undo();
+            Assert(track.Keys.Count == 2, "DuplicateKeyframesCommand Undo removed clones from track 1");
+            Assert(track2.Keys.Count == 1, "DuplicateKeyframesCommand Undo removed clones from track 2");
+
+            history.Redo();
+            Assert(track.Keys.Count == 3, "DuplicateKeyframesCommand Redo restored clones in track 1");
+            Assert(track2.Keys.Count == 2, "DuplicateKeyframesCommand Redo restored clones in track 2");
+
+            // (C) DeleteKeyframesCommand across multiple tracks
+            var delDict = new Dictionary<Keyframe, Track>();
+            delDict[m1] = track;
+            delDict[m2] = track2;
+            history.Execute(new DeleteKeyframesCommand(delDict, null));
+            Assert(!track.Keys.Contains(m1), "m1 deleted from track");
+            Assert(!track2.Keys.Contains(m2), "m2 deleted from track2");
+
+            history.Undo();
+            Assert(track.Keys.Contains(m1), "m1 restored to track on Undo");
+            Assert(track2.Keys.Contains(m2), "m2 restored to track2 on Undo");
+            Assert(track.Keys[0].Time <= track.Keys[1].Time, "Track keys kept sorted on Undo");
+
+            history.Redo();
+            Assert(!track.Keys.Contains(m1) && !track2.Keys.Contains(m2), "DeleteKeyframesCommand Redo re-deletes");
+            history.Undo(); // Restore for subsequent curve tests
+
+            // (D) ChangeKeyframeEasingCommand
+            var easingKey = track.Keys[0];
+            history.Execute(new ChangeKeyframeEasingCommand(easingKey, InterpMode.Linear, InterpMode.Cubic, EasingPreset.Linear, EasingPreset.CubicInOut, null));
+            Assert(easingKey.Interp == InterpMode.Cubic, "ChangeKeyframeEasingCommand changed InterpMode to Cubic");
+            Assert(easingKey.Preset == EasingPreset.CubicInOut, "ChangeKeyframeEasingCommand changed Preset to CubicInOut");
+
+            history.Undo();
+            Assert(easingKey.Interp == InterpMode.Linear, "ChangeKeyframeEasingCommand Undo restored Linear interp");
+            Assert(easingKey.Preset == EasingPreset.Linear, "ChangeKeyframeEasingCommand Undo restored Linear preset");
+
+            history.Redo();
+            Assert(easingKey.Interp == InterpMode.Cubic && easingKey.Preset == EasingPreset.CubicInOut, "ChangeKeyframeEasingCommand Redo re-applied");
+
+            // (E) ModifyBezierHandlesCommand with KeyframeBezierSnapshot
+            var beforeSnap = new KeyframeBezierSnapshot(easingKey);
+            var afterSnap = new KeyframeBezierSnapshot(easingKey, 0.33, 0.0, 0.67, 1.0, EasingPreset.CustomBezier, true);
+            history.Execute(new ModifyBezierHandlesCommand(beforeSnap, afterSnap, null));
+            Assert(Math.Abs(easingKey.X1 - 0.33) < 1e-4 && Math.Abs(easingKey.Y2 - 1.0) < 1e-4, "ModifyBezierHandlesCommand applied new handles");
+            Assert(easingKey.IsTangentBroken == true, "ModifyBezierHandlesCommand set IsTangentBroken");
+
+            history.Undo();
+            Assert(Math.Abs(easingKey.X1 - beforeSnap.X1) < 1e-4 && easingKey.IsTangentBroken == beforeSnap.IsTangentBroken, "ModifyBezierHandlesCommand Undo restored handle snapshot");
+
+            history.Redo();
+            Assert(Math.Abs(easingKey.X1 - 0.33) < 1e-4 && easingKey.IsTangentBroken == true, "ModifyBezierHandlesCommand Redo re-applied handles");
+
+            // (F) ModifySpringParamsCommand
+            var springKey = Keyframe.Spring(1.0, 100.0, 1.0, 100.0, 10.0, 0.0);
+            track.AddKeyframe(springKey);
+            history.Execute(new ModifySpringParamsCommand(springKey, 1.0, 2.5, 100.0, 250.0, 10.0, 18.0, 0.0, 5.0, null));
+            Assert(springKey.Mass == 2.5 && springKey.Stiffness == 250.0 && springKey.Damping == 18.0 && springKey.InitialVelocity == 5.0, "ModifySpringParamsCommand updated all spring properties");
+
+            history.Undo();
+            Assert(springKey.Mass == 1.0 && springKey.Stiffness == 100.0 && springKey.Damping == 10.0 && springKey.InitialVelocity == 0.0, "ModifySpringParamsCommand Undo restored spring properties");
+
+            history.Redo();
+            Assert(springKey.Mass == 2.5 && springKey.Stiffness == 250.0, "ModifySpringParamsCommand Redo re-applied spring properties");
         }
     }
 }
