@@ -21,7 +21,8 @@
   },
   "git": {
     "create_tag": false,
-    "repo_tagging": "single"
+    "repo_tagging": "single",
+    "allow_default_branch_commits": true
   },
   "parallelization": {
     "enabled": false,

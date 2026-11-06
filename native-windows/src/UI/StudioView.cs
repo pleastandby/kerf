@@ -157,6 +157,25 @@ namespace Kerf.UI
         private Border _canvasInteractBtn;
         private TextBlock _canvasInteractText;
 
+        // Graph Editor Components
+        private GraphEditorCanvas _graphEditorCanvas;
+        private ScrollViewer _graphCanvasScroll;
+        private GridSplitter _graphSplitter;
+        private Border _graphEditorHeaderBorder;
+        private TextBlock _graphTrackNameText;
+        private TextBlock _graphTrackUnitsText;
+        private Border _graphAutoFitBtn;
+        private TextBlock _graphAutoFitBtnText;
+        private Border _graphSmoothBtn;
+        private Border _graphBrokenBtn;
+        private Border _graphToggleBtn;
+        private TextBlock _graphToggleBtnText;
+        private RowDefinition _graphSplitterRowDef;
+        private RowDefinition _graphEditorRowDef;
+        private bool _isGraphEditorOpen = true;
+        private GridLength _lastGraphRowHeight = new GridLength(180);
+        private bool _isSyncingHorizontalScroll = false;
+
         // Document & Engine
         public KerfDocument Document { get; private set; }
         public string CurrentFilePath { get; private set; }
@@ -11557,6 +11576,8 @@ namespace Kerf.UI
                 SanitizeAnimationClips(Document);
                 EnsureTimelineControllerInitialized();
                 CaptureAnimationRestPose();
+                _isGraphEditorOpen = true;
+                ApplyGraphEditorVisibility();
                 _isStateMachineMode = true;
                 if (_timelineController != null) _timelineController.UseStateMachine = true;
                 if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
@@ -11624,10 +11645,16 @@ namespace Kerf.UI
             Grid.SetRow(transportBar, 0);
             grid.Children.Add(transportBar);
 
-            // 2. Timeline Body (Tracks container or State Machine container)
+            // 2. Timeline Body (Tracks container with vertical split panel to Graph Editor)
             var bodyGrid = new Grid();
-            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) }); // Left: Track headers
-            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Right: Ruler & Lanes
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) }); // Left: Track headers & Graph header
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Right: Ruler, Lanes & Graph Canvas
+
+            bodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 80 }); // Row 0: Tracks & Lanes
+            _graphSplitterRowDef = new RowDefinition { Height = new GridLength(5) }; // Row 1: GridSplitter
+            bodyGrid.RowDefinitions.Add(_graphSplitterRowDef);
+            _graphEditorRowDef = new RowDefinition { Height = new GridLength(180), MinHeight = 60 }; // Row 2: Graph Editor Panel
+            bodyGrid.RowDefinitions.Add(_graphEditorRowDef);
 
             // Left: Track Headers Stack
             var leftTrackBorder = new Border
@@ -11648,6 +11675,7 @@ namespace Kerf.UI
             Grid.SetRow(interpolationPanel, 1);
             leftTrackGrid.Children.Add(interpolationPanel);
             leftTrackBorder.Child = leftTrackGrid;
+            Grid.SetRow(leftTrackBorder, 0);
             Grid.SetColumn(leftTrackBorder, 0);
             bodyGrid.Children.Add(leftTrackBorder);
 
@@ -11677,6 +11705,68 @@ namespace Kerf.UI
 
             timelineCanvasScroll.Content = _timelineCanvasHost;
 
+            rightCanvasBorder.Child = timelineCanvasScroll;
+            Grid.SetRow(rightCanvasBorder, 0);
+            Grid.SetColumn(rightCanvasBorder, 1);
+            bodyGrid.Children.Add(rightCanvasBorder);
+
+            // Row 1: GridSplitter between Tracks and Graph Editor (Height = 5, Background = KerfBrand.FigmaBorderBrush) per D-01
+            _graphSplitter = new GridSplitter
+            {
+                Height = 5,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center,
+                Background = KerfBrand.FigmaBorderBrush,
+                ResizeDirection = GridResizeDirection.Rows,
+                ShowsPreview = false
+            };
+            Grid.SetRow(_graphSplitter, 1);
+            Grid.SetColumnSpan(_graphSplitter, 2);
+            bodyGrid.Children.Add(_graphSplitter);
+
+            // Row 2 Left: Graph Editor Header / Property Info Sidebar
+            _graphEditorHeaderBorder = CreateGraphEditorHeaderPanel();
+            Grid.SetRow(_graphEditorHeaderBorder, 2);
+            Grid.SetColumn(_graphEditorHeaderBorder, 0);
+            bodyGrid.Children.Add(_graphEditorHeaderBorder);
+
+            // Row 2 Right: Graph Editor Canvas ScrollViewer
+            var graphCanvasBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(19, 22, 29)),
+                ClipToBounds = true
+            };
+            _graphCanvasScroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+            _graphEditorCanvas = new GraphEditorCanvas();
+            _graphEditorCanvas.KeyframeModified += (kf, trk) =>
+            {
+                if (_timelineController != null)
+                {
+                    _timelineController.Seek(_timelineController.CurrentTime);
+                }
+                RefreshPropertyInspector();
+            };
+            _graphEditorCanvas.KeyframeSelectionChanged += (kf) =>
+            {
+                _editingInterpolationKeyframe = kf;
+                _selectedTimelineKeyframes.Clear();
+                if (kf != null) _selectedTimelineKeyframes.Add(kf);
+                UpdateTimelineKeyframeDiamondStyles();
+                RefreshInterpolationGraphPanels();
+                RefreshPropertyInspector();
+            };
+            _graphCanvasScroll.Content = _graphEditorCanvas;
+            graphCanvasBorder.Child = _graphCanvasScroll;
+
+            Grid.SetRow(graphCanvasBorder, 2);
+            Grid.SetColumn(graphCanvasBorder, 1);
+            bodyGrid.Children.Add(graphCanvasBorder);
+
+            // Cross-synchronized scrolling between Tracks and Graph Editor per D-02
             trackScroll.ScrollChanged += (s, e) =>
             {
                 if (e.VerticalChange != 0) timelineCanvasScroll.ScrollToVerticalOffset(trackScroll.VerticalOffset);
@@ -11684,11 +11774,34 @@ namespace Kerf.UI
             timelineCanvasScroll.ScrollChanged += (s, e) =>
             {
                 if (e.VerticalChange != 0) trackScroll.ScrollToVerticalOffset(timelineCanvasScroll.VerticalOffset);
+                if (!_isSyncingHorizontalScroll && e.HorizontalChange != 0 && _graphCanvasScroll != null)
+                {
+                    _isSyncingHorizontalScroll = true;
+                    try
+                    {
+                        _graphCanvasScroll.ScrollToHorizontalOffset(timelineCanvasScroll.HorizontalOffset);
+                    }
+                    finally
+                    {
+                        _isSyncingHorizontalScroll = false;
+                    }
+                }
             };
-
-            rightCanvasBorder.Child = timelineCanvasScroll;
-            Grid.SetColumn(rightCanvasBorder, 1);
-            bodyGrid.Children.Add(rightCanvasBorder);
+            _graphCanvasScroll.ScrollChanged += (s, e) =>
+            {
+                if (!_isSyncingHorizontalScroll && e.HorizontalChange != 0 && timelineCanvasScroll != null)
+                {
+                    _isSyncingHorizontalScroll = true;
+                    try
+                    {
+                        timelineCanvasScroll.ScrollToHorizontalOffset(_graphCanvasScroll.HorizontalOffset);
+                    }
+                    finally
+                    {
+                        _isSyncingHorizontalScroll = false;
+                    }
+                }
+            };
 
             _timelineTracksContainer = bodyGrid;
             _timelineTracksContainer.Visibility = _isStateMachineMode ? Visibility.Collapsed : Visibility.Visible;
@@ -11887,6 +12000,36 @@ namespace Kerf.UI
             speedBtn.MouseLeftButtonUp += (s, e) => CycleTimelineSpeed();
             rightStack.Children.Add(speedBtn);
 
+            // Graph Editor Toggle Button ("📈 Graph Editor" / "Timeline Only") per D-01
+            _graphToggleBtn = new Border
+            {
+                Background = _isGraphEditorOpen ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = Cursors.Hand
+            };
+            _graphToggleBtnText = new TextBlock
+            {
+                Text = _isGraphEditorOpen ? "📈 Graph Editor" : "Timeline Only",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = _isGraphEditorOpen ? KerfBrand.TextBlackBrush : Brushes.White
+            };
+            _graphToggleBtn.Child = _graphToggleBtnText;
+            _graphToggleBtn.MouseEnter += (s, e) =>
+            {
+                if (!_isGraphEditorOpen) _graphToggleBtn.Background = KerfBrand.FigmaBorderBrush;
+            };
+            _graphToggleBtn.MouseLeave += (s, e) =>
+            {
+                _graphToggleBtn.Background = _isGraphEditorOpen ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush;
+            };
+            _graphToggleBtn.MouseLeftButtonUp += (s, e) => ToggleGraphEditor();
+            rightStack.Children.Add(_graphToggleBtn);
+
             // Mode Tabs: [ ⚙ State Machine ] vs [ ⏱ Timeline Clips ]
             var modePill = new Border
             {
@@ -11981,6 +12124,284 @@ namespace Kerf.UI
             return btn;
         }
 
+        private Border CreateGraphEditorHeaderPanel()
+        {
+            var border = new Border
+            {
+                Background = KerfBrand.DarkSlateBrush,
+                BorderBrush = KerfBrand.TealBrush,
+                BorderThickness = new Thickness(0, 0, 1, 0),
+                Padding = new Thickness(10, 8, 10, 8)
+            };
+
+            var stack = new StackPanel();
+
+            var title = new TextBlock
+            {
+                Text = "GRAPH EDITOR",
+                FontSize = 9,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+            stack.Children.Add(title);
+
+            _graphTrackNameText = new TextBlock
+            {
+                Text = "No Track Focused",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 0, 0, 2)
+            };
+            stack.Children.Add(_graphTrackNameText);
+
+            _graphTrackUnitsText = new TextBlock
+            {
+                Text = "Click a track in timeline",
+                FontSize = 9,
+                Foreground = new SolidColorBrush(Color.FromRgb(110, 125, 150)),
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            stack.Children.Add(_graphTrackUnitsText);
+
+            // Button Row: [ Auto-Fit (F) ]
+            _graphAutoFitBtn = new Border
+            {
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 4, 6, 4),
+                Margin = new Thickness(0, 0, 0, 8),
+                Cursor = Cursors.Hand
+            };
+            _graphAutoFitBtnText = new TextBlock
+            {
+                Text = "⛶ Auto-Fit Framing [F]",
+                FontSize = 10,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            _graphAutoFitBtn.Child = _graphAutoFitBtnText;
+            _graphAutoFitBtn.MouseEnter += (s, e) => _graphAutoFitBtn.Background = KerfBrand.FigmaBorderBrush;
+            _graphAutoFitBtn.MouseLeave += (s, e) => _graphAutoFitBtn.Background = KerfBrand.FigmaPanelBrush;
+            _graphAutoFitBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                if (_graphEditorCanvas != null) _graphEditorCanvas.AutoFit();
+            };
+            stack.Children.Add(_graphAutoFitBtn);
+
+            // Tangent Continuity Row: [ Smooth ] vs [ Broken ] per D-06
+            var tangentLabel = new TextBlock
+            {
+                Text = "Tangent Slope (D-06):",
+                FontSize = 9,
+                Foreground = new SolidColorBrush(Color.FromRgb(110, 125, 150)),
+                Margin = new Thickness(0, 2, 0, 3)
+            };
+            stack.Children.Add(tangentLabel);
+
+            var tangentRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+            _graphSmoothBtn = CreateTangentModeButton("Smooth (180°)", true);
+            _graphBrokenBtn = CreateTangentModeButton("Broken (Alt)", false);
+            tangentRow.Children.Add(_graphSmoothBtn);
+            tangentRow.Children.Add(_graphBrokenBtn);
+            stack.Children.Add(tangentRow);
+
+            UpdateTangentButtonsState();
+
+            border.Child = stack;
+            return border;
+        }
+
+        private Border CreateTangentModeButton(string label, bool smooth)
+        {
+            var btn = new Border
+            {
+                Background = KerfBrand.FigmaPanelBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 3, 6, 3),
+                Margin = new Thickness(0, 0, 4, 0),
+                Cursor = Cursors.Hand
+            };
+            var text = new TextBlock
+            {
+                Text = label,
+                FontSize = 9,
+                Foreground = Brushes.White
+            };
+            btn.Child = text;
+            btn.MouseLeftButtonUp += (s, e) => SetKeyframeTangentMode(smooth);
+            return btn;
+        }
+
+        private void SetKeyframeTangentMode(bool smooth)
+        {
+            if (_editingInterpolationKeyframe != null)
+            {
+                _editingInterpolationKeyframe.IsTangentBroken = !smooth;
+                if (smooth && _editingInterpolationTrack != null && _editingInterpolationTrack.Keys != null)
+                {
+                    int idx = _editingInterpolationTrack.Keys.IndexOf(_editingInterpolationKeyframe);
+                    if (idx > 0 && idx < _editingInterpolationTrack.Keys.Count - 1)
+                    {
+                        var prev = _editingInterpolationTrack.Keys[idx - 1];
+                        var next = _editingInterpolationTrack.Keys[idx + 1];
+                        double dtOut = next.Time - _editingInterpolationKeyframe.Time;
+                        double dvOut = next.Value - _editingInterpolationKeyframe.Value;
+                        GraphEditorCanvas.AlignIncomingHandleCollinear(_editingInterpolationKeyframe, prev, _editingInterpolationKeyframe.X1, _editingInterpolationKeyframe.Y1, dtOut, dvOut);
+                    }
+                }
+                UpdateTangentButtonsState();
+                RefreshGraphEditor();
+                RefreshPropertyInspector();
+            }
+        }
+
+        private void UpdateTangentButtonsState()
+        {
+            if (_graphSmoothBtn == null || _graphBrokenBtn == null) return;
+            bool isBroken = (_editingInterpolationKeyframe != null && _editingInterpolationKeyframe.IsTangentBroken);
+            _graphSmoothBtn.Background = !isBroken ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush;
+            var st = _graphSmoothBtn.Child as TextBlock;
+            if (st != null) st.Foreground = !isBroken ? KerfBrand.TextBlackBrush : Brushes.White;
+
+            _graphBrokenBtn.Background = isBroken ? KerfBrand.AmberBrush : KerfBrand.FigmaPanelBrush;
+            var bt = _graphBrokenBtn.Child as TextBlock;
+            if (bt != null) bt.Foreground = isBroken ? KerfBrand.TextBlackBrush : Brushes.White;
+        }
+
+        private void ToggleGraphEditor()
+        {
+            _isGraphEditorOpen = !_isGraphEditorOpen;
+            ApplyGraphEditorVisibility();
+        }
+
+        private void ApplyGraphEditorVisibility()
+        {
+            if (_graphSplitterRowDef == null || _graphEditorRowDef == null) return;
+
+            if (_isGraphEditorOpen)
+            {
+                _graphSplitterRowDef.Height = new GridLength(5);
+                _graphEditorRowDef.Height = _lastGraphRowHeight.Value > 20 ? _lastGraphRowHeight : new GridLength(180);
+                if (_graphSplitter != null) _graphSplitter.Visibility = Visibility.Visible;
+                if (_graphCanvasScroll != null) _graphCanvasScroll.Visibility = Visibility.Visible;
+                if (_graphEditorHeaderBorder != null) _graphEditorHeaderBorder.Visibility = Visibility.Visible;
+
+                if (_graphToggleBtn != null)
+                {
+                    _graphToggleBtn.Background = KerfBrand.MintBrush;
+                    if (_graphToggleBtnText != null)
+                    {
+                        _graphToggleBtnText.Text = "📈 Graph Editor";
+                        _graphToggleBtnText.Foreground = KerfBrand.TextBlackBrush;
+                    }
+                }
+                RefreshGraphEditor();
+            }
+            else
+            {
+                if (_graphEditorRowDef.Height.Value > 20)
+                {
+                    _lastGraphRowHeight = _graphEditorRowDef.Height;
+                }
+                _graphSplitterRowDef.Height = new GridLength(0);
+                _graphEditorRowDef.Height = new GridLength(0);
+                if (_graphSplitter != null) _graphSplitter.Visibility = Visibility.Collapsed;
+                if (_graphCanvasScroll != null) _graphCanvasScroll.Visibility = Visibility.Collapsed;
+                if (_graphEditorHeaderBorder != null) _graphEditorHeaderBorder.Visibility = Visibility.Collapsed;
+
+                if (_graphToggleBtn != null)
+                {
+                    _graphToggleBtn.Background = KerfBrand.FigmaPanelBrush;
+                    if (_graphToggleBtnText != null)
+                    {
+                        _graphToggleBtnText.Text = "Timeline Only";
+                        _graphToggleBtnText.Foreground = Brushes.White;
+                    }
+                }
+            }
+        }
+
+        private void RefreshGraphEditor()
+        {
+            if (_graphEditorCanvas == null) return;
+
+            if (_editingInterpolationTrack == null && _selectedLayers.Count > 0 && _timelineController != null && _timelineController.ActiveClip != null)
+            {
+                uint selId = PropertyBinder.GetNumericNodeId(_selectedLayers[0].Id);
+                var tracks = _timelineController.ActiveClip.GetTracksForNode(selId);
+                if (tracks.Count > 0)
+                {
+                    _editingInterpolationTrack = tracks[0];
+                    if (_editingInterpolationTrack.Keys != null && _editingInterpolationTrack.Keys.Count > 0)
+                    {
+                        _editingInterpolationKeyframe = _editingInterpolationTrack.Keys[0];
+                    }
+                }
+            }
+
+            _graphEditorCanvas.ActiveTrack = _editingInterpolationTrack;
+            _graphEditorCanvas.SelectedKeyframe = _editingInterpolationKeyframe;
+            _graphEditorCanvas.PixelsPerSecond = _timelinePixelsPerSecond;
+            _graphEditorCanvas.Duration = (_timelineController != null && _timelineController.ActiveClip != null) ? _timelineController.ActiveClip.Duration : 2.0;
+            _graphEditorCanvas.PlayheadTime = (_timelineController != null) ? _timelineController.CurrentTime : 0.0;
+
+            UpdateGraphHeaderInfo();
+            UpdateTangentButtonsState();
+            _graphEditorCanvas.Redraw();
+        }
+
+        private void UpdateGraphHeaderInfo()
+        {
+            if (_graphTrackNameText == null) return;
+            if (_editingInterpolationTrack != null)
+            {
+                PropKey pk = (PropKey)_editingInterpolationTrack.Prop;
+                string propName = pk.ToString();
+                string units = GetPropertyUnits(pk);
+                string layerName = "";
+                if (_selectedLayers.Count > 0) layerName = _selectedLayers[0].Name;
+
+                _graphTrackNameText.Text = string.IsNullOrEmpty(layerName) ? propName : string.Format("{0} · {1}", layerName, propName);
+                _graphTrackUnitsText.Text = string.Format("Units: {0}", units);
+            }
+            else
+            {
+                _graphTrackNameText.Text = "No Track Focused";
+                _graphTrackUnitsText.Text = "Click a track in timeline";
+            }
+        }
+
+        private static string GetPropertyUnits(PropKey pk)
+        {
+            switch (pk)
+            {
+                case PropKey.X:
+                case PropKey.Y:
+                case PropKey.Width:
+                case PropKey.Height:
+                case PropKey.VisualWidth:
+                case PropKey.VisualHeight:
+                case PropKey.CornerRadius:
+                    return "px";
+                case PropKey.Rotation:
+                    return "° (deg)";
+                case PropKey.Opacity:
+                    return "% (0.0 - 1.0)";
+                case PropKey.ScaleX:
+                case PropKey.ScaleY:
+                    return "ratio (1.0 = 100%)";
+                default:
+                    return "value";
+            }
+        }
+
         private FrameworkElement CreateInterpolationGraphPanel(bool stateMachine)
         {
             var border = new Border { Background = new SolidColorBrush(Color.FromRgb(26, 30, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(48, 55, 68)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(5, 3, 5, 4), Margin = new Thickness(0, 4, 0, 0) };
@@ -12043,6 +12464,7 @@ namespace Kerf.UI
             RefreshInterpolationGraphPanel(false);
             RefreshInterpolationGraphPanel(true);
             RefreshDefaultInterpolationPresetButtons();
+            RefreshGraphEditor();
         }
 
         private void FindTimelineInterpolationKey()
@@ -13899,6 +14321,7 @@ namespace Kerf.UI
             {
                 if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
                 if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Visible;
+                ApplyGraphEditorVisibility();
                 RefreshTimelineUI();
             }
             UpdateTimelineModeTabs();
@@ -16070,6 +16493,11 @@ namespace Kerf.UI
                 double factor = e.Delta > 0 ? 1.15 : (1.0 / 1.15);
                 _timelinePixelsPerSecond = Math.Max(60.0, Math.Min(1200.0, _timelinePixelsPerSecond * factor));
                 RefreshTimelineCanvas();
+                if (_graphEditorCanvas != null)
+                {
+                    _graphEditorCanvas.PixelsPerSecond = _timelinePixelsPerSecond;
+                    _graphEditorCanvas.Redraw();
+                }
                 e.Handled = true;
             }
         }
