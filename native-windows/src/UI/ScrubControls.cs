@@ -56,7 +56,7 @@ namespace Kerf.UI
             };
 
             var grid = new Grid();
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             // 1. Scrub Label (SizeWE cursor, click & drag to scrub)
@@ -68,6 +68,8 @@ namespace Kerf.UI
                 Foreground = KerfBrand.TextMutedBrush,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(6, 0, 4, 0),
+                MinWidth = 16,
                 Cursor = Cursors.SizeWE,
                 ToolTip = tooltip ?? label
             };
@@ -310,6 +312,7 @@ namespace Kerf.UI
             dock.Children.Add(badge);
 
             // Smooth Slider Track
+            bool isInitializing = true;
             var slider = new Slider
             {
                 Minimum = min,
@@ -326,11 +329,12 @@ namespace Kerf.UI
             {
                 double val = slider.Value;
                 badge.Text = formatBadge(val);
-                if (onChanged != null)
+                if (!isInitializing && onChanged != null)
                 {
                     onChanged(val);
                 }
             };
+            isInitializing = false;
 
             slider.PreviewMouseLeftButtonUp += (s, e) =>
             {

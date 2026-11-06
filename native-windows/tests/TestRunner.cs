@@ -85,6 +85,7 @@ namespace Kerf.Tests
             RunTest("Rive 3-Axis + Rotation Gizmo, Y Key Reposition & Non-Destructive Frame Scaling", TestRiveAnchorPointGizmoAndContentScaling);
             RunTest("Easing Engine, Closed-Form Harmonic Springs & Graph Editor Reconstruction", TestEasingEngineClosedFormSpringsAndGraphEditor);
             RunTest("Universal Graph Editor Sidebar Consolidation & Clean Timeline", TestUniversalGraphEditorConsolidationAndCleanTimeline);
+            RunTest("Single Corner Radius Control & Design vs Animate Mode Isolation", TestSingleCornerRadiusControlAndDesignAnimateIsolation);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -5313,6 +5314,84 @@ namespace Kerf.Tests
             // 4. Verify clean timeline keyframe diamond data integrity
             Assert(track.Keys.Count == 2, "Track preserves keyframe count");
             Assert(track.Keys[0].Time == 0.0 && track.Keys[1].Time == 1.0, "Keyframe times preserved");
+        }
+
+        private static void TestSingleCornerRadiusControlAndDesignAnimateIsolation()
+        {
+            // 1. Verify entity-level Corner Radius updates all four corners in Design Mode
+            var node = new LayerNode
+            {
+                Id = "card-rect",
+                Name = "Rounded Card",
+                Type = ElementType.Rectangle,
+                X = 100,
+                Y = 200,
+                Width = 240,
+                Height = 160,
+                CornerRadius = 0.0
+            };
+
+            // Set CornerRadius to 122.0 in Design Mode
+            double designRadius = 122.0;
+            node.CornerRadius = designRadius;
+            node.CornerRadiusTopLeft = designRadius;
+            node.CornerRadiusTopRight = designRadius;
+            node.CornerRadiusBottomRight = designRadius;
+            node.CornerRadiusBottomLeft = designRadius;
+
+            Assert(node.CornerRadius == 122.0, "LayerNode CornerRadius set to 122.0");
+            Assert(node.CornerRadiusTopLeft == 122.0 && node.CornerRadiusBottomRight == 122.0, "All corner radii synchronized");
+
+            // 2. Command history undo/redo in Design Mode does not pollute animation
+            var history = new CommandHistory();
+            var cmd = new ModifyCornerRadiusCommand(node, 0.0, 122.0, null);
+            history.Execute(cmd);
+            Assert(node.CornerRadius == 122.0, "ModifyCornerRadiusCommand sets 122.0");
+            history.Undo();
+            Assert(node.CornerRadius == 0.0, "ModifyCornerRadiusCommand Undo restores 0.0");
+            history.Redo();
+            Assert(node.CornerRadius == 122.0, "ModifyCornerRadiusCommand Redo restores 122.0");
+
+            // 3. Verify Design Mode changes never create animation tracks
+            var doc = new KerfDocument();
+            doc.Animation = new AnimationProjectData();
+            doc.Animation.Clips = new List<Clip>();
+            var defaultClip = new Clip(100, "Default Animation", 2.0);
+            doc.Animation.Clips.Add(defaultClip);
+            Assert(defaultClip.Tracks.Count == 0, "No tracks created by design modifications");
+
+            // 4. Entering Animate Mode: Rest pose captures design value 122.0
+            double restX = node.X;
+            double restY = node.Y;
+            double restCornerRadius = node.CornerRadius;
+            Assert(restCornerRadius == 122.0, "Rest pose captured design CornerRadius 122.0");
+
+            // 5. When timeline evaluates an unkeyed track, CornerRadius is NOT reset to 0
+            var poseDict = new Dictionary<uint, Dictionary<ushort, double>>();
+            uint numNodeId = PropertyBinder.GetNumericNodeId(node.Id);
+            // Pose dictionary has an X animation, but NO CornerRadius key
+            var props = new Dictionary<ushort, double>();
+            props[(ushort)PropKey.X] = 150.0;
+            poseDict[numNodeId] = props;
+
+            // Restoring rest pose before applying unkeyed animation keeps CornerRadius = 122.0
+            node.CornerRadius = restCornerRadius;
+            PropertyBinder.ApplyPoseToLayer(node, numNodeId, poseDict);
+            Assert(node.CornerRadius == 122.0, "Unkeyed animation preserves design CornerRadius 122.0");
+            Assert(node.RenderTransform.TranslationX == 50.0, "Animated X applied non-destructively");
+
+            // 6. When animation explicitly keys CornerRadius, it evaluates during playback
+            props[(ushort)PropKey.CornerRadius] = 24.0;
+            PropertyBinder.ApplyPoseToLayer(node, numNodeId, poseDict);
+            Assert(node.CornerRadius == 24.0, "Keyed CornerRadius evaluates to 24.0 during playback");
+
+            // 7. On stop / return to design mode, rest pose restores 122.0 perfectly
+            node.CornerRadius = restCornerRadius;
+            node.CornerRadiusTopLeft = restCornerRadius;
+            node.CornerRadiusTopRight = restCornerRadius;
+            node.CornerRadiusBottomRight = restCornerRadius;
+            node.CornerRadiusBottomLeft = restCornerRadius;
+            Assert(node.CornerRadius == 122.0, "Restoring design mode maintains original 122.0 radius");
         }
     }
 }

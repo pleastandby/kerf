@@ -3779,7 +3779,18 @@ namespace Kerf.UI
             row3.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var rotBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("∠", primary.Rotation, val => { primary.Rotation = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.Rotation, primary.Rotation); }, suffix: "°"), primary, PropKey.Rotation);
-            var crBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Radius", primary.CornerRadius, val => { primary.CornerRadius = Math.Max(0, val); InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.CornerRadius, primary.CornerRadius); }, min: 0, suffix: "px"), primary, PropKey.CornerRadius);
+            var crBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Radius", primary.CornerRadius, val =>
+            {
+                double r = Math.Max(0, Math.Round(val, 1));
+                primary.CornerRadius = r;
+                primary.CornerRadiusTopLeft = r;
+                primary.CornerRadiusTopRight = r;
+                primary.CornerRadiusBottomRight = r;
+                primary.CornerRadiusBottomLeft = r;
+                InvalidateAndRefresh(primary);
+                AutoKeyProperty(primary, PropKey.CornerRadius, r);
+                History.MarkDirty();
+            }, min: 0, suffix: "px", tooltip: "Corner Radius (px)"), primary, PropKey.CornerRadius);
             Grid.SetColumn(rotBox, 0); Grid.SetColumn(crBox, 2);
             row3.Children.Add(rotBox); row3.Children.Add(crBox);
             _propertyInspectorStack.Children.Add(row3);
@@ -3918,46 +3929,6 @@ namespace Kerf.UI
                 Grid.SetColumn(axBox, 0); Grid.SetColumn(ayBox, 2);
                 anchorRow.Children.Add(axBox); anchorRow.Children.Add(ayBox);
                 _propertyInspectorStack.Children.Add(anchorRow);
-            }
-
-            // Shape Corner Curving Controls (Smooth Slider & Quick Presets: 0px, 4px, 8px, 16px, 24px, Pill)
-            if (primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Group || primary.Type == ElementType.Image)
-            {
-                double maxRadius = Math.Max(10.0, Math.Min(primary.Width, primary.Height) / 2.0);
-
-                var crSlider = ScrubControls.CreateSmoothSlider("Corner Curve", primary.CornerRadius, 0.0, maxRadius, val =>
-                {
-                    primary.CornerRadius = Math.Round(val);
-                    InvalidateAndRefresh(primary);
-                    AutoKeyProperty(primary, PropKey.CornerRadius, primary.CornerRadius);
-                }, "px");
-                _propertyInspectorStack.Children.Add(crSlider);
-
-                var presetRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
-                double[] presets = new double[] { 0, 4, 8, 16, 24 };
-                foreach (var r in presets)
-                {
-                    double prVal = r;
-                    var pBtn = CreateSmallButton(prVal + "px", "Set radius to " + prVal + "px", () =>
-                    {
-                        primary.CornerRadius = prVal;
-                        InvalidateAndRefresh(primary);
-                        AutoKeyProperty(primary, PropKey.CornerRadius, primary.CornerRadius);
-                        RefreshPropertyInspector();
-                    });
-                    pBtn.Width = 32;
-                    presetRow.Children.Add(pBtn);
-                }
-                var pillBtn = CreateSmallButton("Pill", "Fully rounded capsule", () =>
-                {
-                    primary.CornerRadius = maxRadius;
-                    InvalidateAndRefresh(primary);
-                    AutoKeyProperty(primary, PropKey.CornerRadius, primary.CornerRadius);
-                    RefreshPropertyInspector();
-                });
-                pillBtn.Width = 36;
-                presetRow.Children.Add(pillBtn);
-                _propertyInspectorStack.Children.Add(presetRow);
             }
 
             // Layer Opacity Smooth Slider
@@ -12065,6 +12036,9 @@ namespace Kerf.UI
                 BuildStateMachineListeners();
                 BuildStateMachineStatesGraph();
                 RefreshTimelineUI();
+                RefreshPropertyInspector();
+                RefreshLayersList();
+                RefreshCanvas();
             }
             else
             {
@@ -12091,6 +12065,9 @@ namespace Kerf.UI
                 {
                     _timelinePanel.Visibility = Visibility.Collapsed;
                 }
+                RefreshPropertyInspector();
+                RefreshLayersList();
+                RefreshCanvas();
             }
         }
 
@@ -15777,6 +15754,17 @@ namespace Kerf.UI
                 _animationNodesById[id] = layer;
                 if (layer.RenderTransform == null) layer.RenderTransform = new RenderTransform();
                 layer.RenderTransform.Reset();
+
+                AnimationRestPose rest;
+                if (_animationRestPose.TryGetValue(layer, out rest) && rest != null)
+                {
+                    layer.CornerRadius = rest.CornerRadius;
+                    layer.CornerRadiusTopLeft = rest.CornerRadiusTopLeft;
+                    layer.CornerRadiusTopRight = rest.CornerRadiusTopRight;
+                    layer.CornerRadiusBottomRight = rest.CornerRadiusBottomRight;
+                    layer.CornerRadiusBottomLeft = rest.CornerRadiusBottomLeft;
+                    layer.Opacity = rest.Opacity;
+                }
             }
 
             if (pose != null)
@@ -16191,6 +16179,7 @@ namespace Kerf.UI
 
         private void AddKeyframeForProperty(LayerNode layer, PropKey property, double value)
         {
+            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
             AddKeyframeForPropertyInternal(layer, property, value);
 
             if (layer != null && layer.LockAspectRatio)
@@ -16228,8 +16217,9 @@ namespace Kerf.UI
 
         private void AddKeyframeForPropertyInternal(LayerNode layer, PropKey property, double value)
         {
+            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
             if (_timelineController == null) EnsureTimelineControllerInitialized();
-            if (_timelineController == null || layer == null) return;
+            if (_timelineController == null) return;
             var clip = _timelineController.ActiveClip;
             if (clip == null)
             {
