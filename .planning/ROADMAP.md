@@ -69,9 +69,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: Implement core keyframe data architecture, stable GUIDs, property tracks, keyframe CRUD, clipboard, and sorting.
-- [ ] 03-02: Build hierarchical timeline authoring UI, expandable object lanes, time ruler, frame snapping, and multi-keyframe dragging.
-- [ ] 03-03: Integrate Animate Mode transform inspector, keyframe toggles, and automated verification tests (Test #52).
+- [x] 03-01: Implement core keyframe data architecture, stable GUIDs, property tracks, keyframe CRUD, clipboard, and sorting.
+- [x] 03-02: Build hierarchical timeline authoring UI, expandable object lanes, time ruler, frame snapping, and multi-keyframe dragging.
+- [x] 03-03: Integrate Animate Mode transform inspector, keyframe toggles, and automated verification tests (Test #52).
 
 ---
 

@@ -21,6 +21,14 @@ namespace Kerf.Engine.Animation
         public bool IsPlaying { get; private set; }
         public LoopMode LoopMode { get; set; }
         public bool UseStateMachine { get; set; }
+        public bool SnapToFrames { get; set; }
+
+        public double SnapTime(double time)
+        {
+            if (!SnapToFrames) return time;
+            double fps = Math.Max(1.0, Fps);
+            return Math.Round(time * fps) / fps;
+        }
 
         private Clip _activeClip;
         public Clip ActiveClip
@@ -53,6 +61,7 @@ namespace Kerf.Engine.Animation
             IsPlaying = false;
             LoopMode = LoopMode.Loop;
             UseStateMachine = false;
+            SnapToFrames = true;
             _currentPose = new Dictionary<uint, Dictionary<ushort, double>>();
         }
 

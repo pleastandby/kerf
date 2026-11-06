@@ -41,6 +41,7 @@ namespace Kerf.Engine.Animation
 
     public class Keyframe
     {
+        public string Id { get; set; }
         public double Time { get; set; }
         public double Value { get; set; }
         public InterpMode Interp { get; set; }
@@ -51,8 +52,9 @@ namespace Kerf.Engine.Animation
 
         public Keyframe() : this(0.0, 0.0, InterpMode.Linear) { }
 
-        public Keyframe(double time, double val, InterpMode interp, double x1 = 0.0, double y1 = 0.0, double x2 = 1.0, double y2 = 1.0)
+        public Keyframe(double time, double val, InterpMode interp, double x1 = 0.0, double y1 = 0.0, double x2 = 1.0, double y2 = 1.0, string id = null)
         {
+            Id = !string.IsNullOrEmpty(id) ? id : Guid.NewGuid().ToString("N");
             Time = time;
             Value = val;
             Interp = interp;
@@ -60,6 +62,11 @@ namespace Kerf.Engine.Animation
             Y1 = y1;
             X2 = x2;
             Y2 = y2;
+        }
+
+        public Keyframe Clone(bool preserveId = false)
+        {
+            return new Keyframe(Time, Value, Interp, X1, Y1, X2, Y2, preserveId ? Id : null);
         }
 
         public static Keyframe Hold(double time, double val)
@@ -76,20 +83,36 @@ namespace Kerf.Engine.Animation
         {
             return new Keyframe(time, val, InterpMode.Cubic, x1, y1, x2, y2);
         }
+
+        public override bool Equals(object obj)
+        {
+            var other = obj as Keyframe;
+            if (other == null) return false;
+            return string.Equals(Id, other.Id, StringComparison.Ordinal);
+        }
+
+        public override int GetHashCode()
+        {
+            return Id != null ? Id.GetHashCode() : 0;
+        }
     }
 
     public class Track
     {
         public uint NodeId { get; set; }
+        public string TargetNodeId { get; set; }
         public ushort Prop { get; set; }
+        public string PropertyPath { get; set; }
         public List<Keyframe> Keys { get; set; }
 
         public Track() : this(0, 0) { }
 
-        public Track(uint nodeId, ushort prop)
+        public Track(uint nodeId, ushort prop, string targetNodeId = null, string propPath = null)
         {
             NodeId = nodeId;
+            TargetNodeId = targetNodeId ?? string.Empty;
             Prop = prop;
+            PropertyPath = propPath ?? ((PropKey)prop).ToString();
             Keys = new List<Keyframe>();
         }
 
@@ -99,15 +122,101 @@ namespace Kerf.Engine.Animation
             if (Keys == null) Keys = new List<Keyframe>();
             for (int i = 0; i < Keys.Count; i++)
             {
-                if (Math.Abs(Keys[i].Time - kf.Time) < 1e-9)
+                if (Math.Abs(Keys[i].Time - kf.Time) < 1e-6)
                 {
-                    Keys[i] = kf;
+                    // Deterministic duplicate resolution: update existing keyframe's values
+                    Keys[i].Value = kf.Value;
+                    Keys[i].Interp = kf.Interp;
+                    Keys[i].X1 = kf.X1;
+                    Keys[i].Y1 = kf.Y1;
+                    Keys[i].X2 = kf.X2;
+                    Keys[i].Y2 = kf.Y2;
                     return;
                 }
             }
             int idx = Keys.BinarySearch(kf, KeyframeComparer.Instance);
             if (idx < 0) idx = ~idx;
             Keys.Insert(idx, kf);
+        }
+
+        public bool RemoveKeyframe(string keyframeId)
+        {
+            if (Keys == null || string.IsNullOrEmpty(keyframeId)) return false;
+            for (int i = 0; i < Keys.Count; i++)
+            {
+                if (Keys[i].Id == keyframeId)
+                {
+                    Keys.RemoveAt(i);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool RemoveKeyframeAt(double time, double tolerance = 1e-6)
+        {
+            if (Keys == null) return false;
+            for (int i = 0; i < Keys.Count; i++)
+            {
+                if (Math.Abs(Keys[i].Time - time) <= tolerance)
+                {
+                    Keys.RemoveAt(i);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public Keyframe FindKeyframeAt(double time, double tolerance = 1e-6)
+        {
+            if (Keys == null) return null;
+            for (int i = 0; i < Keys.Count; i++)
+            {
+                if (Math.Abs(Keys[i].Time - time) <= tolerance)
+                {
+                    return Keys[i];
+                }
+            }
+            return null;
+        }
+
+        public double? GetPreviousKeyframeTime(double currentTime)
+        {
+            if (Keys == null || Keys.Count == 0) return null;
+            double? prev = null;
+            for (int i = 0; i < Keys.Count; i++)
+            {
+                if (Keys[i].Time < currentTime - 1e-4)
+                {
+                    prev = Keys[i].Time;
+                }
+                else
+                {
+                    break;
+                }
+            }
+            return prev;
+        }
+
+        public double? GetNextKeyframeTime(double currentTime)
+        {
+            if (Keys == null || Keys.Count == 0) return null;
+            for (int i = 0; i < Keys.Count; i++)
+            {
+                if (Keys[i].Time > currentTime + 1e-4)
+                {
+                    return Keys[i].Time;
+                }
+            }
+            return null;
+        }
+
+        public void SortKeys()
+        {
+            if (Keys != null && Keys.Count > 1)
+            {
+                Keys.Sort(KeyframeComparer.Instance);
+            }
         }
 
         public double Sample(double t)
@@ -221,6 +330,41 @@ namespace Kerf.Engine.Animation
             var pose = new Dictionary<uint, Dictionary<ushort, double>>();
             SampleToPose(t, pose);
             return pose;
+        }
+
+        public Track GetTrack(uint nodeId, ushort prop)
+        {
+            if (Tracks == null) return null;
+            for (int i = 0; i < Tracks.Count; i++)
+            {
+                if (Tracks[i].NodeId == nodeId && Tracks[i].Prop == prop)
+                {
+                    return Tracks[i];
+                }
+            }
+            return null;
+        }
+
+        public Track GetOrCreateTrack(uint nodeId, ushort prop, string targetNodeId = null, string propPath = null)
+        {
+            var tr = GetTrack(nodeId, prop);
+            if (tr == null)
+            {
+                tr = new Track(nodeId, prop, targetNodeId, propPath);
+                AddTrack(tr);
+            }
+            return tr;
+        }
+
+        public List<Track> GetTracksForNode(uint nodeId)
+        {
+            var list = new List<Track>();
+            if (Tracks == null) return list;
+            for (int i = 0; i < Tracks.Count; i++)
+            {
+                if (Tracks[i].NodeId == nodeId) list.Add(Tracks[i]);
+            }
+            return list;
         }
     }
 

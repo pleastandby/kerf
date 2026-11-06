@@ -80,3 +80,4 @@ Replace the existing single-layer, unstable timeline implementation with a relia
 - `StudioView.UpdatePropertyPanel`: Inject Animate Mode keyframe diamond toggles and navigation arrows.
 - `TestRunner.cs`: Add Test #52 verifying all authoring capabilities.
 </code_context>
+

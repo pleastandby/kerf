@@ -78,6 +78,17 @@ namespace Kerf.UI
         private Dictionary<Keyframe, double> _timelineKeyframeDragStartTimes = new Dictionary<Keyframe, double>();
         private readonly HashSet<Keyframe> _selectedTimelineKeyframes = new HashSet<Keyframe>();
         private readonly Dictionary<Keyframe, AnimTrack> _timelineKeyframeOwners = new Dictionary<Keyframe, AnimTrack>();
+        private readonly HashSet<uint> _collapsedTimelineObjects = new HashSet<uint>();
+
+        private struct TimelineLaneInfo
+        {
+            public bool IsMaster;
+            public uint NodeId;
+            public AnimTrack Track;
+            public double Y;
+            public double Height;
+        }
+
         private DateTime _lastAnimationTickUtc = DateTime.MinValue;
 
         // Left Sidebar Tabs (Layers vs Assets)
@@ -3188,6 +3199,65 @@ namespace Kerf.UI
             Grid.SetColumn(rotBox, 0); Grid.SetColumn(crBox, 2);
             row3.Children.Add(rotBox); row3.Children.Add(crBox);
             _propertyInspectorStack.Children.Add(row3);
+
+            if (_currentStudioMode == StudioMode.Animate)
+            {
+                var scaleRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                double currentScaleX = primary.RenderTransform != null ? primary.RenderTransform.ScaleX : 1.0;
+                double currentScaleY = primary.RenderTransform != null ? primary.RenderTransform.ScaleY : 1.0;
+
+                var sxBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("ScaleX", currentScaleX, val =>
+                {
+                    if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
+                    primary.RenderTransform.ScaleX = val;
+                    InvalidateAndRefresh(primary);
+                    AutoKeyProperty(primary, PropKey.ScaleX, val);
+                }), primary, PropKey.ScaleX);
+
+                var syBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("ScaleY", currentScaleY, val =>
+                {
+                    if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
+                    primary.RenderTransform.ScaleY = val;
+                    InvalidateAndRefresh(primary);
+                    AutoKeyProperty(primary, PropKey.ScaleY, val);
+                }), primary, PropKey.ScaleY);
+
+                Grid.SetColumn(sxBox, 0); Grid.SetColumn(syBox, 2);
+                scaleRow.Children.Add(sxBox); scaleRow.Children.Add(syBox);
+                _propertyInspectorStack.Children.Add(scaleRow);
+
+                var anchorRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                anchorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                anchorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                anchorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                double currentAnchorX = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.0;
+                double currentAnchorY = primary.RenderTransform != null ? primary.RenderTransform.AnchorY : 0.0;
+
+                var axBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Anc X", currentAnchorX, val =>
+                {
+                    if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
+                    primary.RenderTransform.AnchorX = val;
+                    InvalidateAndRefresh(primary);
+                    AutoKeyProperty(primary, PropKey.AnchorX, val);
+                }), primary, PropKey.AnchorX);
+
+                var ayBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Anc Y", currentAnchorY, val =>
+                {
+                    if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
+                    primary.RenderTransform.AnchorY = val;
+                    InvalidateAndRefresh(primary);
+                    AutoKeyProperty(primary, PropKey.AnchorY, val);
+                }), primary, PropKey.AnchorY);
+
+                Grid.SetColumn(axBox, 0); Grid.SetColumn(ayBox, 2);
+                anchorRow.Children.Add(axBox); anchorRow.Children.Add(ayBox);
+                _propertyInspectorStack.Children.Add(anchorRow);
+            }
 
             // Shape Corner Curving Controls (Smooth Slider & Quick Presets: 0px, 4px, 8px, 16px, 24px, Pill)
             if (primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Group || primary.Type == ElementType.Image)
@@ -10437,6 +10507,36 @@ namespace Kerf.UI
                     e.Handled = true;
                     return;
                 }
+                if (isCtrl && !isShift && !isAlt && shortcutKey == Key.C && _selectedTimelineKeyframes.Count > 0)
+                {
+                    CopySelectedTimelineKeyframes();
+                    e.Handled = true;
+                    return;
+                }
+                if (isCtrl && !isShift && !isAlt && shortcutKey == Key.V && KeyframeClipboard.HasData)
+                {
+                    PasteTimelineKeyframesAtPlayhead();
+                    e.Handled = true;
+                    return;
+                }
+                if (isCtrl && !isShift && !isAlt && shortcutKey == Key.D && _selectedTimelineKeyframes.Count > 0)
+                {
+                    DuplicateSelectedTimelineKeyframes();
+                    e.Handled = true;
+                    return;
+                }
+                if (!isCtrl && !isShift && !isAlt && shortcutKey == Key.J && _timelineController != null)
+                {
+                    JumpToPreviousKeyframe();
+                    e.Handled = true;
+                    return;
+                }
+                if (!isCtrl && !isShift && !isAlt && shortcutKey == Key.K && _timelineController != null)
+                {
+                    JumpToNextKeyframe();
+                    e.Handled = true;
+                    return;
+                }
                 if (isAlt && isShift && shortcutKey == Key.S && _selectedTimelineKeyframes.Count > 1)
                 {
                     StaggerSelectedTimelineKeyframes(false);
@@ -10865,7 +10965,7 @@ namespace Kerf.UI
             leftTrackGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             leftTrackGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(92) });
             var trackScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-            _timelineTracksStack = new StackPanel { Margin = new Thickness(8, 4, 8, 4) };
+            _timelineTracksStack = new StackPanel { Margin = new Thickness(0) };
             trackScroll.Content = _timelineTracksStack;
             Grid.SetRow(trackScroll, 0);
             leftTrackGrid.Children.Add(trackScroll);
@@ -10882,6 +10982,11 @@ namespace Kerf.UI
                 Background = new SolidColorBrush(Color.FromRgb(18, 21, 29)),
                 ClipToBounds = true
             };
+            var timelineCanvasScroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
             _timelineCanvasHost = new Canvas
             {
                 Height = 230,
@@ -10893,8 +10998,20 @@ namespace Kerf.UI
             _timelineCanvasHost.PreviewMouseLeftButtonDown += HandleTimelineCanvasPreviewMouseDown;
             _timelineCanvasHost.PreviewMouseMove += HandleTimelineCanvasMouseMove;
             _timelineCanvasHost.PreviewMouseLeftButtonUp += HandleTimelineCanvasMouseUp;
+            _timelineCanvasHost.PreviewMouseWheel += HandleTimelineCanvasMouseWheel;
 
-            rightCanvasBorder.Child = _timelineCanvasHost;
+            timelineCanvasScroll.Content = _timelineCanvasHost;
+
+            trackScroll.ScrollChanged += (s, e) =>
+            {
+                if (e.VerticalChange != 0) timelineCanvasScroll.ScrollToVerticalOffset(trackScroll.VerticalOffset);
+            };
+            timelineCanvasScroll.ScrollChanged += (s, e) =>
+            {
+                if (e.VerticalChange != 0) trackScroll.ScrollToVerticalOffset(timelineCanvasScroll.VerticalOffset);
+            };
+
+            rightCanvasBorder.Child = timelineCanvasScroll;
             Grid.SetColumn(rightCanvasBorder, 1);
             bodyGrid.Children.Add(rightCanvasBorder);
 
@@ -13259,6 +13376,7 @@ namespace Kerf.UI
                 foreach (var entry in _timelineKeyframeDragStartTimes)
                     entry.Key.Time = Math.Max(0.0, Math.Min(duration, entry.Value + delta));
                 SortSelectedKeyframeTracks();
+                if (_timelineController != null) _timelineController.Seek(_timelineController.CurrentTime);
                 RefreshTimelineCanvas();
                 return;
             }
@@ -13337,19 +13455,19 @@ namespace Kerf.UI
             _selectedTimelineKeyframes.Clear();
             if (_timelineMarqueeAdditive)
                 foreach (var keyframe in _timelineMarqueeInitialSelection) _selectedTimelineKeyframes.Add(keyframe);
-            var selectedLayer = _selectedLayers.FirstOrDefault();
-            uint selectedId = selectedLayer != null ? PropertyBinder.GetNumericNodeId(selectedLayer.Id) : 0;
-            foreach (var track in _timelineController.ActiveClip.Tracks ?? new List<AnimTrack>())
+
+            var lanes = BuildTimelineLanes();
+            foreach (var lane in lanes)
             {
-                if (selectedLayer != null && track.NodeId != selectedId) continue;
-                double centerY = 24.0 + GetPropRowIndex(track.Prop) * 21.0 + 10.5;
-                foreach (var keyframe in track.Keys ?? new List<Keyframe>())
+                if (lane.IsMaster || lane.Track == null) continue;
+                double centerY = lane.Y + 11.0;
+                foreach (var keyframe in lane.Track.Keys ?? new List<Keyframe>())
                 {
                     var keyRect = new Rect(keyframe.Time * _timelinePixelsPerSecond - 6.0, centerY - 6.0, 12.0, 12.0);
                     if (selectionRect.IntersectsWith(keyRect))
                     {
                         _selectedTimelineKeyframes.Add(keyframe);
-                        _timelineKeyframeOwners[keyframe] = track;
+                        _timelineKeyframeOwners[keyframe] = lane.Track;
                     }
                 }
             }
@@ -13538,7 +13656,8 @@ namespace Kerf.UI
         private void ScrubTimelineAtPoint(Point pt)
         {
             if (_timelineController == null) EnsureTimelineControllerInitialized();
-            double time = Math.Max(0.0, Math.Min(_timelineController.Duration, pt.X / _timelinePixelsPerSecond));
+            double rawTime = Math.Max(0.0, Math.Min(_timelineController.Duration, pt.X / _timelinePixelsPerSecond));
+            double time = _timelineController.SnapToFrames ? _timelineController.SnapTime(rawTime) : rawTime;
             _timelineController.Seek(time);
             UpdateTimelineTimeReadout();
             UpdateTimelineScrubberPosition();
@@ -13548,7 +13667,9 @@ namespace Kerf.UI
         private void UpdateTimelineTimeReadout()
         {
             if (_timelineController == null || _timelineTimeText == null) return;
-            _timelineTimeText.Text = string.Format("{0:F2}s / {1:F2}s", _timelineController.CurrentTime, _timelineController.Duration);
+            int currentFrame = (int)Math.Round(_timelineController.CurrentTime * _timelineController.Fps);
+            int totalFrames = (int)Math.Round(_timelineController.Duration * _timelineController.Fps);
+            _timelineTimeText.Text = string.Format("{0}f ({1:F2}s) / {2}f ({3:F2}s)", currentFrame, _timelineController.CurrentTime, totalFrames, _timelineController.Duration);
         }
 
         private void UpdateTimelineScrubberPosition()
@@ -13912,32 +14033,134 @@ namespace Kerf.UI
         {
             if (field == null || _currentStudioMode != StudioMode.Animate) return field;
             var grid = new Grid { Margin = new Thickness(0) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(23) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Input field
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) }); // Jump Prev ◀
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) }); // Diamond ◆/◇
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) }); // Jump Next ▶
             Grid.SetColumn(field, 0);
             grid.Children.Add(field);
-            var button = new Button
+
+            uint nodeId = layer != null ? PropertyBinder.GetNumericNodeId(layer.Id) : 0;
+            var clip = _timelineController != null ? _timelineController.ActiveClip : null;
+            AnimTrack track = (clip != null && nodeId != 0) ? clip.GetTrack(nodeId, (ushort)property) : null;
+            bool hasTrack = (track != null && track.Keys != null && track.Keys.Count > 0);
+            double currentTime = _timelineController != null ? _timelineController.CurrentTime : 0.0;
+            Keyframe existingKey = (track != null) ? track.FindKeyframeAt(currentTime, 0.02) : null;
+            bool hasKey = (existingKey != null);
+
+            // Prev Button
+            var prevBtn = new Button
             {
-                Content = HasPropertyKeyAtPlayhead(layer, property) ? "◆" : "◇",
-                Width = 20,
-                Height = 25,
+                Content = "◀",
+                Width = 14,
+                Height = 22,
                 Padding = new Thickness(0),
-                Margin = new Thickness(2, 0, 0, 0),
+                Margin = new Thickness(1, 0, 1, 0),
                 BorderThickness = new Thickness(0),
                 Background = Brushes.Transparent,
-                Foreground = new SolidColorBrush(IsPropertyAnimated(layer, property)
-                    ? Color.FromRgb(96, 165, 250) : Color.FromRgb(118, 129, 150)),
-                FontSize = 15,
-                Cursor = Cursors.Hand,
-                ToolTip = HasPropertyKeyAtPlayhead(layer, property) ? "Update key at playhead" : "Add key for this property"
+                Foreground = hasTrack ? new SolidColorBrush(Color.FromRgb(140, 160, 195)) : new SolidColorBrush(Color.FromRgb(60, 70, 90)),
+                FontSize = 8,
+                Cursor = hasTrack ? Cursors.Hand : Cursors.Arrow,
+                ToolTip = "Jump to previous keyframe"
             };
-            button.Click += (s, e) =>
+            prevBtn.Click += (s, e) =>
             {
-                AddKeyframeForProperty(layer, property, GetPropertyValue(layer, property));
-                RefreshPropertyInspector();
+                if (track != null)
+                {
+                    double? prev = track.GetPreviousKeyframeTime(currentTime);
+                    if (prev.HasValue && _timelineController != null)
+                    {
+                        _timelineController.Seek(prev.Value);
+                        UpdateTimelineTimeReadout();
+                        UpdateTimelineScrubberPosition();
+                        RefreshTimelineCanvas();
+                        RefreshPropertyInspector();
+                    }
+                }
             };
-            Grid.SetColumn(button, 1);
-            grid.Children.Add(button);
+            Grid.SetColumn(prevBtn, 1);
+            grid.Children.Add(prevBtn);
+
+            // Diamond Button
+            var diamondBtn = new Button
+            {
+                Content = hasKey ? "◆" : "◇",
+                Width = 18,
+                Height = 22,
+                Padding = new Thickness(0),
+                Margin = new Thickness(1, 0, 1, 0),
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                Foreground = hasKey
+                    ? KerfBrand.MintBrush // Solid Mint ◆
+                    : hasTrack
+                        ? new SolidColorBrush(Color.FromRgb(70, 239, 177)) // Hollow Mint ◇
+                        : new SolidColorBrush(Color.FromRgb(100, 115, 135)), // Dim Gray ◇
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Cursor = Cursors.Hand,
+                ToolTip = hasKey
+                    ? "Keyframe at playhead (click to delete keyframe)"
+                    : hasTrack
+                        ? "Property animated (click to insert keyframe at playhead)"
+                        : "Not keyed (click to insert keyframe and create track)"
+            };
+            diamondBtn.Click += (s, e) =>
+            {
+                if (hasKey)
+                {
+                    if (track != null)
+                    {
+                        track.RemoveKeyframeAt(currentTime, 0.02);
+                        if (_timelineController != null) _timelineController.Seek(currentTime);
+                        RefreshTimelineUI();
+                        RefreshPropertyInspector();
+                    }
+                }
+                else
+                {
+                    double val = GetPropertyValue(layer, property);
+                    AddKeyframeForProperty(layer, property, val);
+                    RefreshTimelineUI();
+                    RefreshPropertyInspector();
+                }
+            };
+            Grid.SetColumn(diamondBtn, 2);
+            grid.Children.Add(diamondBtn);
+
+            // Next Button
+            var nextBtn = new Button
+            {
+                Content = "▶",
+                Width = 14,
+                Height = 22,
+                Padding = new Thickness(0),
+                Margin = new Thickness(1, 0, 1, 0),
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                Foreground = hasTrack ? new SolidColorBrush(Color.FromRgb(140, 160, 195)) : new SolidColorBrush(Color.FromRgb(60, 70, 90)),
+                FontSize = 8,
+                Cursor = hasTrack ? Cursors.Hand : Cursors.Arrow,
+                ToolTip = "Jump to next keyframe"
+            };
+            nextBtn.Click += (s, e) =>
+            {
+                if (track != null)
+                {
+                    double? next = track.GetNextKeyframeTime(currentTime);
+                    if (next.HasValue && _timelineController != null)
+                    {
+                        _timelineController.Seek(next.Value);
+                        UpdateTimelineTimeReadout();
+                        UpdateTimelineScrubberPosition();
+                        RefreshTimelineCanvas();
+                        RefreshPropertyInspector();
+                    }
+                }
+            };
+            Grid.SetColumn(nextBtn, 3);
+            grid.Children.Add(nextBtn);
+
             return grid;
         }
 
@@ -13962,14 +14185,32 @@ namespace Kerf.UI
             if (layer == null) return 0.0;
             switch (property)
             {
-                case PropKey.X: return layer.X;
-                case PropKey.Y: return layer.Y;
-                case PropKey.Width: return layer.Width;
-                case PropKey.Height: return layer.Height;
-                case PropKey.Rotation: return layer.Rotation;
-                case PropKey.Opacity: return layer.Opacity;
-                case PropKey.CornerRadius: return layer.CornerRadius;
-                default: return 0.0;
+                case PropKey.X:
+                    return layer.X + (layer.RenderTransform != null ? layer.RenderTransform.TranslationX : 0.0);
+                case PropKey.Y:
+                    return layer.Y + (layer.RenderTransform != null ? layer.RenderTransform.TranslationY : 0.0);
+                case PropKey.ScaleX:
+                    return layer.RenderTransform != null ? layer.RenderTransform.ScaleX : 1.0;
+                case PropKey.ScaleY:
+                    return layer.RenderTransform != null ? layer.RenderTransform.ScaleY : 1.0;
+                case PropKey.Rotation:
+                    return layer.Rotation + (layer.RenderTransform != null ? layer.RenderTransform.Rotation : 0.0);
+                case PropKey.AnchorX:
+                    return layer.RenderTransform != null ? layer.RenderTransform.AnchorX : 0.0;
+                case PropKey.AnchorY:
+                    return layer.RenderTransform != null ? layer.RenderTransform.AnchorY : 0.0;
+                case PropKey.Width:
+                case PropKey.VisualWidth:
+                    return layer.RenderTransform != null && layer.RenderTransform.VisualWidth > 0 ? layer.RenderTransform.VisualWidth : layer.Width;
+                case PropKey.Height:
+                case PropKey.VisualHeight:
+                    return layer.RenderTransform != null && layer.RenderTransform.VisualHeight > 0 ? layer.RenderTransform.VisualHeight : layer.Height;
+                case PropKey.Opacity:
+                    return layer.Opacity;
+                case PropKey.CornerRadius:
+                    return layer.CornerRadius;
+                default:
+                    return 0.0;
             }
         }
 
@@ -14052,64 +14293,382 @@ namespace Kerf.UI
             if (_timelineTracksStack == null) return;
             _timelineTracksStack.Children.Clear();
 
-            var sel = _selectedLayers.FirstOrDefault();
-            var header = new TextBlock
+            // 1. Top Ruler Header Spacer (Height: 22px)
+            var rulerHeader = new Border
             {
-                Text = (sel != null) ? string.Format("Layer: {0}", sel.Name) : "No Layer Selected",
-                FontSize = 11,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                Margin = new Thickness(0, 0, 0, 6)
+                Height = 22,
+                Background = new SolidColorBrush(Color.FromRgb(15, 20, 28)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(8, 0, 8, 0)
             };
-            _timelineTracksStack.Children.Add(header);
-
-            if (sel != null)
+            var headerText = new TextBlock
             {
-                _timelineTracksStack.Children.Add(CreateTrackRow("Position X", string.Format("{0:F1} px", sel.X)));
-                _timelineTracksStack.Children.Add(CreateTrackRow("Position Y", string.Format("{0:F1} px", sel.Y)));
-                _timelineTracksStack.Children.Add(CreateTrackRow("Width", string.Format("{0:F1} px", sel.Width)));
-                _timelineTracksStack.Children.Add(CreateTrackRow("Height", string.Format("{0:F1} px", sel.Height)));
-                _timelineTracksStack.Children.Add(CreateTrackRow("Rotation", string.Format("{0:F1} °", sel.Rotation)));
-                _timelineTracksStack.Children.Add(CreateTrackRow("Opacity", string.Format("{0:F0} %", sel.Opacity * 100)));
-                _timelineTracksStack.Children.Add(CreateTrackRow("Corner Radius", string.Format("{0:F1} px", sel.CornerRadius)));
-            }
-            else
+                Text = "OBJECTS / TRACKS",
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            rulerHeader.Child = headerText;
+            _timelineTracksStack.Children.Add(rulerHeader);
+
+            var lanes = BuildTimelineLanes();
+            if (lanes.Count == 0)
             {
                 var hint = new TextBlock
                 {
-                    Text = "Select a layer on canvas to view tracks & record keyframes.",
+                    Text = "Select a layer on canvas or create keyframes to view tracks.",
                     FontSize = 10,
                     Foreground = new SolidColorBrush(Color.FromRgb(120, 135, 160)),
+                    Margin = new Thickness(8, 12, 8, 8),
                     TextWrapping = TextWrapping.Wrap
                 };
                 _timelineTracksStack.Children.Add(hint);
+                return;
+            }
+
+            foreach (var lane in lanes)
+            {
+                if (lane.IsMaster)
+                {
+                    bool isExpanded = !_collapsedTimelineObjects.Contains(lane.NodeId);
+                    _timelineTracksStack.Children.Add(CreateMasterObjectRow(lane.NodeId, isExpanded));
+                }
+                else
+                {
+                    _timelineTracksStack.Children.Add(CreatePropertyTrackRow(lane.NodeId, lane.Track));
+                }
             }
         }
 
-        private FrameworkElement CreateTrackRow(string name, string val)
+        private List<TimelineLaneInfo> BuildTimelineLanes()
         {
-            var grid = new Grid { Height = 20, Margin = new Thickness(0, 1, 0, 1) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var lanes = new List<TimelineLaneInfo>();
+            if (_timelineController == null || _timelineController.ActiveClip == null) return lanes;
+
+            var nodeIds = GetTimelineObjectNodeIds();
+            double currentY = 22.0; // Starts immediately below 22px ruler
+
+            foreach (var nodeId in nodeIds)
+            {
+                lanes.Add(new TimelineLaneInfo
+                {
+                    IsMaster = true,
+                    NodeId = nodeId,
+                    Track = null,
+                    Y = currentY,
+                    Height = 22.0
+                });
+                currentY += 22.0;
+
+                if (!_collapsedTimelineObjects.Contains(nodeId))
+                {
+                    var tracks = _timelineController.ActiveClip.GetTracksForNode(nodeId);
+                    foreach (var track in tracks)
+                    {
+                        lanes.Add(new TimelineLaneInfo
+                        {
+                            IsMaster = false,
+                            NodeId = nodeId,
+                            Track = track,
+                            Y = currentY,
+                            Height = 22.0
+                        });
+                        currentY += 22.0;
+                    }
+                }
+            }
+
+            return lanes;
+        }
+
+        private List<uint> GetTimelineObjectNodeIds()
+        {
+            var list = new List<uint>();
+            if (_timelineController != null && _timelineController.ActiveClip != null)
+            {
+                var sel = _selectedLayers.FirstOrDefault();
+                uint selId = sel != null ? PropertyBinder.GetNumericNodeId(sel.Id) : 0;
+                if (selId != 0)
+                {
+                    list.Add(selId);
+                }
+                foreach (var track in _timelineController.ActiveClip.Tracks)
+                {
+                    if (track.NodeId != 0 && !list.Contains(track.NodeId))
+                    {
+                        list.Add(track.NodeId);
+                    }
+                }
+            }
+            return list;
+        }
+
+        private LayerNode FindLayerByNumericId(uint nodeId)
+        {
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page == null) return null;
+            return page.GetAllLayersFlat().FirstOrDefault(l => PropertyBinder.GetNumericNodeId(l.Id) == nodeId);
+        }
+
+        private static string GetLayerTypeBadge(LayerNode layer)
+        {
+            if (layer == null) return "•";
+            switch (layer.Type)
+            {
+                case ElementType.Frame: return "F";
+                case ElementType.Group: return "G";
+                case ElementType.Rectangle: return "R";
+                case ElementType.Ellipse: return "O";
+                case ElementType.Text: return "T";
+                case ElementType.Path:
+                case ElementType.Line:
+                case ElementType.Arrow:
+                case ElementType.Polygon:
+                case ElementType.Star: return "V";
+                case ElementType.Image: return "I";
+                case ElementType.ComponentInstance: return "C";
+                default: return "■";
+            }
+        }
+
+        private static string GetPropertyName(ushort prop)
+        {
+            switch ((PropKey)prop)
+            {
+                case PropKey.X: return "Position X";
+                case PropKey.Y: return "Position Y";
+                case PropKey.ScaleX: return "Scale X";
+                case PropKey.ScaleY: return "Scale Y";
+                case PropKey.Rotation: return "Rotation";
+                case PropKey.AnchorX: return "Anchor X";
+                case PropKey.AnchorY: return "Anchor Y";
+                case PropKey.Opacity: return "Opacity";
+                case PropKey.Width: return "Width";
+                case PropKey.Height: return "Height";
+                case PropKey.VisualWidth: return "Visual Width";
+                case PropKey.VisualHeight: return "Visual Height";
+                case PropKey.CornerRadius: return "Corner Radius";
+                default: return ((PropKey)prop).ToString();
+            }
+        }
+
+        private string GetEvaluatedPropertyString(uint nodeId, ushort prop)
+        {
+            var layer = FindLayerByNumericId(nodeId);
+            double val = 0.0;
+            bool hasVal = false;
+
+            if (_timelineController != null && _timelineController.ActiveClip != null)
+            {
+                var track = _timelineController.ActiveClip.GetTrack(nodeId, prop);
+                if (track != null && track.Keys.Count > 0)
+                {
+                    val = track.Sample(_timelineController.CurrentTime);
+                    hasVal = true;
+                }
+            }
+
+            if (!hasVal && layer != null)
+            {
+                switch ((PropKey)prop)
+                {
+                    case PropKey.X: val = layer.X + (layer.RenderTransform != null ? layer.RenderTransform.TranslationX : 0); break;
+                    case PropKey.Y: val = layer.Y + (layer.RenderTransform != null ? layer.RenderTransform.TranslationY : 0); break;
+                    case PropKey.ScaleX: val = layer.RenderTransform != null ? layer.RenderTransform.ScaleX : 1.0; break;
+                    case PropKey.ScaleY: val = layer.RenderTransform != null ? layer.RenderTransform.ScaleY : 1.0; break;
+                    case PropKey.Rotation: val = layer.Rotation + (layer.RenderTransform != null ? layer.RenderTransform.Rotation : 0); break;
+                    case PropKey.AnchorX: val = layer.RenderTransform != null ? layer.RenderTransform.AnchorX : 0.0; break;
+                    case PropKey.AnchorY: val = layer.RenderTransform != null ? layer.RenderTransform.AnchorY : 0.0; break;
+                    case PropKey.Opacity: val = layer.Opacity; break;
+                    case PropKey.Width:
+                    case PropKey.VisualWidth: val = layer.RenderTransform != null && layer.RenderTransform.VisualWidth > 0 ? layer.RenderTransform.VisualWidth : layer.Width; break;
+                    case PropKey.Height:
+                    case PropKey.VisualHeight: val = layer.RenderTransform != null && layer.RenderTransform.VisualHeight > 0 ? layer.RenderTransform.VisualHeight : layer.Height; break;
+                    case PropKey.CornerRadius: val = layer.CornerRadius; break;
+                }
+            }
+
+            switch ((PropKey)prop)
+            {
+                case PropKey.X:
+                case PropKey.Y:
+                case PropKey.Width:
+                case PropKey.Height:
+                case PropKey.VisualWidth:
+                case PropKey.VisualHeight:
+                case PropKey.CornerRadius:
+                    return string.Format("{0:F1} px", val);
+                case PropKey.Rotation:
+                    return string.Format("{0:F1} °", val);
+                case PropKey.Opacity:
+                    return string.Format("{0:F0} %", val * 100);
+                case PropKey.ScaleX:
+                case PropKey.ScaleY:
+                case PropKey.AnchorX:
+                case PropKey.AnchorY:
+                    return string.Format("{0:F2}", val);
+                default:
+                    return string.Format("{0:F1}", val);
+            }
+        }
+
+        private FrameworkElement CreateMasterObjectRow(uint nodeId, bool isExpanded)
+        {
+            var layer = FindLayerByNumericId(nodeId);
+            string layerName = layer != null ? layer.Name : string.Format("Object #{0}", nodeId);
+            string typeBadge = GetLayerTypeBadge(layer);
+            var tracks = (_timelineController != null && _timelineController.ActiveClip != null)
+                ? _timelineController.ActiveClip.GetTracksForNode(nodeId)
+                : new List<AnimTrack>();
+
+            bool isSelected = _selectedLayers.Any(l => PropertyBinder.GetNumericNodeId(l.Id) == nodeId);
+
+            var grid = new Grid
+            {
+                Height = 22,
+                Background = isSelected
+                    ? new SolidColorBrush(Color.FromRgb(24, 48, 64))
+                    : new SolidColorBrush(Color.FromRgb(16, 20, 28)),
+                Cursor = Cursors.Hand
+            };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) }); // Expander button
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) }); // Icon badge
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Name
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Track count
+
+            // 1. Expander arrow
+            var expandBtn = new Border
+            {
+                Width = 16,
+                Height = 16,
+                Background = Brushes.Transparent,
+                Child = new TextBlock
+                {
+                    Text = isExpanded ? "▼" : "▶",
+                    FontSize = 9,
+                    Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            expandBtn.MouseLeftButtonDown += (s, e) =>
+            {
+                if (_collapsedTimelineObjects.Contains(nodeId))
+                    _collapsedTimelineObjects.Remove(nodeId);
+                else
+                    _collapsedTimelineObjects.Add(nodeId);
+
+                RefreshTimelineUI();
+                e.Handled = true;
+            };
+            Grid.SetColumn(expandBtn, 0);
+            grid.Children.Add(expandBtn);
+
+            // 2. Type badge
+            var badge = new Border
+            {
+                Width = 14,
+                Height = 14,
+                CornerRadius = new CornerRadius(2),
+                Background = new SolidColorBrush(Color.FromRgb(32, 40, 56)),
+                Child = new TextBlock
+                {
+                    Text = typeBadge,
+                    FontSize = 8,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = KerfBrand.MintBrush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            Grid.SetColumn(badge, 1);
+            grid.Children.Add(badge);
+
+            // 3. Name
+            var nameBlock = new TextBlock
+            {
+                Text = layerName,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = isSelected ? KerfBrand.MintBrush : Brushes.White,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 0, 4, 0),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            Grid.SetColumn(nameBlock, 2);
+            grid.Children.Add(nameBlock);
+
+            // 4. Track count badge
+            var countBlock = new TextBlock
+            {
+                Text = string.Format("({0})", tracks.Count),
+                FontSize = 9,
+                Foreground = new SolidColorBrush(Color.FromRgb(100, 120, 150)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            Grid.SetColumn(countBlock, 3);
+            grid.Children.Add(countBlock);
+
+            grid.MouseLeftButtonDown += (s, e) =>
+            {
+                if (layer != null)
+                {
+                    _selectedLayers.Clear();
+                    _selectedLayers.Add(layer);
+                    OnSelectionChanged();
+                    RefreshCanvas();
+                    RefreshTimelineUI();
+                }
+            };
+
+            return grid;
+        }
+
+        private FrameworkElement CreatePropertyTrackRow(uint nodeId, AnimTrack track)
+        {
+            var grid = new Grid
+            {
+                Height = 22,
+                Background = new SolidColorBrush(Color.FromRgb(14, 17, 24))
+            };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) }); // Indent
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Prop name
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Value readout
+
+            var indentBullet = new TextBlock
+            {
+                Text = "└",
+                FontSize = 9,
+                Foreground = new SolidColorBrush(Color.FromRgb(60, 75, 105)),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 4, 0)
+            };
+            Grid.SetColumn(indentBullet, 0);
+            grid.Children.Add(indentBullet);
 
             var nameBlock = new TextBlock
             {
-                Text = name,
+                Text = track != null && !string.IsNullOrEmpty(track.PropertyPath) ? track.PropertyPath : GetPropertyName(track != null ? track.Prop : (ushort)0),
                 FontSize = 10,
                 Foreground = new SolidColorBrush(Color.FromRgb(180, 195, 220)),
                 VerticalAlignment = VerticalAlignment.Center
             };
-            Grid.SetColumn(nameBlock, 0);
+            Grid.SetColumn(nameBlock, 1);
             grid.Children.Add(nameBlock);
 
             var valBlock = new TextBlock
             {
-                Text = val,
+                Text = track != null ? GetEvaluatedPropertyString(nodeId, track.Prop) : string.Empty,
                 FontSize = 10,
                 Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
             };
-            Grid.SetColumn(valBlock, 1);
+            Grid.SetColumn(valBlock, 2);
             grid.Children.Add(valBlock);
 
             return grid;
@@ -14137,29 +14696,44 @@ namespace Kerf.UI
             };
             _timelineCanvasHost.Children.Add(rulerLine);
 
-            // Tick marks & time labels every 0.25s / 0.5s
-            for (double t = 0.0; t <= duration + 0.001; t += 0.25)
+            double fps = (_timelineController != null) ? Math.Max(1.0, _timelineController.Fps) : 60.0;
+            double frameDuration = 1.0 / fps;
+            int totalFrames = (int)Math.Ceiling(duration * fps);
+
+            int frameStep = 1;
+            if (pps < 120) frameStep = Math.Max(1, (int)fps / 2);
+            else if (pps < 250) frameStep = Math.Max(1, (int)(fps / 4));
+            else if (pps < 500) frameStep = Math.Max(1, (int)(fps / 12));
+            else frameStep = 1;
+
+            for (int f = 0; f <= totalFrames; f += frameStep)
             {
+                double t = f * frameDuration;
+                if (t > duration + 1e-4) break;
                 double x = t * pps;
-                bool isMajor = (Math.Abs(t % 0.5) < 0.01);
+
+                bool isSecondMark = (f % (int)fps == 0);
+                bool isHalfSecond = (f % Math.Max(1, (int)(fps / 2)) == 0);
+                bool isMajor = isSecondMark || isHalfSecond;
+
                 var tick = new Line
                 {
                     X1 = x,
                     Y1 = isMajor ? 6 : 14,
                     X2 = x,
                     Y2 = 22,
-                    Stroke = new SolidColorBrush(isMajor ? Color.FromRgb(140, 155, 185) : Color.FromRgb(60, 70, 95)),
+                    Stroke = new SolidColorBrush(isMajor ? Color.FromRgb(140, 155, 185) : Color.FromRgb(50, 60, 80)),
                     StrokeThickness = 1
                 };
                 _timelineCanvasHost.Children.Add(tick);
 
-                if (isMajor)
+                if (isMajor || (pps >= 400 && f % 5 == 0))
                 {
                     var label = new TextBlock
                     {
-                        Text = string.Format("{0:0.0}s", t),
+                        Text = isSecondMark ? string.Format("{0}f ({1:0.0}s)", f, t) : string.Format("{0}f", f),
                         FontSize = 9,
-                        Foreground = new SolidColorBrush(Color.FromRgb(140, 155, 185)),
+                        Foreground = new SolidColorBrush(isMajor ? Color.FromRgb(140, 155, 185) : Color.FromRgb(90, 105, 130)),
                         FontFamily = new FontFamily("Consolas, Courier New")
                     };
                     Canvas.SetLeft(label, x + 3);
@@ -14168,35 +14742,117 @@ namespace Kerf.UI
                 }
             }
 
-            // 2. Track Lanes (Horizontal separator lines)
-            double rowY = 24.0;
-            for (int r = 0; r < 7; r++)
+            // 2. Track Lanes and Keyframe Diamonds
+            var lanes = BuildTimelineLanes();
+            var sel = _selectedLayers.FirstOrDefault();
+            uint selId = (sel != null) ? PropertyBinder.GetNumericNodeId(sel.Id) : 0;
+
+            foreach (var lane in lanes)
             {
-                rowY += 21.0;
+                double laneY = lane.Y;
+                double laneH = lane.Height;
+
                 var laneLine = new Line
                 {
                     X1 = 0,
-                    Y1 = rowY,
+                    Y1 = laneY + laneH,
                     X2 = Math.Max(totalWidth + 100, 1000),
-                    Y2 = rowY,
-                    Stroke = new SolidColorBrush(Color.FromRgb(30, 35, 48)),
+                    Y2 = laneY + laneH,
+                    Stroke = new SolidColorBrush(lane.IsMaster ? Color.FromRgb(36, 44, 60) : Color.FromRgb(26, 32, 44)),
                     StrokeThickness = 1
                 };
                 _timelineCanvasHost.Children.Add(laneLine);
-            }
 
-            // 3. Keyframe Diamonds ◆
-            if (_timelineController != null && _timelineController.ActiveClip != null)
-            {
-                var sel = _selectedLayers.FirstOrDefault();
-                uint selId = (sel != null) ? PropertyBinder.GetNumericNodeId(sel.Id) : 0;
-
-                foreach (var track in _timelineController.ActiveClip.Tracks)
+                if (lane.IsMaster)
                 {
-                    if (sel != null && track.NodeId != selId) continue;
+                    if (selId == lane.NodeId)
+                    {
+                        var laneHighlight = new Rectangle
+                        {
+                            Width = Math.Max(totalWidth + 100, 1000),
+                            Height = laneH,
+                            Fill = new SolidColorBrush(Color.FromArgb(16, 70, 239, 177)),
+                            IsHitTestVisible = false
+                        };
+                        Canvas.SetLeft(laneHighlight, 0);
+                        Canvas.SetTop(laneHighlight, laneY);
+                        _timelineCanvasHost.Children.Add(laneHighlight);
+                    }
 
-                    int propRow = GetPropRowIndex(track.Prop);
-                    double ky = 24.0 + propRow * 21.0 + 10.5;
+                    var nodeTracks = (_timelineController != null && _timelineController.ActiveClip != null)
+                        ? _timelineController.ActiveClip.GetTracksForNode(lane.NodeId)
+                        : new List<AnimTrack>();
+
+                    var summaryTimes = new HashSet<double>();
+                    foreach (var tr in nodeTracks)
+                        foreach (var k in tr.Keys)
+                            summaryTimes.Add(k.Time);
+
+                    double masterCenterY = laneY + 11.0;
+                    foreach (var time in summaryTimes)
+                    {
+                        double kx = time * pps;
+                        var keysAtTime = new List<Tuple<AnimTrack, Keyframe>>();
+                        foreach (var tr in nodeTracks)
+                        {
+                            var match = tr.FindKeyframeAt(time, 1e-4);
+                            if (match != null) keysAtTime.Add(Tuple.Create(tr, match));
+                        }
+
+                        bool anySelected = keysAtTime.Any(pair => _selectedTimelineKeyframes.Contains(pair.Item2));
+
+                        var sumDiamond = new Polygon
+                        {
+                            Points = new PointCollection
+                            {
+                                new Point(kx, masterCenterY - 5),
+                                new Point(kx + 5, masterCenterY),
+                                new Point(kx, masterCenterY + 5),
+                                new Point(kx - 5, masterCenterY)
+                            },
+                            Fill = anySelected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(160, 175, 205)),
+                            Stroke = KerfBrand.ObsidianBrush,
+                            StrokeThickness = 1,
+                            ToolTip = string.Format("Summary · {0:0.00}s ({1} keys)", time, keysAtTime.Count),
+                            Cursor = Cursors.SizeWE
+                        };
+
+                        var hitTarget = new Ellipse
+                        {
+                            Width = 18,
+                            Height = 18,
+                            Fill = Brushes.Transparent,
+                            Cursor = Cursors.SizeWE,
+                            ToolTip = sumDiamond.ToolTip
+                        };
+                        Canvas.SetLeft(hitTarget, kx - 9);
+                        Canvas.SetTop(hitTarget, masterCenterY - 9);
+
+                        var capturedPairs = keysAtTime;
+                        hitTarget.PreviewMouseLeftButtonDown += (s, e) =>
+                        {
+                            bool additive = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift) || Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+                            if (!additive) _selectedTimelineKeyframes.Clear();
+                            foreach (var p in capturedPairs)
+                            {
+                                _selectedTimelineKeyframes.Add(p.Item2);
+                                _timelineKeyframeOwners[p.Item2] = p.Item1;
+                            }
+                            if (capturedPairs.Count > 0)
+                            {
+                                BeginTimelineKeyframeDrag(capturedPairs[0].Item1, capturedPairs[0].Item2, e);
+                            }
+                            e.Handled = true;
+                        };
+
+                        _timelineCanvasHost.Children.Add(hitTarget);
+                        _timelineCanvasHost.Children.Add(sumDiamond);
+                    }
+                }
+                else if (lane.Track != null)
+                {
+                    double propCenterY = laneY + 11.0;
+                    var track = lane.Track;
 
                     foreach (var kf in track.Keys)
                     {
@@ -14204,35 +14860,36 @@ namespace Kerf.UI
                         double kx = kf.Time * pps;
                         var keyframe = kf;
                         var keyTrack = track;
+
                         var hitTarget = new Ellipse
                         {
                             Width = 20,
                             Height = 20,
                             Fill = Brushes.Transparent,
-                            Stroke = Brushes.Transparent,
                             Cursor = Cursors.SizeWE,
-                            ToolTip = string.Format("Drag to move {0} keyframe", ((PropKey)track.Prop).ToString()),
+                            ToolTip = string.Format("Drag to move {0} keyframe", keyTrack.PropertyPath),
                             Tag = keyframe
                         };
                         Canvas.SetLeft(hitTarget, kx - 10);
-                        Canvas.SetTop(hitTarget, ky - 10);
+                        Canvas.SetTop(hitTarget, propCenterY - 10);
                         _timelineCanvasHost.Children.Add(hitTarget);
 
+                        int kfFrame = (int)Math.Round(kf.Time * fps);
                         var diamond = new Polygon
                         {
                             Points = new PointCollection
                             {
-                                new Point(kx, ky - 6),
-                                new Point(kx + 6, ky),
-                                new Point(kx, ky + 6),
-                                new Point(kx - 6, ky)
+                                new Point(kx, propCenterY - 6),
+                                new Point(kx + 6, propCenterY),
+                                new Point(kx, propCenterY + 6),
+                                new Point(kx - 6, propCenterY)
                             },
                             Fill = _selectedTimelineKeyframes.Contains(kf)
                                 ? KerfBrand.MintBrush
                                 : ReferenceEquals(kf, _editingInterpolationKeyframe) ? KerfBrand.TealBrush : KerfBrand.AmberBrush,
                             Stroke = KerfBrand.ObsidianBrush,
                             StrokeThickness = 1,
-                            ToolTip = string.Format("{0} · {1:F2}s · {2:F1}", ((PropKey)track.Prop).ToString(), kf.Time, kf.Value),
+                            ToolTip = string.Format("{0} · {1:F2}s ({2}f) · {3:F1}", keyTrack.PropertyPath, kf.Time, kfFrame, kf.Value),
                             Cursor = Cursors.SizeWE,
                             Tag = keyframe
                         };
@@ -14242,25 +14899,24 @@ namespace Kerf.UI
                 }
             }
 
-            // 4. Playhead Line & Scrubber Needle
+            // 3. Playhead Line & Scrubber Needle
             if (_timelineController != null)
             {
                 double px = _timelineController.CurrentTime * pps;
+                double playheadHeight = Math.Max(220.0, lanes.Count > 0 ? (lanes.Last().Y + 30.0) : 220.0);
 
-                // Vertical Playhead Line
                 var playheadLine = new Line
                 {
                     X1 = px,
                     Y1 = 12,
                     X2 = px,
-                    Y2 = Math.Max(180, _timelineCanvasHost.ActualHeight - 4),
-                    Stroke = KerfBrand.MintBrush, // Brand Mint Playhead
+                    Y2 = playheadHeight,
+                    Stroke = KerfBrand.MintBrush,
                     StrokeThickness = 1.5,
                     IsHitTestVisible = false
                 };
                 _timelineCanvasHost.Children.Add(playheadLine);
 
-                // Playhead Head Indicator (Downward triangle)
                 var playheadHead = new Polygon
                 {
                     Points = new PointCollection
@@ -14276,8 +14932,129 @@ namespace Kerf.UI
                 };
                 _timelineCanvasHost.Children.Add(playheadHead);
             }
+
+            double requiredHeight = Math.Max(230.0, lanes.Count > 0 ? (lanes.Last().Y + 30.0) : 230.0);
+            _timelineCanvasHost.Width = Math.Max(totalWidth + 200, 1200);
+            _timelineCanvasHost.Height = requiredHeight;
+
             _selectedTimelineKeyframes.RemoveWhere(keyframe => !_timelineKeyframeOwners.ContainsKey(keyframe));
             RefreshInterpolationGraphPanels();
+        }
+
+        private void CopySelectedTimelineKeyframes()
+        {
+            if (_selectedTimelineKeyframes.Count == 0) return;
+            var pairs = new List<Tuple<AnimTrack, Keyframe>>();
+            foreach (var kf in _selectedTimelineKeyframes)
+            {
+                AnimTrack track;
+                if (_timelineKeyframeOwners.TryGetValue(kf, out track))
+                {
+                    pairs.Add(Tuple.Create(track, kf));
+                }
+            }
+            KeyframeClipboard.Copy(pairs);
+        }
+
+        private void PasteTimelineKeyframesAtPlayhead()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null || !KeyframeClipboard.HasData) return;
+            var sel = _selectedLayers.FirstOrDefault();
+            uint targetNodeId = sel != null ? PropertyBinder.GetNumericNodeId(sel.Id) : 0;
+            double playheadTime = _timelineController.CurrentTime;
+
+            var pasted = KeyframeClipboard.Paste(_timelineController.ActiveClip, targetNodeId, playheadTime);
+            if (pasted.Count > 0)
+            {
+                _selectedTimelineKeyframes.Clear();
+                foreach (var kf in pasted)
+                {
+                    _selectedTimelineKeyframes.Add(kf);
+                }
+                _timelineController.Seek(playheadTime);
+                RefreshTimelineUI();
+            }
+        }
+
+        private void DuplicateSelectedTimelineKeyframes()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null || _selectedTimelineKeyframes.Count == 0) return;
+            var pairs = new List<Tuple<AnimTrack, Keyframe>>();
+            foreach (var kf in _selectedTimelineKeyframes)
+            {
+                AnimTrack track;
+                if (_timelineKeyframeOwners.TryGetValue(kf, out track))
+                {
+                    pairs.Add(Tuple.Create(track, kf));
+                }
+            }
+            double offset = 1.0 / Math.Max(1.0, _timelineController.Fps);
+            var duplicated = KeyframeClipboard.Duplicate(_timelineController.ActiveClip, pairs, offset);
+            if (duplicated.Count > 0)
+            {
+                _selectedTimelineKeyframes.Clear();
+                foreach (var kf in duplicated)
+                {
+                    _selectedTimelineKeyframes.Add(kf);
+                }
+                _timelineController.Seek(_timelineController.CurrentTime + offset);
+                RefreshTimelineUI();
+            }
+        }
+
+        private void JumpToPreviousKeyframe()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null) return;
+            double t = _timelineController.CurrentTime;
+            double best = -1.0;
+            foreach (var track in _timelineController.ActiveClip.Tracks)
+            {
+                double? candidate = track.GetPreviousKeyframeTime(t);
+                if (candidate.HasValue && candidate.Value < t - 1e-4)
+                {
+                    if (candidate.Value > best) best = candidate.Value;
+                }
+            }
+            if (best >= 0.0)
+            {
+                _timelineController.Seek(best);
+                UpdateTimelineTimeReadout();
+                UpdateTimelineScrubberPosition();
+                RefreshTimelineCanvas();
+            }
+        }
+
+        private void JumpToNextKeyframe()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null) return;
+            double t = _timelineController.CurrentTime;
+            double best = double.MaxValue;
+            foreach (var track in _timelineController.ActiveClip.Tracks)
+            {
+                double? candidate = track.GetNextKeyframeTime(t);
+                if (candidate.HasValue && candidate.Value > t + 1e-4)
+                {
+                    if (candidate.Value < best) best = candidate.Value;
+                }
+            }
+            if (best < double.MaxValue)
+            {
+                _timelineController.Seek(best);
+                UpdateTimelineTimeReadout();
+                UpdateTimelineScrubberPosition();
+                RefreshTimelineCanvas();
+            }
+        }
+
+        private void HandleTimelineCanvasMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl))
+            {
+                double factor = e.Delta > 0 ? 1.15 : (1.0 / 1.15);
+                _timelinePixelsPerSecond = Math.Max(60.0, Math.Min(1200.0, _timelinePixelsPerSecond * factor));
+                RefreshTimelineCanvas();
+                e.Handled = true;
+            }
         }
 
         private static int GetPropRowIndex(ushort propKey)
@@ -14286,12 +15063,18 @@ namespace Kerf.UI
             {
                 case PropKey.X: return 0;
                 case PropKey.Y: return 1;
-                case PropKey.Width: return 2;
-                case PropKey.Height: return 3;
+                case PropKey.ScaleX: return 2;
+                case PropKey.ScaleY: return 3;
                 case PropKey.Rotation: return 4;
-                case PropKey.Opacity: return 5;
-                case PropKey.CornerRadius: return 6;
-                default: return 0;
+                case PropKey.AnchorX: return 5;
+                case PropKey.AnchorY: return 6;
+                case PropKey.Opacity: return 7;
+                case PropKey.Width:
+                case PropKey.VisualWidth: return 8;
+                case PropKey.Height:
+                case PropKey.VisualHeight: return 9;
+                case PropKey.CornerRadius: return 10;
+                default: return (int)propKey;
             }
         }
 

@@ -79,6 +79,7 @@ namespace Kerf.Tests
             RunTest("Hierarchical Object Insertion & Container Target Resolution", TestHierarchicalObjectInsertionAndContainerTargetResolution);
             RunTest("Non-Destructive Render Transforms & Auto Layout Preservation", TestNonDestructiveRenderTransformsAndAutoLayoutPreservation);
             RunTest("Independent Transform Architecture & Deterministic Animation Evaluator", TestIndependentTransformArchitectureAndAnimationEvaluator);
+            RunTest("Timeline & Keyframe Engine Reconstruction & Authoring System", TestTimelineAndKeyframeEngineAuthoringSystem);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -4280,6 +4281,162 @@ namespace Kerf.Tests
             Assert(childRect.RenderTransform.IsIdentity, "ChildRect RenderTransform identity after Stop");
             Assert(frame.Width == 400 && frame.Height == 300, "Frame rest bounds 100% intact with zero drift");
             Assert(childRect.Width == 150 && childRect.Height == 60, "ChildRect rest bounds 100% intact with zero drift");
+        }
+
+        private static void TestTimelineAndKeyframeEngineAuthoringSystem()
+        {
+            // 1. Keyframe CRUD & Stable Unique IDs
+            var track = new Track(101, (ushort)PropKey.X, "layer-101", "Position X");
+            var kf1 = new Keyframe(1.0, 100.0, InterpMode.Linear);
+            var kf2 = new Keyframe(0.0, 0.0, InterpMode.Linear);
+            var kf3 = new Keyframe(2.0, 200.0, InterpMode.Linear);
+
+            Assert(!string.IsNullOrEmpty(kf1.Id) && !string.IsNullOrEmpty(kf2.Id) && !string.IsNullOrEmpty(kf3.Id),
+                "Keyframes have non-empty unique string GUIDs");
+            Assert(kf1.Id != kf2.Id && kf2.Id != kf3.Id, "Keyframe GUIDs are unique across instances");
+
+            // Binary search insertion maintains sorted order regardless of insertion order
+            track.AddKeyframe(kf1);
+            track.AddKeyframe(kf2);
+            track.AddKeyframe(kf3);
+
+            Assert(track.Keys.Count == 3, "Track has 3 keyframes");
+            Assert(track.Keys[0].Time == 0.0 && track.Keys[1].Time == 1.0 && track.Keys[2].Time == 2.0,
+                "Track maintains strictly sorted chronological order (0.0s, 1.0s, 2.0s)");
+
+            // Keyframe search and neighbor navigation
+            var found = track.FindKeyframeAt(1.0);
+            Assert(found != null && found.Id == kf1.Id, "FindKeyframeAt found exact keyframe at 1.0s");
+
+            double? prevTime = track.GetPreviousKeyframeTime(1.5);
+            Assert(prevTime.HasValue && Math.Abs(prevTime.Value - 1.0) < 1e-4, "GetPreviousKeyframeTime(1.5) returned 1.0s");
+
+            double? nextTime = track.GetNextKeyframeTime(1.0);
+            Assert(nextTime.HasValue && Math.Abs(nextTime.Value - 2.0) < 1e-4, "GetNextKeyframeTime(1.0) returned 2.0s");
+
+            // Keyframe deletion by ID
+            string deletedId = kf1.Id;
+            bool removed = track.RemoveKeyframe(deletedId);
+            Assert(removed && track.Keys.Count == 2, "RemoveKeyframe successfully removed keyframe by ID");
+            Assert(track.Keys[0].Time == 0.0 && track.Keys[1].Time == 2.0, "Track remains sorted after keyframe deletion");
+
+            // 2. Duplicate Timestamps Resolution
+            var duplicateKey = new Keyframe(2.0, 999.0, InterpMode.Cubic);
+            track.AddKeyframe(duplicateKey);
+            Assert(track.Keys.Count == 2, "Deterministic duplicate resolution: count remains 2 without creating orphan duplicate keys");
+            Assert(track.Keys[1].Value == 999.0 && track.Keys[1].Interp == InterpMode.Cubic,
+                "Existing keyframe updated in place with new value and interpolation mode");
+
+            // 3. Multi-Keyframe Selection & Relative Time Shifting
+            var track2 = new Track(102, (ushort)PropKey.Rotation, "layer-102", "Rotation");
+            var r1 = new Keyframe(0.5, 45.0, InterpMode.Linear);
+            var r2 = new Keyframe(1.0, 90.0, InterpMode.Linear);
+            var r3 = new Keyframe(1.5, 180.0, InterpMode.Linear);
+            track2.AddKeyframe(r1);
+            track2.AddKeyframe(r2);
+            track2.AddKeyframe(r3);
+
+            // Shift selected keys (r1 and r2) by delta = +0.25s
+            var selectedKeys = new List<Keyframe> { r1, r2 };
+            double shiftDelta = 0.25;
+            foreach (var k in selectedKeys)
+            {
+                k.Time += shiftDelta;
+            }
+            track2.SortKeys();
+
+            Assert(Math.Abs(r1.Time - 0.75) < 1e-4 && Math.Abs(r2.Time - 1.25) < 1e-4,
+                "Multi-keyframe relative time shifting preserves exact inter-keyframe timing (0.75s, 1.25s)");
+            Assert(Math.Abs((r2.Time - r1.Time) - 0.5) < 1e-4, "Relative distance between shifted keyframes remains exactly 0.5s");
+
+            // 4. Keyframe Clipboard (Copy, Paste, Duplicate)
+            KeyframeClipboard.Clear();
+            Assert(!KeyframeClipboard.HasData, "Clipboard initialized empty");
+
+            var copySelection = new List<Tuple<Track, Keyframe>>
+            {
+                Tuple.Create(track2, r1),
+                Tuple.Create(track2, r2)
+            };
+            KeyframeClipboard.Copy(copySelection);
+            Assert(KeyframeClipboard.HasData && KeyframeClipboard.Count == 2, "Clipboard copied 2 keyframes");
+
+            var clip = new Clip(1, "TestClip", 5.0, 60.0);
+            clip.Tracks.Add(track);
+            clip.Tracks.Add(track2);
+
+            // Paste at playhead = 3.0s onto target object 103
+            var pasted = KeyframeClipboard.Paste(clip, 103, 3.0);
+            Assert(pasted.Count == 2, "Clipboard pasted 2 keyframes at playhead");
+            Assert(Math.Abs(pasted[0].Time - 3.0) < 1e-4, "First pasted keyframe aligned to playhead time 3.0s");
+            Assert(Math.Abs(pasted[1].Time - 3.5) < 1e-4, "Second pasted keyframe preserves relative offset (+0.5s) at 3.5s");
+
+            var pastedTrack = clip.GetTrack(103, (ushort)PropKey.Rotation);
+            Assert(pastedTrack != null && pastedTrack.Keys.Count == 2, "Target track for object 103 created automatically on paste");
+
+            // Duplicate in-place with 0.1s offset
+            var dupeSelection = new List<Tuple<Track, Keyframe>>
+            {
+                Tuple.Create(pastedTrack, pasted[0])
+            };
+            var duplicated = KeyframeClipboard.Duplicate(clip, dupeSelection, 0.1);
+            Assert(duplicated.Count == 1, "Duplicate created 1 keyframe");
+            Assert(Math.Abs(duplicated[0].Time - 3.1) < 1e-4, "Duplicated keyframe offset by 0.1s to 3.1s");
+            Assert(duplicated[0].Id != pasted[0].Id, "Duplicated keyframe has distinct unique ID");
+
+            // 5. Frame Snapping & Clock Quantization
+            var controller = new AnimationTimelineController(5.0, 60.0);
+            controller.ActiveClip = clip;
+            controller.SnapToFrames = true;
+
+            // 60fps frame duration = 0.016666...s
+            double snapped1 = controller.SnapTime(0.040); // 0.040s * 60 = 2.4 -> 2 frames = 2.0 / 60 = 0.0333...s
+            Assert(Math.Abs(snapped1 - (2.0 / 60.0)) < 1e-4, "SnapTime quantized 0.040s to frame 2 (0.0333s)");
+
+            double snapped2 = controller.SnapTime(0.045); // 0.045s * 60 = 2.7 -> 3 frames = 3.0 / 60 = 0.050s
+            Assert(Math.Abs(snapped2 - (3.0 / 60.0)) < 1e-4, "SnapTime quantized 0.045s to frame 3 (0.0500s)");
+
+            // 6. Multi-Object Timeline & Evaluator Integration (Non-destructive)
+            var layerA = new LayerNode { Id = "layer-A", X = 50, Y = 50, Width = 100, Height = 100, Opacity = 1.0 };
+            var layerB = new LayerNode { Id = "layer-B", X = 200, Y = 200, Width = 80, Height = 80, Opacity = 1.0 };
+            uint idA = PropertyBinder.GetNumericNodeId(layerA.Id);
+            uint idB = PropertyBinder.GetNumericNodeId(layerB.Id);
+
+            var trackA_X = clip.GetOrCreateTrack(idA, (ushort)PropKey.X, layerA.Id, "Position X");
+            trackA_X.AddKeyframe(Keyframe.Linear(0.0, 50.0));
+            trackA_X.AddKeyframe(Keyframe.Linear(1.0, 150.0));
+
+            var trackA_Rot = clip.GetOrCreateTrack(idA, (ushort)PropKey.Rotation, layerA.Id, "Rotation");
+            trackA_Rot.AddKeyframe(Keyframe.Linear(0.0, 0.0));
+            trackA_Rot.AddKeyframe(Keyframe.Linear(1.0, 90.0));
+
+            var trackB_Opacity = clip.GetOrCreateTrack(idB, (ushort)PropKey.Opacity, layerB.Id, "Opacity");
+            trackB_Opacity.AddKeyframe(Keyframe.Linear(0.0, 1.0));
+            trackB_Opacity.AddKeyframe(Keyframe.Linear(1.0, 0.2));
+
+            // Evaluate at t = 0.5s
+            var pose = clip.EvaluateAt(0.5);
+            Assert(pose.ContainsKey(idA) && pose.ContainsKey(idB), "Pose contains evaluations for both animated objects");
+
+            PropertyBinder.ApplyPoseToLayer(layerA, idA, pose);
+            PropertyBinder.ApplyPoseToLayer(layerB, idB, pose);
+
+            Assert(Math.Abs(layerA.RenderTransform.TranslationX - 50.0) < 1e-4, "Layer A evaluated TranslationX is 50.0 (total X = 100.0)");
+            Assert(Math.Abs(layerA.RenderTransform.Rotation - 45.0) < 1e-4, "Layer A evaluated Rotation is 45.0°");
+            Assert(Math.Abs(layerB.Opacity - 0.6) < 1e-4, "Layer B evaluated Opacity is 0.6");
+
+            // Design rest geometry preserved
+            Assert(layerA.X == 50 && layerA.Y == 50, "Layer A design rest position X/Y is completely unmodified");
+            Assert(layerB.X == 200 && layerB.Y == 200, "Layer B design rest position X/Y is completely unmodified");
+
+            // 7. Object Deletion / Missing Target Safety
+            // If target layer is deleted/missing, tracks remain intact and queries return empty or default safely
+            var tracksForNonExistent = clip.GetTracksForNode(999999);
+            Assert(tracksForNonExistent != null && tracksForNonExistent.Count == 0,
+                "Querying tracks for nonexistent/deleted object node returns empty list without exception");
+
+            var missingTrack = clip.GetTrack(999999, (ushort)PropKey.X);
+            Assert(missingTrack == null, "GetTrack for nonexistent/deleted node returns null safely");
         }
     }
 }
