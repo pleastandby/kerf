@@ -499,6 +499,7 @@ namespace Kerf.UI
                     var pathGeo = new PathGeometry();
                     var fig = new PathFigure { StartPoint = new Point(xA, yA), IsClosed = false };
 
+                    double settleT = -1.0;
                     for (int s = 1; s <= sampleCount; s++)
                     {
                         double frac = (double)s / sampleCount;
@@ -510,6 +511,11 @@ namespace Kerf.UI
                         double ptX = _viewport.TimeToX(currT);
                         double ptY = _viewport.ValueToY(sampleVal);
                         fig.Segments.Add(new LineSegment(new Point(ptX, ptY), true));
+
+                        if (settleT < 0 && Math.Abs(springP - 1.0) < 0.005 && localT > 0.15)
+                        {
+                            settleT = currT;
+                        }
                     }
 
                     pathGeo.Figures.Add(fig);
@@ -517,6 +523,23 @@ namespace Kerf.UI
                     springBrush.Freeze();
                     var path = new Path { Data = pathGeo, Stroke = springBrush, StrokeThickness = 2.0, IsHitTestVisible = false };
                     Children.Add(path);
+
+                    if (settleT > 0)
+                    {
+                        double sx = _viewport.TimeToX(settleT);
+                        var settleLine = new Line
+                        {
+                            X1 = sx,
+                            Y1 = _viewport.ValueToY(kB.Value) - 10,
+                            X2 = sx,
+                            Y2 = _viewport.ValueToY(kB.Value) + 10,
+                            Stroke = new SolidColorBrush(Color.FromArgb(140, 245, 158, 11)),
+                            StrokeThickness = 1.0,
+                            StrokeDashArray = new DoubleCollection(new double[] { 2, 2 }),
+                            IsHitTestVisible = false
+                        };
+                        Children.Add(settleLine);
+                    }
                 }
             }
 
@@ -948,6 +971,10 @@ namespace Kerf.UI
                 double targetY2 = 1.0 - (sOut * inLenT * dtIn) / dvIn;
                 prevSegmentKf.Y2 = targetY2;
             }
+            else
+            {
+                prevSegmentKf.Y2 = 1.0;
+            }
         }
 
         public static void AlignOutgoingHandleCollinear(Keyframe centerKf, Keyframe nextSegmentKf, double inX2, double inY2, double dtIn, double dvIn)
@@ -968,6 +995,10 @@ namespace Kerf.UI
             {
                 double targetY1 = (sIn * outLenT * dtOut) / dvOut;
                 centerKf.Y1 = targetY1;
+            }
+            else
+            {
+                centerKf.Y1 = 0.0;
             }
         }
 

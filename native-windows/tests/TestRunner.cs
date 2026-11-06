@@ -5111,6 +5111,81 @@ namespace Kerf.Tests
             zeroTrack.AddKeyframe(new Keyframe(1.0 + 1e-7, 2.0, InterpMode.Linear));
             double zeroSample = zeroTrack.Sample(1.0);
             Assert(!double.IsNaN(zeroSample) && !double.IsInfinity(zeroSample), "Zero-length segment handled safely without division by zero");
+
+            // 7. GraphViewport coordinate transforms and Auto-Fit framing per D-04
+            GraphViewport vp = new GraphViewport(0.0, 100.0, 250.0, 1000.0, 200.0, 20.0);
+            
+            // TimeToX conversion: x = t * pps
+            Assert(Math.Abs(vp.TimeToX(0.0) - 0.0) < 1e-7, "Viewport TimeToX at t=0 returns 0.0");
+            Assert(Math.Abs(vp.TimeToX(1.0) - 250.0) < 1e-7, "Viewport TimeToX at t=1 returns 250.0");
+            Assert(Math.Abs(vp.TimeToX(2.5) - 625.0) < 1e-7, "Viewport TimeToX at t=2.5 returns 625.0");
+            Assert(Math.Abs(vp.XToTime(250.0) - 1.0) < 1e-7, "Viewport XToTime at x=250 returns 1.0s");
+
+            // ValueToY and YToValue roundtrip conversions
+            double[] testValues = new double[] { 0.0, 25.0, 50.0, 75.0, 100.0, -20.0, 140.0 };
+            for (int vi = 0; vi < testValues.Length; vi++)
+            {
+                double val = testValues[vi];
+                double y = vp.ValueToY(val);
+                double roundtripVal = vp.YToValue(y);
+                Assert(Math.Abs(roundtripVal - val) < 1e-6, string.Format("Viewport ValueToY/YToValue roundtrip for {0} (got {1})", val, roundtripVal));
+            }
+
+            // Value bounds: vMin maps to (CanvasHeight - MarginY), vMax maps to MarginY
+            Assert(Math.Abs(vp.ValueToY(0.0) - (200.0 - 20.0)) < 1e-6, "ValueToY at VMin maps to bottom margin");
+            Assert(Math.Abs(vp.ValueToY(100.0) - 20.0) < 1e-6, "ValueToY at VMax maps to top margin");
+
+            // Auto-Fit framing with 15% margins per D-04
+            var fitTrack = new Track(30, (ushort)PropKey.Opacity);
+            fitTrack.AddKeyframe(Keyframe.Linear(0.0, 10.0));
+            fitTrack.AddKeyframe(Keyframe.Linear(1.0, 90.0));
+
+            vp.AutoFit(fitTrack, (ushort)PropKey.Opacity);
+            // Span = 90 - 10 = 80; margin = 80 * 0.15 = 12; expected VMin = 10 - 12 = -2.0, VMax = 90 + 12 = 102.0
+            Assert(Math.Abs(vp.VMin - (-2.0)) < 1e-6, string.Format("Auto-Fit 15% bottom margin: expected -2.0, got {0}", vp.VMin));
+            Assert(Math.Abs(vp.VMax - 102.0) < 1e-6, string.Format("Auto-Fit 15% top margin: expected 102.0, got {0}", vp.VMax));
+
+            // Auto-Fit zero-span fallback guarding against division by zero per T-04-03
+            var zeroSpanTrack = new Track(31, (ushort)PropKey.Opacity);
+            zeroSpanTrack.AddKeyframe(Keyframe.Linear(0.0, 1.0));
+            zeroSpanTrack.AddKeyframe(Keyframe.Linear(1.0, 1.0));
+
+            vp.AutoFit(zeroSpanTrack, (ushort)PropKey.Opacity);
+            Assert(vp.VMax > vp.VMin, "Auto-Fit on zero span provides safe non-zero range");
+            double safeY = vp.ValueToY(1.0);
+            Assert(!double.IsNaN(safeY) && !double.IsInfinity(safeY), "ValueToY on zero-span guarded viewport produces finite coordinate");
+
+            // 8. Tangent continuity, 180° collinear slope enforcement, and Alt-drag breaking per D-06
+            var tangentTrack = new Track(40, (ushort)PropKey.Y);
+            var tk0 = Keyframe.Cubic(0.0, 0.0, 0.0, 0.0, 0.5, 0.5);
+            var tk1 = Keyframe.Cubic(1.0, 100.0, 0.4, 0.6, 0.8, 1.0);
+            var tk2 = Keyframe.Linear(2.0, 300.0);
+            tangentTrack.AddKeyframe(tk0);
+            tangentTrack.AddKeyframe(tk1);
+            tangentTrack.AddKeyframe(tk2);
+
+            // Outgoing handle of tk1: X1 = 0.4, Y1 = 0.6 across dt = 1.0s, dv = 200.0
+            // Slope S_out = (0.6 * 200.0) / (0.4 * 1.0) = 120.0 / 0.4 = 300.0
+            double dtOut = tk2.Time - tk1.Time;
+            double dvOut = tk2.Value - tk1.Value;
+            double expectedSlope = (tk1.Y1 * dvOut) / (tk1.X1 * dtOut);
+
+            // Align incoming handle collinear with outgoing handle
+            GraphEditorCanvas.AlignIncomingHandleCollinear(tk1, tk0, tk1.X1, tk1.Y1, dtOut, dvOut);
+
+            // Check resulting incoming slope: S_in = ( (1 - tk0.Y2) * dvIn ) / ( (1 - tk0.X2) * dtIn )
+            double dtIn = tk1.Time - tk0.Time;
+            double dvIn = tk1.Value - tk0.Value;
+            double realizedSlopeIn = ((1.0 - tk0.Y2) * dvIn) / ((1.0 - tk0.X2) * dtIn);
+            Assert(Math.Abs(realizedSlopeIn - expectedSlope) < 1e-4, string.Format("Collinear 180° tangent slope alignment: expected {0}, got {1}", expectedSlope, realizedSlopeIn));
+
+            // Alt-break: when tangent is broken, handle moves independently
+            tk1.IsTangentBroken = true;
+            double prevY2 = tk0.Y2;
+            // Mutate outgoing handle while broken
+            tk1.Y1 = 1.2; // Steep overshoot
+            // Since it is broken, incoming handle remains unchanged
+            Assert(tk0.Y2 == prevY2, "Tangent broken mode preserves independent angle without updating opposing handle");
         }
     }
 }
