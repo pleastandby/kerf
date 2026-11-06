@@ -9,7 +9,7 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 - [x] **Phase 1: Independent Transform Pipeline & Render Separation** - Introduce decoupled render transforms so animation never destructively mutates layer dimensions or Auto Layout bounds.
 - [x] **Phase 2: Independent Transform Architecture and Animation Evaluator** - Eliminate destructive animation transformations and establish a reliable evaluation pipeline with hierarchical matrix composition, centralized clock, and renderer integration.
 - [x] **Phase 3: Timeline and Keyframe Engine Reconstruction** - Build a structured, multi-track animation timeline with expandable object lanes, time ruler, stable keyframes, scrubbing, and inspector integration.
-- [ ] **Phase 4: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
+- [x] **Phase 4: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
 - [ ] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [ ] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
 - [ ] **Phase 7: Verification, Legacy Migration & Safe Deprecation** - End-to-end integration tests, legacy project file migration, and deprecation of old property binders with 0 regressions.
@@ -87,8 +87,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Mathematical easing engine, closed-form analytical springs, 21 presets, and Track.Sample dispatch
-- [ ] 04-02-PLAN.md — Interactive Graph Editor split panel, Value Graph framing, tangent handle dragging, and preset grid popover
+- [x] 04-01-PLAN.md — Mathematical easing engine, closed-form analytical springs, 21 presets, and Track.Sample dispatch
+- [x] 04-02-PLAN.md — Interactive Graph Editor split panel, Value Graph framing, tangent handle dragging, and preset grid popover
 
 ---
 

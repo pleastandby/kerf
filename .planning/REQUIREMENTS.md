@@ -23,10 +23,10 @@ Requirements for the animation engine refactor milestone. Each maps directly to 
 
 ### Easing & Graph Curve Editor
 
-- [ ] **EASE-01**: Robust cubic Bézier easing math supporting custom control points $(x_1, y_1, x_2, y_2)$ and standard presets (Ease In, Ease Out, Ease In-Out, Bounce, Spring).
-- [ ] **EASE-02**: Interactive Direct2D curve/graph editor widget displaying property curves over time.
-- [ ] **EASE-03**: Draggable tangent control handles allowing intuitive curve sculpting on selected keyframes.
-- [ ] **EASE-04**: Synchronized playhead and real-time canvas preview during curve editing.
+- [x] **EASE-01**: Robust cubic Bézier easing math supporting custom control points $(x_1, y_1, x_2, y_2)$ and standard presets (Ease In, Ease Out, Ease In-Out, Bounce, Spring).
+- [x] **EASE-02**: Interactive Direct2D curve/graph editor widget displaying property curves over time.
+- [x] **EASE-03**: Draggable tangent control handles allowing intuitive curve sculpting on selected keyframes.
+- [x] **EASE-04**: Synchronized playhead and real-time canvas preview during curve editing.
 
 ### Command History & Full Undo/Redo
 
@@ -91,10 +91,10 @@ Which phases cover which requirements.
 | MODEL-02 | Phase 2 | Pending |
 | MODEL-03 | Phase 2 | Pending |
 | MODEL-04 | Phase 2 | Pending |
-| EASE-01 | Phase 3 | Pending |
-| EASE-02 | Phase 3 | Pending |
-| EASE-03 | Phase 3 | Pending |
-| EASE-04 | Phase 3 | Pending |
+| EASE-01 | Phase 4 | Complete |
+| EASE-02 | Phase 4 | Complete |
+| EASE-03 | Phase 4 | Complete |
+| EASE-04 | Phase 4 | Complete |
 | HIST-01 | Phase 4 | Pending |
 | HIST-02 | Phase 4 | Pending |
 | HIST-03 | Phase 4 | Pending |
