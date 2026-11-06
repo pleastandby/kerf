@@ -51,6 +51,7 @@ namespace Kerf.Engine.Animation
             if (props.TryGetValue((ushort)PropKey.ScaleX, out val))
             {
                 layer.RenderTransform.ScaleX = val;
+                layer.RenderTransform.VisualWidth = layer.Width * val;
             }
             else if (props.TryGetValue((ushort)PropKey.VisualWidth, out val))
             {
@@ -59,12 +60,14 @@ namespace Kerf.Engine.Animation
             }
             else if (props.TryGetValue((ushort)PropKey.Width, out val))
             {
+                layer.RenderTransform.VisualWidth = val;
                 layer.RenderTransform.ScaleX = val / Math.Max(0.001, layer.Width);
             }
 
             if (props.TryGetValue((ushort)PropKey.ScaleY, out val))
             {
                 layer.RenderTransform.ScaleY = val;
+                layer.RenderTransform.VisualHeight = layer.Height * val;
             }
             else if (props.TryGetValue((ushort)PropKey.VisualHeight, out val))
             {
@@ -73,6 +76,7 @@ namespace Kerf.Engine.Animation
             }
             else if (props.TryGetValue((ushort)PropKey.Height, out val))
             {
+                layer.RenderTransform.VisualHeight = val;
                 layer.RenderTransform.ScaleY = val / Math.Max(0.001, layer.Height);
             }
 

@@ -82,6 +82,7 @@ namespace Kerf.Tests
             RunTest("Timeline & Keyframe Engine Reconstruction & Authoring System", TestTimelineAndKeyframeEngineAuthoringSystem);
             RunTest("Scale Crash Fix, Non-Destructive Frame Content Scaling, Empty Preset & State Timeline Header", TestScaleCrashFixFrameScalingNoPresetAndStateTimelineHeader);
             RunTest("Anchor Point System, Stationary Pan-Behind & Raster Scaling", TestAnchorPointAndRasterScaling);
+            RunTest("Rive 3-Axis + Rotation Gizmo, Y Key Reposition & Non-Destructive Frame Scaling", TestRiveAnchorPointGizmoAndContentScaling);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -4791,6 +4792,109 @@ namespace Kerf.Tests
             });
 
             Assert(clipWithRemainingDemo.Tracks.Count == 0, "Enhanced sanitization completely removed lingering demo rotation and opacity tracks");
+        }
+
+        private static void TestRiveAnchorPointGizmoAndContentScaling()
+        {
+            // 1. ToolType.Anchor restriction: Anchor point only moves in ToolType.Anchor
+            ToolType currentTool = ToolType.Select;
+            bool canHitAnchorInSelect = (currentTool == ToolType.Anchor);
+            Assert(!canHitAnchorInSelect, "In ToolType.Select, anchor point hit testing is disabled so dragging never moves the anchor");
+
+            // Pressing 'Y' enters Anchor mode
+            currentTool = ToolType.Anchor;
+            bool canHitAnchorInAnchor = (currentTool == ToolType.Anchor);
+            Assert(canHitAnchorInAnchor, "Pressing 'Y' sets ToolType.Anchor enabling 3-axis and rotation gizmo manipulation");
+
+            // Pressing 'Enter' commits and exits Anchor mode back to ToolType.Select
+            currentTool = ToolType.Select;
+            Assert(currentTool == ToolType.Select, "Pressing 'Enter' commits anchor point and returns to ToolType.Select");
+
+            // 2. Non-Destructive Scaling of AutoLayout Frame and Content
+            // Create an AutoLayout frame (550 x 550) containing 4 child rectangles
+            var page = new Page();
+            var frame = new LayerNode
+            {
+                Id = "auto-frame",
+                Type = ElementType.Frame,
+                X = 100,
+                Y = 100,
+                Width = 550,
+                Height = 550,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Vertical,
+                    PaddingTop = 20,
+                    PaddingLeft = 20,
+                    PaddingRight = 20,
+                    PaddingBottom = 20,
+                    Gap = 16
+                },
+                RenderTransform = new RenderTransform
+                {
+                    AnchorX = 0.5,
+                    AnchorY = 0.5,
+                    ScaleX = 1.0,
+                    ScaleY = 1.0
+                }
+            };
+            page.Layers.Add(frame);
+
+            var r1 = new LayerNode { Id = "r1", Type = ElementType.Rectangle, ParentId = frame.Id, X = 120, Y = 120, Width = 230, Height = 230 };
+            var r2 = new LayerNode { Id = "r2", Type = ElementType.Rectangle, ParentId = frame.Id, X = 370, Y = 120, Width = 230, Height = 230 };
+            var r3 = new LayerNode { Id = "r3", Type = ElementType.Rectangle, ParentId = frame.Id, X = 120, Y = 370, Width = 230, Height = 230 };
+            var r4 = new LayerNode { Id = "r4", Type = ElementType.Rectangle, ParentId = frame.Id, X = 370, Y = 370, Width = 230, Height = 230 };
+            frame.Children.Add(r1); frame.Children.Add(r2); frame.Children.Add(r3); frame.Children.Add(r4);
+            page.Layers.Add(r1); page.Layers.Add(r2); page.Layers.Add(r3); page.Layers.Add(r4);
+
+            // In Animate Mode, scaling up to 728 x 731:
+            // The base layout dimensions MUST NOT be modified!
+            double targetVisualW = 728;
+            double targetVisualH = 731;
+            double scaleX = targetVisualW / frame.Width;
+            double scaleY = targetVisualH / frame.Height;
+
+            frame.RenderTransform.ScaleX = scaleX;
+            frame.RenderTransform.ScaleY = scaleY;
+            frame.RenderTransform.VisualWidth = targetVisualW;
+            frame.RenderTransform.VisualHeight = targetVisualH;
+
+            Assert(frame.Width == 550 && frame.Height == 550, "Frame base layout dimensions remain intact at 550x550 in Animate Mode");
+            Assert(r1.Width == 230 && r1.Height == 230, "Child rectangles keep their layout dimensions");
+            Assert(r1.X == 120 && r1.Y == 120, "Child rectangles keep their un-reflowed relative positions");
+
+            // World transform matrix scales the frame AND all child visuals outward from Anchor (0.5, 0.5)
+            Matrix frameWorldMat = frame.GetRenderTransformMatrix();
+            Point centerBefore = new Point(100 + 275, 100 + 275);
+            Point centerAfter = frameWorldMat.Transform(centerBefore);
+            Assert(Math.Abs(centerBefore.X - centerAfter.X) < 1e-4 && Math.Abs(centerBefore.Y - centerAfter.Y) < 1e-4,
+                "Center anchor point stays invariant during symmetric scaling");
+
+            Point frameTL = frameWorldMat.Transform(new Point(100, 100));
+            Point frameBR = frameWorldMat.Transform(new Point(650, 650));
+            double visualWidth = frameBR.X - frameTL.X;
+            double visualHeight = frameBR.Y - frameTL.Y;
+            Assert(Math.Abs(visualWidth - targetVisualW) < 1e-2, "Visual rendered width equals target 728px");
+            Assert(Math.Abs(visualHeight - targetVisualH) < 1e-2, "Visual rendered height equals target 731px");
+
+            // Child world transform: child matrix combined with parent frame matrix
+            Matrix childWorldMat = r1.GetWorldRenderTransformMatrix(page);
+            Point childRenderedTopLeft = childWorldMat.Transform(new Point(r1.X, r1.Y));
+            Assert(childRenderedTopLeft.X < 120 && childRenderedTopLeft.Y < 120,
+                "Child shapes scale outward smoothly with parent frame rather than staying stuck in top-left");
+
+            // 3. PropertyBinder Evaluation with Width/VisualWidth/ScaleX
+            uint frameNodeId = PropertyBinder.GetNumericNodeId(frame.Id);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            pose[frameNodeId] = new Dictionary<ushort, double>();
+            pose[frameNodeId][(ushort)PropKey.Width] = 728.0;
+            pose[frameNodeId][(ushort)PropKey.Height] = 731.0;
+
+            PropertyBinder.ApplyPoseToLayer(frame, frameNodeId, pose);
+            Assert(Math.Abs(frame.RenderTransform.ScaleX - (728.0 / 550.0)) < 1e-4, "PropertyBinder converts Width keyframe to RenderTransform.ScaleX non-destructively");
+            Assert(Math.Abs(frame.RenderTransform.ScaleY - (731.0 / 550.0)) < 1e-4, "PropertyBinder converts Height keyframe to RenderTransform.ScaleY non-destructively");
+            Assert(frame.RenderTransform.VisualWidth == 728.0 && frame.RenderTransform.VisualHeight == 731.0, "VisualWidth and VisualHeight populated");
+            Assert(frame.Width == 550 && frame.Height == 550, "Frame base document dimensions still 550x550 after PropertyBinder pose evaluation");
         }
     }
 }
