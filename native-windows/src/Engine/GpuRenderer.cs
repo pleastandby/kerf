@@ -82,9 +82,9 @@ namespace Kerf.Engine
                     pushedOpacity = true;
                 }
 
-                // Push Transform (Rotation, Scale)
+                // Push Transform (Rotation, Scale) - note: RenderTransform is handled on visual.Transform
                 bool pushedTransform = false;
-                var matrix = node.GetTransformMatrix();
+                var matrix = node.GetStaticTransformMatrix();
                 if (!matrix.IsIdentity)
                 {
                     dc.PushTransform(new MatrixTransform(matrix));

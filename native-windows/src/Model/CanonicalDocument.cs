@@ -913,6 +913,20 @@ namespace Kerf.Model
             return mat;
         }
 
+        public Matrix GetStaticTransformMatrix()
+        {
+            var mat = Matrix.Identity;
+            if (Rotation != 0.0)
+            {
+                mat.RotateAt(Rotation, X + Width / 2.0, Y + Height / 2.0);
+            }
+            if (ScaleX != 1.0 || ScaleY != 1.0)
+            {
+                mat.ScaleAt(ScaleX, ScaleY, X + Width / 2.0, Y + Height / 2.0);
+            }
+            return mat;
+        }
+
         public Matrix GetTransformMatrix()
         {
             var mat = Matrix.Identity;

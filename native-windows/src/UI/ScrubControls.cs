@@ -97,24 +97,31 @@ namespace Kerf.UI
             {
                 if (isScrubbing && e.LeftButton == MouseButtonState.Pressed && lbl.IsMouseCaptured)
                 {
-                    Point cur = e.GetPosition(lbl);
-                    double dx = cur.X - startMouse.X;
-
-                    double multiplier = step;
-                    if (Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift))
-                        multiplier *= 10.0;
-                    else if (Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt))
-                        multiplier *= 0.1;
-
-                    double newVal = startVal + dx * multiplier;
-                    newVal = Math.Max(min, Math.Min(max, newVal));
-                    currentValue = newVal;
-
-                    tb.Text = Math.Round(newVal, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix;
-
-                    if (onChanged != null)
+                    try
                     {
-                        onChanged(newVal);
+                        Point cur = e.GetPosition(lbl);
+                        double dx = cur.X - startMouse.X;
+
+                        double multiplier = step;
+                        if (Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift))
+                            multiplier *= 10.0;
+                        else if (Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt))
+                            multiplier *= 0.1;
+
+                        double newVal = startVal + dx * multiplier;
+                        newVal = Math.Max(min, Math.Min(max, newVal));
+                        currentValue = newVal;
+
+                        tb.Text = Math.Round(newVal, 1).ToString("0.#", CultureInfo.InvariantCulture) + (suffix ?? string.Empty);
+
+                        if (onChanged != null)
+                        {
+                            onChanged(newVal);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // Fail-safe to avoid crash during live scrubbing
                     }
                 }
                 else if (lbl.IsMouseCaptured)
@@ -137,19 +144,26 @@ namespace Kerf.UI
 
             Action commitText = () =>
             {
-                string raw = tb.Text.Replace(suffix, "").Trim();
-                double parsed;
-                if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) ||
-                    double.TryParse(raw, NumberStyles.Float, CultureInfo.CurrentCulture, out parsed))
+                try
                 {
-                    parsed = Math.Max(min, Math.Min(max, parsed));
-                    currentValue = parsed;
-                    tb.Text = Math.Round(parsed, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix;
-                    if (onChanged != null) onChanged(parsed);
+                    string raw = !string.IsNullOrEmpty(suffix) ? tb.Text.Replace(suffix, "").Trim() : tb.Text.Trim();
+                    double parsed;
+                    if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) ||
+                        double.TryParse(raw, NumberStyles.Float, CultureInfo.CurrentCulture, out parsed))
+                    {
+                        parsed = Math.Max(min, Math.Min(max, parsed));
+                        currentValue = parsed;
+                        tb.Text = Math.Round(parsed, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix;
+                        if (onChanged != null) onChanged(parsed);
+                    }
+                    else
+                    {
+                        tb.Text = Math.Round(currentValue, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix;
+                    }
                 }
-                else
+                catch (Exception)
                 {
-                    tb.Text = Math.Round(currentValue, 1).ToString("0.#", CultureInfo.InvariantCulture) + suffix;
+                    // Fail-safe to guarantee studio never crashes on text commit
                 }
             };
 

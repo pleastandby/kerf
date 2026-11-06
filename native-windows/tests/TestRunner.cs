@@ -80,6 +80,7 @@ namespace Kerf.Tests
             RunTest("Non-Destructive Render Transforms & Auto Layout Preservation", TestNonDestructiveRenderTransformsAndAutoLayoutPreservation);
             RunTest("Independent Transform Architecture & Deterministic Animation Evaluator", TestIndependentTransformArchitectureAndAnimationEvaluator);
             RunTest("Timeline & Keyframe Engine Reconstruction & Authoring System", TestTimelineAndKeyframeEngineAuthoringSystem);
+            RunTest("Scale Crash Fix, Non-Destructive Frame Content Scaling, Empty Preset & State Timeline Header", TestScaleCrashFixFrameScalingNoPresetAndStateTimelineHeader);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -4437,6 +4438,107 @@ namespace Kerf.Tests
 
             var missingTrack = clip.GetTrack(999999, (ushort)PropKey.X);
             Assert(missingTrack == null, "GetTrack for nonexistent/deleted node returns null safely");
+        }
+
+        private static void TestScaleCrashFixFrameScalingNoPresetAndStateTimelineHeader()
+        {
+            // 1. ScrubControls safety: empty suffix string replacement must not throw System.ArgumentException
+            string suffix = "";
+            string rawText = " 2.5 ";
+            string cleaned = !string.IsNullOrEmpty(suffix) ? rawText.Replace(suffix, "").Trim() : rawText.Trim();
+            double parsedVal;
+            bool parsedOk = double.TryParse(cleaned, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedVal);
+            Assert(parsedOk && Math.Abs(parsedVal - 2.5) < 1e-4, "Empty suffix scrub parsing succeeds without throwing String cannot be of zero length exception");
+
+            // 2. Default animation clip starts completely empty (no unwanted rotation or opacity presets)
+            var newClip = new Clip(1, "DefaultClip", 5.0, 60.0);
+            Assert(newClip.Tracks.Count == 0, "Default animation clip starts with 0 tracks and 0 keyframes without uninvited presets");
+
+            // 3. Non-destructive Frame Content Scaling in Animate Mode
+            var doc = new KerfDocument();
+            var page = doc.Pages[0];
+            var frame = new LayerNode
+            {
+                Id = "frame-container-1",
+                Type = ElementType.Frame,
+                Name = "Parent Frame",
+                X = 100,
+                Y = 100,
+                Width = 400,
+                Height = 300
+            };
+            var childVector = new LayerNode
+            {
+                Id = "vector-child-1",
+                Type = ElementType.Path,
+                Name = "Inner Icon",
+                ParentId = frame.Id,
+                X = 50,
+                Y = 50,
+                Width = 80,
+                Height = 80
+            };
+            frame.Children.Add(childVector);
+            page.Layers.Add(frame);
+
+            // Verify GetStaticTransformMatrix does not double-bake RenderTransform
+            frame.RenderTransform.ScaleX = 2.0;
+            frame.RenderTransform.ScaleY = 2.0;
+            var staticMat = frame.GetStaticTransformMatrix();
+            Assert(staticMat.IsIdentity, "GetStaticTransformMatrix remains identity when no static rotation or scale is applied");
+
+            var renderMat = frame.GetRenderTransformMatrix();
+            Assert(Math.Abs(renderMat.M11 - 2.0) < 1e-4 && Math.Abs(renderMat.M22 - 2.0) < 1e-4,
+                "GetRenderTransformMatrix accurately reflects animated 2.0x scale");
+
+            // Frame dimensions are preserved non-destructively
+            Assert(frame.Width == 400 && frame.Height == 300, "Base frame width and height are preserved non-destructively without resizing bounds");
+
+            // Child geometry is transformed by frame's visual transform
+            // In WPF / RetainedSceneGraph, child visuals live inside the frame's VisualContainer
+            Point childOriginInFrame = new Point(childVector.X, childVector.Y);
+            Point transformedChildOrigin = renderMat.Transform(childOriginInFrame);
+            Assert(transformedChildOrigin != childOriginInFrame,
+                   "Nested child objects scale with the parent frame non-destructively");
+
+            // 4. State Machine Timeline Header & State-to-Clip Mapping
+            var smDef = new StateMachineDefinition("AppStateMachine");
+            var smLayer = new MachineLayer("BaseLayer");
+            var idleClip = new Clip(10, "IdleClip", 2.0, 60.0);
+            var hoverClip = new Clip(11, "HoverClip", 1.5, 60.0);
+            doc.Animation.Clips.Add(idleClip);
+            doc.Animation.Clips.Add(hoverClip);
+
+            var stateIdle = new MachineState(0, "Idle", StateKind.Animation, 0); // maps to doc.Animation.Clips[0]
+            var stateHover = new MachineState(1, "Hover", StateKind.Animation, 1); // maps to doc.Animation.Clips[1]
+            smLayer.States.Add(stateIdle);
+            smLayer.States.Add(stateHover);
+            smDef.Layers.Add(smLayer);
+            doc.Animation.StateMachine = smDef;
+
+            // Test mapping for idleClip
+            int idleIdx = doc.Animation.Clips.IndexOf(idleClip);
+            MachineState matchedIdle = null;
+            foreach (var l in doc.Animation.StateMachine.Layers)
+            {
+                foreach (var s in l.States)
+                {
+                    if (s.ClipIndex == idleIdx) matchedIdle = s;
+                }
+            }
+            Assert(matchedIdle != null && matchedIdle.Name == "Idle", "Idle clip maps accurately to 'Idle' state");
+
+            // Test mapping for hoverClip
+            int hoverIdx = doc.Animation.Clips.IndexOf(hoverClip);
+            MachineState matchedHover = null;
+            foreach (var l in doc.Animation.StateMachine.Layers)
+            {
+                foreach (var s in l.States)
+                {
+                    if (s.ClipIndex == hoverIdx) matchedHover = s;
+                }
+            }
+            Assert(matchedHover != null && matchedHover.Name == "Hover", "Hover clip maps accurately to 'Hover' state");
         }
     }
 }

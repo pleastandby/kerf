@@ -56,6 +56,7 @@ namespace Kerf.UI
         private TextBlock _timelineLoopText;
         private TextBlock _timelineSpeedText;
         private StackPanel _timelineTracksStack;
+        private StackPanel _timelineStateTabsStack;
         private Canvas _timelineCanvasHost;
         private FrameworkElement _timelineTracksContainer;
         private FrameworkElement _stateMachineContainer;
@@ -3216,7 +3217,7 @@ namespace Kerf.UI
                     primary.RenderTransform.ScaleX = val;
                     InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.ScaleX, val);
-                }), primary, PropKey.ScaleX);
+                }, min: 0.01, max: 100.0, step: 0.05), primary, PropKey.ScaleX);
 
                 var syBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("ScaleY", currentScaleY, val =>
                 {
@@ -3224,7 +3225,7 @@ namespace Kerf.UI
                     primary.RenderTransform.ScaleY = val;
                     InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.ScaleY, val);
-                }), primary, PropKey.ScaleY);
+                }, min: 0.01, max: 100.0, step: 0.05), primary, PropKey.ScaleY);
 
                 Grid.SetColumn(sxBox, 0); Grid.SetColumn(syBox, 2);
                 scaleRow.Children.Add(sxBox); scaleRow.Children.Add(syBox);
@@ -3244,7 +3245,7 @@ namespace Kerf.UI
                     primary.RenderTransform.AnchorX = val;
                     InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.AnchorX, val);
-                }), primary, PropKey.AnchorX);
+                }, min: 0.0, max: 1.0, step: 0.05), primary, PropKey.AnchorX);
 
                 var ayBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Anc Y", currentAnchorY, val =>
                 {
@@ -3252,7 +3253,7 @@ namespace Kerf.UI
                     primary.RenderTransform.AnchorY = val;
                     InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.AnchorY, val);
-                }), primary, PropKey.AnchorY);
+                }, min: 0.0, max: 1.0, step: 0.05), primary, PropKey.AnchorY);
 
                 Grid.SetColumn(axBox, 0); Grid.SetColumn(ayBox, 2);
                 anchorRow.Children.Add(axBox); anchorRow.Children.Add(ayBox);
@@ -7189,14 +7190,20 @@ namespace Kerf.UI
                 {
                     var union = TransformEngine.UnionBounds(_selectedLayers);
                     double rot = (_selectedLayers.Count == 1) ? _selectedLayers[0].Rotation : 0;
-                    var handle = TransformEngine.HitTestHandle(canvasPt, union, rot, _zoomScale);
+                    Point testHandlePt = canvasPt;
+                    if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1 && _selectedLayers[0].RenderTransform != null && !_selectedLayers[0].RenderTransform.IsIdentity)
+                    {
+                        testHandlePt = RetainedSceneGraph.CanvasToLocalPoint(_selectedLayers[0], canvasPt);
+                        rot = 0;
+                    }
+                    var handle = TransformEngine.HitTestHandle(testHandlePt, union, rot, _zoomScale);
                     if (handle != HandleType.None)
                     {
                         _activeHandle = handle;
                         _isTransforming = true;
                         _transformStartBounds = union;
                         _transformStartRot = rot;
-                        _transformStartMouse = canvasPt;
+                        _transformStartMouse = testHandlePt;
                         _dragInitialPositions.Clear();
                         _dragInitialBounds.Clear();
                         _dragInitialRotations.Clear();
@@ -7580,9 +7587,15 @@ namespace Kerf.UI
 
                 if (_activeHandle != HandleType.None)
                 {
+                    Point effectiveCanvasPt = canvasPt;
+                    if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1 && _selectedLayers[0].RenderTransform != null && !_selectedLayers[0].RenderTransform.IsIdentity)
+                    {
+                        effectiveCanvasPt = RetainedSceneGraph.CanvasToLocalPoint(_selectedLayers[0], canvasPt);
+                    }
+
                     var res = TransformEngine.ApplyTransform(
                         _activeHandle,
-                        canvasPt,
+                        effectiveCanvasPt,
                         _transformStartMouse,
                         _transformStartBounds,
                         _transformStartRot,
@@ -7594,13 +7607,31 @@ namespace Kerf.UI
                     if (_selectedLayers.Count == 1)
                     {
                         var n = _selectedLayers[0];
-                        Rect oldBounds = new Rect(n.X, n.Y, n.Width, n.Height);
-                        bool reflowOwnAutoLayout = false;
-                        n.X = res.Bounds.X;
-                        n.Y = res.Bounds.Y;
-                        n.Width = res.Bounds.Width;
-                        n.Height = res.Bounds.Height;
-                        n.Rotation = res.Rotation;
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            // In Animate Mode: scaling a Frame/layer must scale its entire visual contents non-destructively
+                            // via RenderTransform.ScaleX/Y and translation offsets, without mutating persistent layout dimensions.
+                            if (n.RenderTransform == null) n.RenderTransform = new RenderTransform();
+                            double sx = res.Bounds.Width / Math.Max(0.001, _transformStartBounds.Width);
+                            double sy = res.Bounds.Height / Math.Max(0.001, _transformStartBounds.Height);
+                            n.RenderTransform.ScaleX = Math.Max(0.001, sx);
+                            n.RenderTransform.ScaleY = Math.Max(0.001, sy);
+                            n.RenderTransform.TranslationX = res.Bounds.X - _transformStartBounds.X;
+                            n.RenderTransform.TranslationY = res.Bounds.Y - _transformStartBounds.Y;
+                            n.RenderTransform.Rotation = res.Rotation - _transformStartRot;
+                            _sceneGraph.InvalidateSubtree(n.Id);
+                            RefreshCanvas();
+                            RefreshPropertyInspector();
+                        }
+                        else
+                        {
+                            Rect oldBounds = new Rect(n.X, n.Y, n.Width, n.Height);
+                            bool reflowOwnAutoLayout = false;
+                            n.X = res.Bounds.X;
+                            n.Y = res.Bounds.Y;
+                            n.Width = res.Bounds.Width;
+                            n.Height = res.Bounds.Height;
+                            n.Rotation = res.Rotation;
 
                         // Figma Auto Layout Flexbox Resizing: switch resized axis to Fixed and reflow live!
                         if (n.AutoLayout != null && n.AutoLayout.Mode != AutoLayoutMode.None)
@@ -7654,6 +7685,7 @@ namespace Kerf.UI
                         if (reflowOwnAutoLayout) AutoLayoutEngine.ReflowRecursive(n);
                         ReflowAutoLayoutAncestors(n);
                         InvalidateLayoutFrameVisuals(n);
+                        }
                     }
                     else
                     {
@@ -8281,7 +8313,8 @@ namespace Kerf.UI
                                 Math.Abs(node.Y - initRect.Y) > 0.001 ||
                                 Math.Abs(node.Width - initRect.Width) > 0.001 ||
                                 Math.Abs(node.Height - initRect.Height) > 0.001 ||
-                                (_dragInitialRotations.ContainsKey(node) && Math.Abs(node.Rotation - _dragInitialRotations[node]) > 0.001))
+                                (_dragInitialRotations.ContainsKey(node) && Math.Abs(node.Rotation - _dragInitialRotations[node]) > 0.001) ||
+                                (_currentStudioMode == StudioMode.Animate && node.RenderTransform != null && !node.RenderTransform.IsIdentity))
                             {
                                 changed = true;
                                 break;
@@ -8289,45 +8322,57 @@ namespace Kerf.UI
                         }
                         if (changed)
                         {
-                            var afterBounds = new Dictionary<LayerNode, Rect>();
-                            var afterRots = new Dictionary<LayerNode, double>();
-                            var afterGeos = new Dictionary<LayerNode, VectorGeometry>();
-                            foreach (var n in _dragInitialBounds.Keys)
-                            {
-                                afterBounds[n] = new Rect(n.X, n.Y, n.Width, n.Height);
-                                afterRots[n] = n.Rotation;
-                                if (n.Type == ElementType.Path && n.Geometry != null)
-                                {
-                                    afterGeos[n] = n.Geometry.Clone();
-                                }
-                            }
-                            var cmd = new TransformLayersCommand(
-                                _dragInitialBounds,
-                                afterBounds,
-                                _dragInitialRotations,
-                                afterRots,
-                                _dragInitialGeometries,
-                                afterGeos,
-                                () => {
-                                    foreach (var n in afterBounds.Keys) _sceneGraph.InvalidateNode(n.Id);
-                                    RefreshCanvas();
-                                    RefreshPropertyInspector();
-                                });
-                            History.Execute(cmd);
                             if (_currentStudioMode == StudioMode.Animate)
                             {
-                                foreach (var layer in afterBounds.Keys)
+                                History.MarkDirty();
+                                foreach (var layer in _dragInitialBounds.Keys)
                                 {
                                     CaptureAnimationRestPoseForLayer(layer);
-                                    Rect before = _dragInitialBounds[layer];
-                                    Rect after = afterBounds[layer];
-                                    if (Math.Abs(before.X - after.X) > 0.001) AutoKeyProperty(layer, PropKey.X, layer.X);
-                                    if (Math.Abs(before.Y - after.Y) > 0.001) AutoKeyProperty(layer, PropKey.Y, layer.Y);
-                                    if (Math.Abs(before.Width - after.Width) > 0.001) AutoKeyProperty(layer, PropKey.Width, layer.Width);
-                                    if (Math.Abs(before.Height - after.Height) > 0.001) AutoKeyProperty(layer, PropKey.Height, layer.Height);
-                                    if (_dragInitialRotations.ContainsKey(layer) && Math.Abs(_dragInitialRotations[layer] - layer.Rotation) > 0.001)
-                                        AutoKeyProperty(layer, PropKey.Rotation, layer.Rotation);
+                                    if (layer.RenderTransform != null)
+                                    {
+                                        if (Math.Abs(layer.RenderTransform.ScaleX - 1.0) > 0.001)
+                                            AutoKeyProperty(layer, PropKey.ScaleX, layer.RenderTransform.ScaleX);
+                                        if (Math.Abs(layer.RenderTransform.ScaleY - 1.0) > 0.001)
+                                            AutoKeyProperty(layer, PropKey.ScaleY, layer.RenderTransform.ScaleY);
+                                        if (Math.Abs(layer.RenderTransform.TranslationX) > 0.001)
+                                            AutoKeyProperty(layer, PropKey.X, layer.X + layer.RenderTransform.TranslationX);
+                                        if (Math.Abs(layer.RenderTransform.TranslationY) > 0.001)
+                                            AutoKeyProperty(layer, PropKey.Y, layer.Y + layer.RenderTransform.TranslationY);
+                                        if (Math.Abs(layer.RenderTransform.Rotation) > 0.001)
+                                            AutoKeyProperty(layer, PropKey.Rotation, layer.Rotation + layer.RenderTransform.Rotation);
+                                    }
+                                    _sceneGraph.InvalidateSubtree(layer.Id);
                                 }
+                                RefreshCanvas();
+                                RefreshPropertyInspector();
+                            }
+                            else
+                            {
+                                var afterBounds = new Dictionary<LayerNode, Rect>();
+                                var afterRots = new Dictionary<LayerNode, double>();
+                                var afterGeos = new Dictionary<LayerNode, VectorGeometry>();
+                                foreach (var n in _dragInitialBounds.Keys)
+                                {
+                                    afterBounds[n] = new Rect(n.X, n.Y, n.Width, n.Height);
+                                    afterRots[n] = n.Rotation;
+                                    if (n.Type == ElementType.Path && n.Geometry != null)
+                                    {
+                                        afterGeos[n] = n.Geometry.Clone();
+                                    }
+                                }
+                                var cmd = new TransformLayersCommand(
+                                    _dragInitialBounds,
+                                    afterBounds,
+                                    _dragInitialRotations,
+                                    afterRots,
+                                    _dragInitialGeometries,
+                                    afterGeos,
+                                    () => {
+                                        foreach (var n in afterBounds.Keys) _sceneGraph.InvalidateNode(n.Id);
+                                        RefreshCanvas();
+                                        RefreshPropertyInspector();
+                                    });
+                                History.Execute(cmd);
                             }
                         }
                     }
@@ -8829,7 +8874,19 @@ namespace Kerf.UI
             var center = new Point(union.X + union.Width / 2.0, union.Y + union.Height / 2.0);
 
             var mat = Matrix.Identity;
-            if (Math.Abs(rot) > 0.001)
+            if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1 && _selectedLayers[0].RenderTransform != null && !_selectedLayers[0].RenderTransform.IsIdentity)
+            {
+                var rtMat = _selectedLayers[0].GetRenderTransformMatrix();
+                if (!rtMat.IsIdentity)
+                {
+                    mat = rtMat;
+                }
+                else if (Math.Abs(rot) > 0.001)
+                {
+                    mat.RotateAt(rot, center.X, center.Y);
+                }
+            }
+            else if (Math.Abs(rot) > 0.001)
             {
                 mat.RotateAt(rot, center.X, center.Y);
             }
@@ -9217,7 +9274,7 @@ namespace Kerf.UI
             if (History != null) History.MarkDirty();
             if (_currentStudioMode == StudioMode.Animate) CaptureAnimationRestPoseForLayer(node);
             ReflowAutoLayoutAncestors(node);
-            _sceneGraph.InvalidateNode(node.Id);
+            _sceneGraph.InvalidateSubtree(node.Id);
             RefreshCanvas();
         }
 
@@ -11262,6 +11319,17 @@ namespace Kerf.UI
             modeStack.Children.Add(_tabTimelineClipsBtn);
             modePill.Child = modeStack;
             rightStack.Children.Insert(0, modePill);
+
+            // Dynamic State Machine State Tabs Bar: allows direct 1-click opening of multiple state timelines
+            var stateTabsScroll = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            _timelineStateTabsStack = new StackPanel { Orientation = Orientation.Horizontal };
+            stateTabsScroll.Content = _timelineStateTabsStack;
+            rightStack.Children.Insert(1, stateTabsScroll);
 
             Grid.SetRow(rightStack, 1);
             transportGrid.Children.Add(rightStack);
@@ -13710,7 +13778,13 @@ namespace Kerf.UI
                 _timelineScrubber.Maximum = _timelineController.Duration;
                 _timelineScrubber.Value = 0.0;
             }
-            if (_timelineClipText != null) _timelineClipText.Text = "Clip: " + clip.Name;
+            string stateName = GetActiveStateNameForClip(clip);
+            if (_timelineClipText != null)
+            {
+                _timelineClipText.Text = !string.IsNullOrEmpty(stateName)
+                    ? "State: [" + stateName + "] · Clip: " + clip.Name
+                    : "Clip: " + clip.Name;
+            }
             if (_timelineLoopText != null) _timelineLoopText.Text = clip.LoopMode == LoopMode.Loop ? "🔁 Loop: All" : (clip.LoopMode == LoopMode.PingPong ? "🔁 Loop: PingPong" : "🔁 Loop: Once");
             if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
             if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Visible;
@@ -13938,27 +14012,8 @@ namespace Kerf.UI
             }
 
             var defaultClip = new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.Loop);
-
-            var pageLayers = (Document != null && Document.GetActivePage() != null) ? Document.GetActivePage().Layers : null;
-            if (pageLayers != null && pageLayers.Count > 0)
-            {
-                var target = pageLayers[0];
-                uint targetId = PropertyBinder.GetNumericNodeId(target.Id);
-
-                // Default Rotation track (0 -> 180 -> 360 deg)
-                var rotTrack = new AnimTrack(targetId, (ushort)PropKey.Rotation);
-                rotTrack.AddKeyframe(Keyframe.Cubic(0.0, 0.0, 0.42, 0.0, 0.58, 1.0));
-                rotTrack.AddKeyframe(Keyframe.Cubic(1.0, 180.0, 0.42, 0.0, 0.58, 1.0));
-                rotTrack.AddKeyframe(Keyframe.Cubic(2.0, 360.0, 0.42, 0.0, 0.58, 1.0));
-                defaultClip.Tracks.Add(rotTrack);
-
-                // Default Opacity track (1.0 -> 0.4 -> 1.0)
-                var opTrack = new AnimTrack(targetId, (ushort)PropKey.Opacity);
-                opTrack.AddKeyframe(Keyframe.Linear(0.0, target.Opacity));
-                opTrack.AddKeyframe(Keyframe.Linear(1.0, Math.Max(0.2, target.Opacity * 0.5)));
-                opTrack.AddKeyframe(Keyframe.Linear(2.0, target.Opacity));
-                defaultClip.Tracks.Add(opTrack);
-            }
+            // Start with an empty clip: no animations applied before the user explicitly creates keyframes
+            defaultClip.Tracks.Clear();
 
             _timelineController.ActiveClip = defaultClip;
             _timelineController.Duration = defaultClip.Duration;
@@ -14279,6 +14334,137 @@ namespace Kerf.UI
             }
         }
 
+        private string GetActiveStateNameForClip(Clip clip)
+        {
+            if (clip == null || Document == null || Document.Animation == null || Document.Animation.StateMachine == null)
+                return null;
+
+            var sm = Document.Animation.StateMachine;
+            int clipIdx = Document.Animation.Clips != null ? Document.Animation.Clips.IndexOf(clip) : -1;
+            if (clipIdx >= 0)
+            {
+                foreach (var layer in sm.Layers)
+                {
+                    foreach (var state in layer.States)
+                    {
+                        if (state.Kind == StateKind.Animation && state.ClipIndex == clipIdx)
+                        {
+                            return state.Name;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        private void RefreshTimelineStateTabs()
+        {
+            if (_timelineStateTabsStack == null) return;
+            _timelineStateTabsStack.Children.Clear();
+
+            var sm = Document != null && Document.Animation != null ? Document.Animation.StateMachine : null;
+            if (sm == null || sm.Layers.Count == 0 || Document.Animation.Clips == null) return;
+
+            var layer = sm.Layers[0];
+            var activeClip = _timelineController != null ? _timelineController.ActiveClip : null;
+
+            foreach (var state in layer.States)
+            {
+                if (state.Kind != StateKind.Animation) continue;
+
+                bool isActive = false;
+                if (activeClip != null && state.ClipIndex >= 0 && state.ClipIndex < Document.Animation.Clips.Count)
+                {
+                    isActive = ReferenceEquals(Document.Animation.Clips[state.ClipIndex], activeClip);
+                }
+
+                var tab = new Border
+                {
+                    Background = isActive ? KerfBrand.MintBrush : KerfBrand.DarkSlateBrush,
+                    BorderBrush = isActive ? KerfBrand.MintBrush : KerfBrand.TealBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(8, 3, 8, 3),
+                    Margin = new Thickness(0, 0, 4, 0),
+                    Cursor = Cursors.Hand,
+                    ToolTip = "State: " + state.Name + " (Click to open state timeline)"
+                };
+
+                var tabText = new TextBlock
+                {
+                    Text = (isActive ? "◉ " : "○ ") + state.Name,
+                    FontSize = 10.5,
+                    FontWeight = isActive ? FontWeights.Bold : FontWeights.SemiBold,
+                    Foreground = isActive ? KerfBrand.TextBlackBrush : KerfBrand.TextWhiteBrush
+                };
+                tab.Child = tabText;
+
+                var capturedState = state;
+                tab.MouseLeftButtonUp += (s, e) =>
+                {
+                    OpenStateTimeline(capturedState);
+                };
+
+                _timelineStateTabsStack.Children.Add(tab);
+            }
+
+            var addStateBtn = new Border
+            {
+                Background = Brushes.Transparent,
+                BorderBrush = KerfBrand.TealBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 3, 6, 3),
+                Cursor = Cursors.Hand,
+                ToolTip = "Add a new animation state and open its timeline"
+            };
+            addStateBtn.Child = new TextBlock
+            {
+                Text = "+ State",
+                FontSize = 10.5,
+                Foreground = KerfBrand.MintBrush
+            };
+            addStateBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                AddNewStateWithTimeline();
+            };
+            _timelineStateTabsStack.Children.Add(addStateBtn);
+
+            if (_timelineClipText != null && activeClip != null)
+            {
+                string stateName = GetActiveStateNameForClip(activeClip);
+                _timelineClipText.Text = !string.IsNullOrEmpty(stateName)
+                    ? "State: [" + stateName + "] · Clip: " + activeClip.Name
+                    : "Clip: " + activeClip.Name;
+            }
+        }
+
+        private void AddNewStateWithTimeline()
+        {
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            var sm = EnsureStateMachineRuntime();
+            if (sm == null || sm.Definition == null || sm.Definition.Layers.Count == 0) return;
+
+            var layer = sm.Definition.Layers[0];
+            int nextIndex = layer.States.Count;
+            string stateName = "State " + nextIndex;
+
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+
+            uint clipId = Document.Animation.Clips.Count == 0 ? 100u : Document.Animation.Clips.Max(c => c == null ? 0u : c.Id) + 1u;
+            var newClip = new Clip(clipId, stateName, Math.Max(0.1, _timelineController.Duration), _timelineController.Fps, LoopMode.Loop);
+            Document.Animation.Clips.Add(newClip);
+            if (!sm.Clips.Contains(newClip)) sm.Clips.Add(newClip);
+
+            var newState = new MachineState(nextIndex, stateName, StateKind.Animation, sm.Clips.IndexOf(newClip));
+            layer.AddState(newState);
+
+            History.MarkDirty();
+            BuildStateMachineStatesGraph();
+            SelectAnimationClip(newClip);
+        }
+
         public void RefreshTimelineUI()
         {
             RefreshTimelineTracks();
@@ -14286,6 +14472,7 @@ namespace Kerf.UI
             RefreshInterpolationGraphPanels();
             UpdateTimelineTimeReadout();
             UpdateTimelineScrubberPosition();
+            RefreshTimelineStateTabs();
         }
 
         private void RefreshTimelineTracks()
@@ -14302,12 +14489,16 @@ namespace Kerf.UI
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(8, 0, 8, 0)
             };
+            string stateTitle = GetActiveStateNameForClip(_timelineController != null ? _timelineController.ActiveClip : null);
+            string rulerTitle = !string.IsNullOrEmpty(stateTitle)
+                ? "STATE: " + stateTitle.ToUpper() + " · TRACKS"
+                : "OBJECTS / TRACKS";
             var headerText = new TextBlock
             {
-                Text = "OBJECTS / TRACKS",
+                Text = rulerTitle,
                 FontSize = 10,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                Foreground = !string.IsNullOrEmpty(stateTitle) ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(140, 160, 195)),
                 VerticalAlignment = VerticalAlignment.Center
             };
             rulerHeader.Child = headerText;

@@ -304,6 +304,25 @@ namespace Kerf.Engine
             }
         }
 
+        public void InvalidateSubtree(string nodeId)
+        {
+            SceneVisualNode vNode;
+            if (_nodeLookup.TryGetValue(nodeId, out vNode))
+            {
+                InvalidateNodeRecursive(vNode);
+            }
+        }
+
+        private void InvalidateNodeRecursive(SceneVisualNode vNode)
+        {
+            if (vNode == null) return;
+            vNode.IsDirty = true;
+            for (int i = 0; i < vNode.Children.Count; i++)
+            {
+                InvalidateNodeRecursive(vNode.Children[i]);
+            }
+        }
+
         public void InvalidateAll()
         {
             foreach (var vNode in _nodeLookup.Values)
