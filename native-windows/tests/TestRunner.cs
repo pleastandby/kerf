@@ -86,6 +86,7 @@ namespace Kerf.Tests
             RunTest("Easing Engine, Closed-Form Harmonic Springs & Graph Editor Reconstruction", TestEasingEngineClosedFormSpringsAndGraphEditor);
             RunTest("Universal Graph Editor Sidebar Consolidation & Clean Timeline", TestUniversalGraphEditorConsolidationAndCleanTimeline);
             RunTest("Single Corner Radius Control & Design vs Animate Mode Isolation", TestSingleCornerRadiusControlAndDesignAnimateIsolation);
+            RunTest("Animation Command History, Full Undo/Redo & Runtime Isolation", TestAnimationCommandHistoryAndFullUndoRedo);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -5392,6 +5393,52 @@ namespace Kerf.Tests
             node.CornerRadiusBottomRight = restCornerRadius;
             node.CornerRadiusBottomLeft = restCornerRadius;
             Assert(node.CornerRadius == 122.0, "Restoring design mode maintains original 122.0 radius");
+        }
+
+        private static void TestAnimationCommandHistoryAndFullUndoRedo()
+        {
+            // 1. Task 1 Tracer: AddKeyframeCommand, Overwrite resolution & ModifyKeyframeValueCommand
+            var history = new CommandHistory();
+            var track = new Track(1, (ushort)PropKey.X);
+
+            // Execute AddKeyframeCommand for t=0.0s, val=10.0
+            var kf1 = Keyframe.Linear(0.0, 10.0);
+            history.Execute(new AddKeyframeCommand(track, kf1, null));
+            Assert(track.Keys.Count == 1, "Track has 1 keyframe after AddKeyframeCommand");
+            Assert(track.Keys[0].Value == 10.0, "Keyframe value is 10.0");
+
+            // Undo()
+            history.Undo();
+            Assert(track.Keys.Count == 0, "Track has 0 keyframes after Undo");
+            Assert(history.CanUndo == false, "CanUndo is false");
+            Assert(history.CanRedo == true, "CanRedo is true");
+
+            // Redo()
+            history.Redo();
+            Assert(track.Keys.Count == 1, "Track has 1 keyframe after Redo");
+            Assert(track.Keys[0].Value == 10.0, "Keyframe value restored to 10.0");
+
+            // Execute AddKeyframeCommand at t=0.0s with val=25.0 (overwriting existing keyframe)
+            var kf2 = Keyframe.Linear(0.0, 25.0);
+            history.Execute(new AddKeyframeCommand(track, kf2, null));
+            Assert(track.Keys.Count == 1, "Track still has 1 keyframe after overwriting at duplicate timestamp");
+            Assert(track.Keys[0].Value == 25.0, "Overwritten keyframe value is 25.0");
+
+            // Undo() - restored replaced keyframe without data loss
+            history.Undo();
+            Assert(track.Keys.Count == 1, "Track has 1 keyframe after undoing overwrite");
+            Assert(track.Keys[0].Value == 10.0, "Restored replaced keyframe value 10.0 without data loss");
+            Assert(track.Keys[0].Id == kf1.Id, "Restored keyframe ID matches original replaced keyframe");
+
+            // Execute ModifyKeyframeValueCommand changing value from 10.0 to 99.0
+            history.Execute(new ModifyKeyframeValueCommand(track.Keys[0], 10.0, 99.0, null));
+            Assert(track.Keys[0].Value == 99.0, "ModifyKeyframeValueCommand changed value to 99.0");
+
+            // Undo and Redo ModifyKeyframeValueCommand
+            history.Undo();
+            Assert(track.Keys[0].Value == 10.0, "ModifyKeyframeValueCommand Undo restored 10.0");
+            history.Redo();
+            Assert(track.Keys[0].Value == 99.0, "ModifyKeyframeValueCommand Redo restored 99.0");
         }
     }
 }

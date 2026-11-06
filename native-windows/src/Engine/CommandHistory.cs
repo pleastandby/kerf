@@ -649,6 +649,85 @@ namespace Kerf.Engine
         }
     }
 
+    public class AddKeyframeCommand : ICommand
+    {
+        public string Description { get { return "Add Keyframe"; } }
+        private readonly Track _track;
+        private readonly Keyframe _keyframe;
+        private Keyframe _replacedKeyframe;
+        private readonly Action _onRender;
+
+        public AddKeyframeCommand(Track track, Keyframe keyframe, Action onRender = null)
+        {
+            _track = track;
+            _keyframe = keyframe;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_track == null || _keyframe == null) return;
+
+            var existing = _track.FindKeyframeAt(_keyframe.Time, 1e-6);
+            if (existing != null && existing.Id != _keyframe.Id)
+            {
+                _replacedKeyframe = existing.Clone(true);
+                _track.RemoveKeyframe(existing.Id);
+            }
+            _track.AddKeyframe(_keyframe);
+            _track.SortKeys();
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_track == null || _keyframe == null) return;
+
+            _track.RemoveKeyframe(_keyframe.Id);
+            if (_replacedKeyframe != null)
+            {
+                _track.AddKeyframe(_replacedKeyframe);
+            }
+            _track.SortKeys();
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class ModifyKeyframeValueCommand : ICommand
+    {
+        public string Description { get { return "Modify Keyframe Value"; } }
+        private readonly Keyframe _keyframe;
+        private readonly double _beforeValue;
+        private readonly double _afterValue;
+        private readonly Action _onRender;
+
+        public ModifyKeyframeValueCommand(Keyframe keyframe, double beforeValue, double afterValue, Action onRender = null)
+        {
+            _keyframe = keyframe;
+            _beforeValue = beforeValue;
+            _afterValue = afterValue;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_keyframe != null)
+            {
+                _keyframe.Value = _afterValue;
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_keyframe != null)
+            {
+                _keyframe.Value = _beforeValue;
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
     public class MoveKeyframesCommand : ICommand
     {
         public string Description { get { return "Move Keyframes"; } }
