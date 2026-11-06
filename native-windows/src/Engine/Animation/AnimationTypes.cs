@@ -102,7 +102,7 @@ namespace Kerf.Engine.Animation
             Damping = 10.0;
             InitialVelocity = 0.0;
             IsTangentBroken = false;
-            Preset = (interp == InterpMode.Linear) ? EasingPreset.Linear : EasingPreset.CustomBezier;
+            Preset = EasingPreset.Linear;
         }
 
         public Keyframe Clone(bool preserveId = false)
