@@ -83,6 +83,7 @@ namespace Kerf.Tests
             RunTest("Scale Crash Fix, Non-Destructive Frame Content Scaling, Empty Preset & State Timeline Header", TestScaleCrashFixFrameScalingNoPresetAndStateTimelineHeader);
             RunTest("Anchor Point System, Stationary Pan-Behind & Raster Scaling", TestAnchorPointAndRasterScaling);
             RunTest("Rive 3-Axis + Rotation Gizmo, Y Key Reposition & Non-Destructive Frame Scaling", TestRiveAnchorPointGizmoAndContentScaling);
+            RunTest("Easing Engine, Closed-Form Harmonic Springs & Graph Editor Reconstruction", TestEasingEngineClosedFormSpringsAndGraphEditor);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -4895,6 +4896,41 @@ namespace Kerf.Tests
             Assert(Math.Abs(frame.RenderTransform.ScaleY - (731.0 / 550.0)) < 1e-4, "PropertyBinder converts Height keyframe to RenderTransform.ScaleY non-destructively");
             Assert(frame.RenderTransform.VisualWidth == 728.0 && frame.RenderTransform.VisualHeight == 731.0, "VisualWidth and VisualHeight populated");
             Assert(frame.Width == 550 && frame.Height == 550, "Frame base document dimensions still 550x550 after PropertyBinder pose evaluation");
+        }
+
+        private static void TestEasingEngineClosedFormSpringsAndGraphEditor()
+        {
+            // 1. Tracer End-to-End Assertion: Bézier overshoot evaluation via Track.Sample
+            var trackBezier = new Track(1, (ushort)PropKey.X);
+            // Anticipation / overshoot curve: y1 = -0.4, y2 = 1.4
+            var kf0 = Keyframe.Cubic(0.0, 100.0, 0.25, -0.4, 0.75, 1.4);
+            var kf1 = Keyframe.Linear(1.0, 200.0);
+            trackBezier.AddKeyframe(kf0);
+            trackBezier.AddKeyframe(kf1);
+
+            // Test anticipation dip: at t = 0.15, value should dip below 100.0
+            double sampleDip = trackBezier.Sample(0.15);
+            Assert(sampleDip < 100.0, string.Format("Bézier anticipation dip: expected < 100.0, got {0:F4}", sampleDip));
+
+            // Test overshoot: at t = 0.85, value should overshoot above 200.0
+            double sampleOvershoot = trackBezier.Sample(0.85);
+            Assert(sampleOvershoot > 200.0, string.Format("Bézier overshoot: expected > 200.0, got {0:F4}", sampleOvershoot));
+
+            // 2. Tracer End-to-End Assertion: Closed-Form Harmonic Spring via Track.Sample
+            var trackSpring = new Track(2, (ushort)PropKey.Y);
+            // Underdamped / bouncy spring: m=1.0, k=150.0, c=10.0 (zeta ~ 0.41, produces peak overshoot)
+            var kfSpring = Keyframe.Spring(0.0, 50.0, 1.0, 150.0, 10.0, 0.0);
+            var kfEnd = Keyframe.Linear(2.0, 150.0);
+            trackSpring.AddKeyframe(kfSpring);
+            trackSpring.AddKeyframe(kfEnd);
+
+            // At t = 0.0, displacement is 0 -> value 50.0
+            double springStart = trackSpring.Sample(0.0);
+            Assert(Math.Abs(springStart - 50.0) < 1e-4, string.Format("Spring initial value at t=0: expected 50.0, got {0:F4}", springStart));
+
+            // At peak overshoot (t ~ 0.25s), value overshoots 150.0
+            double springPeak = trackSpring.Sample(0.25);
+            Assert(springPeak > 150.0, string.Format("Spring overshoot peak at t=0.25: expected > 150.0, got {0:F4}", springPeak));
         }
     }
 }

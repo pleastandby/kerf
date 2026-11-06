@@ -35,12 +35,12 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < 8; i++)
             {
                 double xErr = CubicBezierEval(s, x1, x2) - u;
-                if (Math.Abs(xErr) < 1e-6)
+                if (Math.Abs(xErr) < 1e-7)
                 {
                     return CubicBezierEval(s, y1, y2);
                 }
                 double d = CubicBezierDerivative(s, x1, x2);
-                if (Math.Abs(d) < 1e-6) break;
+                if (Math.Abs(d) < 1e-7) break;
                 s -= xErr / d;
                 if (s < 0.0 || s > 1.0) break;
             }
@@ -52,7 +52,7 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < 20; i++)
             {
                 double xVal = CubicBezierEval(s, x1, x2);
-                if (Math.Abs(xVal - u) < 1e-6) break;
+                if (Math.Abs(xVal - u) < 1e-7) break;
                 if (xVal < u)
                 {
                     low = s;

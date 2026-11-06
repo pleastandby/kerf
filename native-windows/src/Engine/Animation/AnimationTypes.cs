@@ -29,7 +29,34 @@ namespace Kerf.Engine.Animation
     {
         Hold = 0,
         Linear = 1,
-        Cubic = 2
+        Cubic = 2,
+        Spring = 3
+    }
+
+    public enum EasingPreset
+    {
+        Linear = 0,
+        Ease = 1,
+        EaseIn = 2,
+        EaseOut = 3,
+        EaseInOut = 4,
+        QuadIn = 5,
+        QuadOut = 6,
+        QuadInOut = 7,
+        CubicIn = 8,
+        CubicOut = 9,
+        CubicInOut = 10,
+        QuartIn = 11,
+        QuartOut = 12,
+        QuartInOut = 13,
+        QuintIn = 14,
+        QuintOut = 15,
+        QuintInOut = 16,
+        Back = 17,
+        Elastic = 18,
+        Bounce = 19,
+        Smooth = 20,
+        CustomBezier = 21
     }
 
     public enum LoopMode
@@ -50,6 +77,13 @@ namespace Kerf.Engine.Animation
         public double X2 { get; set; }
         public double Y2 { get; set; }
 
+        public double Mass { get; set; }
+        public double Stiffness { get; set; }
+        public double Damping { get; set; }
+        public double InitialVelocity { get; set; }
+        public bool IsTangentBroken { get; set; }
+        public EasingPreset Preset { get; set; }
+
         public Keyframe() : this(0.0, 0.0, InterpMode.Linear) { }
 
         public Keyframe(double time, double val, InterpMode interp, double x1 = 0.0, double y1 = 0.0, double x2 = 1.0, double y2 = 1.0, string id = null)
@@ -62,11 +96,25 @@ namespace Kerf.Engine.Animation
             Y1 = y1;
             X2 = x2;
             Y2 = y2;
+
+            Mass = 1.0;
+            Stiffness = 100.0;
+            Damping = 10.0;
+            InitialVelocity = 0.0;
+            IsTangentBroken = false;
+            Preset = (interp == InterpMode.Linear) ? EasingPreset.Linear : EasingPreset.CustomBezier;
         }
 
         public Keyframe Clone(bool preserveId = false)
         {
-            return new Keyframe(Time, Value, Interp, X1, Y1, X2, Y2, preserveId ? Id : null);
+            var kf = new Keyframe(Time, Value, Interp, X1, Y1, X2, Y2, preserveId ? Id : null);
+            kf.Mass = Mass;
+            kf.Stiffness = Stiffness;
+            kf.Damping = Damping;
+            kf.InitialVelocity = InitialVelocity;
+            kf.IsTangentBroken = IsTangentBroken;
+            kf.Preset = Preset;
+            return kf;
         }
 
         public static Keyframe Hold(double time, double val)
@@ -82,6 +130,16 @@ namespace Kerf.Engine.Animation
         public static Keyframe Cubic(double time, double val, double x1, double y1, double x2, double y2)
         {
             return new Keyframe(time, val, InterpMode.Cubic, x1, y1, x2, y2);
+        }
+
+        public static Keyframe Spring(double time, double val, double mass = 1.0, double stiffness = 100.0, double damping = 10.0, double initialVelocity = 0.0)
+        {
+            var kf = new Keyframe(time, val, InterpMode.Spring);
+            kf.Mass = mass;
+            kf.Stiffness = stiffness;
+            kf.Damping = damping;
+            kf.InitialVelocity = initialVelocity;
+            return kf;
         }
 
         public override bool Equals(object obj)
@@ -131,6 +189,12 @@ namespace Kerf.Engine.Animation
                     Keys[i].Y1 = kf.Y1;
                     Keys[i].X2 = kf.X2;
                     Keys[i].Y2 = kf.Y2;
+                    Keys[i].Mass = kf.Mass;
+                    Keys[i].Stiffness = kf.Stiffness;
+                    Keys[i].Damping = kf.Damping;
+                    Keys[i].InitialVelocity = kf.InitialVelocity;
+                    Keys[i].IsTangentBroken = kf.IsTangentBroken;
+                    Keys[i].Preset = kf.Preset;
                     return;
                 }
             }
@@ -261,6 +325,9 @@ namespace Kerf.Engine.Animation
                 case InterpMode.Cubic:
                     double eased = CubicBezierEase.Evaluate(u, a.X1, a.Y1, a.X2, a.Y2);
                     return a.Value + (b.Value - a.Value) * eased;
+                case InterpMode.Spring:
+                    double springProgress = EasingEngine.EvaluateSpring(t - a.Time, a.Mass, a.Stiffness, a.Damping, a.InitialVelocity);
+                    return a.Value + (b.Value - a.Value) * springProgress;
                 default:
                     return a.Value;
             }
