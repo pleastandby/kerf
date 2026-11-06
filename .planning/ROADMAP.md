@@ -104,8 +104,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: Implement atomic animation commands (`AddKeyframeCommand`, `ModifyKeyframeValueCommand`, `MoveKeyframesCommand`, `DeleteKeyframesCommand`, `ChangeKeyframeEasingCommand`, `ModifyBezierHandlesCommand`, `ModifySpringParamsCommand`, `AddTrackCommand`, `RemoveTrackCommand`, `AddClipCommand`, `RemoveClipCommand`).
-- [ ] 05-02: Wire transaction batching on pointer interactions and connect undo/redo events to timeline and graph editor UI views.
+- [ ] 05-01-PLAN.md — Core reversible animation commands, CompositeCommand transaction batching, and Test #59 scaffold
+- [ ] 05-02-PLAN.md — UI pointer release batching, cross-mode in-place undo, silent data restore, and runtime isolation
 
 ---
 
