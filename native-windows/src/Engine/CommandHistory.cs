@@ -1067,6 +1067,255 @@ namespace Kerf.Engine
         }
     }
 
+    public class AddTrackCommand : ICommand
+    {
+        public string Description { get { return "Add Track"; } }
+        private readonly Clip _clip;
+        private readonly Track _track;
+        private readonly Action _onRender;
+
+        public AddTrackCommand(Clip clip, Track track, Action onRender = null)
+        {
+            _clip = clip;
+            _track = track;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_clip != null && _track != null)
+            {
+                _clip.AddTrack(_track);
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_clip != null && _clip.Tracks != null && _track != null)
+            {
+                _clip.Tracks.Remove(_track);
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class RemoveTrackCommand : ICommand
+    {
+        public string Description { get { return "Remove Track"; } }
+        private readonly Clip _clip;
+        private readonly Track _track;
+        private int _originalIndex;
+        private readonly Action _onRender;
+
+        public RemoveTrackCommand(Clip clip, Track track, Action onRender = null)
+        {
+            _clip = clip;
+            _track = track;
+            _originalIndex = (clip != null && clip.Tracks != null && track != null) ? clip.Tracks.IndexOf(track) : -1;
+            _onRender = onRender;
+        }
+
+        public RemoveTrackCommand(Clip clip, Track track, int originalIndex, Action onRender = null)
+        {
+            _clip = clip;
+            _track = track;
+            _originalIndex = originalIndex;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_clip != null && _clip.Tracks != null && _track != null)
+            {
+                if (_originalIndex < 0)
+                {
+                    _originalIndex = _clip.Tracks.IndexOf(_track);
+                }
+                _clip.Tracks.Remove(_track);
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_clip != null && _clip.Tracks != null && _track != null)
+            {
+                int idx = Math.Max(0, Math.Min(_originalIndex >= 0 ? _originalIndex : _clip.Tracks.Count, _clip.Tracks.Count));
+                if (!_clip.Tracks.Contains(_track))
+                {
+                    _clip.Tracks.Insert(idx, _track);
+                }
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class AddClipCommand : ICommand
+    {
+        public string Description { get { return "Add Clip"; } }
+        private readonly AnimationProjectData _project;
+        private readonly Clip _clip;
+        private uint _previousActiveClipId;
+        private readonly Action _onRender;
+
+        public AddClipCommand(AnimationProjectData project, Clip clip, Action onRender = null)
+        {
+            _project = project;
+            _clip = clip;
+            _previousActiveClipId = (project != null) ? project.ActiveClipId : 0;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_project != null && _clip != null)
+            {
+                if (_project.Clips == null) _project.Clips = new List<Clip>();
+                if (!_project.Clips.Contains(_clip))
+                {
+                    _project.Clips.Add(_clip);
+                }
+                _previousActiveClipId = _project.ActiveClipId;
+                _project.ActiveClipId = _clip.Id;
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_project != null && _clip != null)
+            {
+                if (_project.Clips != null)
+                {
+                    _project.Clips.Remove(_clip);
+                }
+                _project.ActiveClipId = _previousActiveClipId;
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class RemoveClipCommand : ICommand
+    {
+        public string Description { get { return "Remove Clip"; } }
+        private readonly AnimationProjectData _project;
+        private readonly Clip _clip;
+        private int _originalIndex;
+        private uint _previousActiveClipId;
+        private readonly Action _onRender;
+
+        public RemoveClipCommand(AnimationProjectData project, Clip clip, Action onRender = null)
+        {
+            _project = project;
+            _clip = clip;
+            _originalIndex = (project != null && project.Clips != null && clip != null) ? project.Clips.IndexOf(clip) : -1;
+            _previousActiveClipId = (project != null) ? project.ActiveClipId : 0;
+            _onRender = onRender;
+        }
+
+        public RemoveClipCommand(AnimationProjectData project, Clip clip, int originalIndex, uint previousActiveClipId, Action onRender = null)
+        {
+            _project = project;
+            _clip = clip;
+            _originalIndex = originalIndex;
+            _previousActiveClipId = previousActiveClipId;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_project != null && _clip != null && _project.Clips != null)
+            {
+                if (_originalIndex < 0)
+                {
+                    _originalIndex = _project.Clips.IndexOf(_clip);
+                }
+                _previousActiveClipId = _project.ActiveClipId;
+                _project.Clips.Remove(_clip);
+                if (_project.ActiveClipId == _clip.Id)
+                {
+                    _project.ActiveClipId = _project.Clips.Count > 0 ? _project.Clips[0].Id : 0;
+                }
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_project != null && _clip != null)
+            {
+                if (_project.Clips == null) _project.Clips = new List<Clip>();
+                int idx = Math.Max(0, Math.Min(_originalIndex >= 0 ? _originalIndex : _project.Clips.Count, _project.Clips.Count));
+                if (!_project.Clips.Contains(_clip))
+                {
+                    _project.Clips.Insert(idx, _clip);
+                }
+                _project.ActiveClipId = _previousActiveClipId;
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class AnimationClipDurationCommand : ICommand
+    {
+        public string Description { get { return "Change Clip Duration"; } }
+        private readonly Clip _clip;
+        private readonly double _beforeDuration;
+        private readonly double _afterDuration;
+        private readonly double _beforeFps;
+        private readonly double _afterFps;
+        private readonly LoopMode _beforeLoop;
+        private readonly LoopMode _afterLoop;
+        private readonly Action _onRender;
+
+        public AnimationClipDurationCommand(Clip clip, double beforeDuration, double afterDuration, double beforeFps, double afterFps, LoopMode beforeLoop, LoopMode afterLoop, Action onRender = null)
+        {
+            _clip = clip;
+            _beforeDuration = beforeDuration;
+            _afterDuration = afterDuration;
+            _beforeFps = beforeFps;
+            _afterFps = afterFps;
+            _beforeLoop = beforeLoop;
+            _afterLoop = afterLoop;
+            _onRender = onRender;
+        }
+
+        public AnimationClipDurationCommand(Clip clip, double afterDuration, double afterFps, LoopMode afterLoop, Action onRender = null)
+        {
+            _clip = clip;
+            _beforeDuration = (clip != null) ? clip.Duration : 1.0;
+            _afterDuration = afterDuration;
+            _beforeFps = (clip != null) ? clip.Fps : 60.0;
+            _afterFps = afterFps;
+            _beforeLoop = (clip != null) ? clip.LoopMode : LoopMode.OneShot;
+            _afterLoop = afterLoop;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_clip != null)
+            {
+                _clip.Duration = _afterDuration;
+                _clip.Fps = _afterFps;
+                _clip.LoopMode = _afterLoop;
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_clip != null)
+            {
+                _clip.Duration = _beforeDuration;
+                _clip.Fps = _beforeFps;
+                _clip.LoopMode = _beforeLoop;
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
     public class ModifyCornerRadiusCommand : ICommand
     {
         public string Description { get { return "Change Corner Radius"; } }

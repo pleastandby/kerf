@@ -5538,6 +5538,131 @@ namespace Kerf.Tests
 
             history.Redo();
             Assert(springKey.Mass == 2.5 && springKey.Stiffness == 250.0, "ModifySpringParamsCommand Redo re-applied spring properties");
+
+            // 3. Task 3: Track & Clip Structural Commands with CompositeCommand Transaction Batching
+            var projectData = new AnimationProjectData();
+            var clip1 = new Clip(101, "Intro Animation", 5.0, 60.0, LoopMode.Loop);
+            var clip2 = new Clip(102, "Outro Animation", 3.0, 30.0, LoopMode.OneShot);
+
+            // (A) AddClipCommand & RemoveClipCommand
+            history.Execute(new AddClipCommand(projectData, clip1, null));
+            Assert(projectData.Clips.Count == 1, "AddClipCommand added clip1");
+            Assert(projectData.ActiveClipId == clip1.Id, "ActiveClipId set to clip1.Id");
+
+            history.Execute(new AddClipCommand(projectData, clip2, null));
+            Assert(projectData.Clips.Count == 2, "AddClipCommand added clip2");
+            Assert(projectData.ActiveClipId == clip2.Id, "ActiveClipId updated to clip2.Id");
+
+            history.Undo();
+            Assert(projectData.Clips.Count == 1, "AddClipCommand Undo removed clip2");
+            Assert(projectData.ActiveClipId == clip1.Id, "ActiveClipId restored to clip1.Id");
+
+            history.Redo();
+            Assert(projectData.Clips.Count == 2, "AddClipCommand Redo restored clip2");
+
+            // RemoveClipCommand
+            history.Execute(new RemoveClipCommand(projectData, clip1, null));
+            Assert(projectData.Clips.Count == 1 && projectData.Clips[0] == clip2, "RemoveClipCommand removed clip1");
+
+            history.Undo();
+            Assert(projectData.Clips.Count == 2, "RemoveClipCommand Undo restored clip1");
+            Assert(projectData.Clips[0] == clip1, "clip1 restored at original index 0");
+
+            history.Redo();
+            Assert(projectData.Clips.Count == 1 && projectData.Clips[0] == clip2, "RemoveClipCommand Redo re-removed clip1");
+            history.Undo(); // Restore clip1
+
+            // (B) AddTrackCommand & RemoveTrackCommand
+            var clipTrackA = new Track(10, (ushort)PropKey.Opacity);
+            var clipTrackB = new Track(10, (ushort)PropKey.ScaleX);
+            history.Execute(new AddTrackCommand(clip1, clipTrackA, null));
+            history.Execute(new AddTrackCommand(clip1, clipTrackB, null));
+            Assert(clip1.Tracks.Count == 2, "Added 2 tracks to clip1");
+
+            history.Undo();
+            Assert(clip1.Tracks.Count == 1 && clip1.Tracks[0] == clipTrackA, "Undo removed second track");
+
+            history.Redo();
+            Assert(clip1.Tracks.Count == 2 && clip1.Tracks[1] == clipTrackB, "Redo restored second track");
+
+            history.Execute(new RemoveTrackCommand(clip1, clipTrackA, null));
+            Assert(clip1.Tracks.Count == 1 && clip1.Tracks[0] == clipTrackB, "RemoveTrackCommand removed first track");
+
+            history.Undo();
+            Assert(clip1.Tracks.Count == 2 && clip1.Tracks[0] == clipTrackA, "RemoveTrackCommand Undo restored first track at index 0");
+
+            history.Redo();
+            Assert(clip1.Tracks.Count == 1 && clip1.Tracks[0] == clipTrackB, "RemoveTrackCommand Redo re-removed track");
+            history.Undo(); // Restore trackA
+
+            // (C) AnimationClipDurationCommand (duration reduction preserves keyframes beyond new duration)
+            var keyBeyond = Keyframe.Linear(4.5, 99.0);
+            clipTrackA.AddKeyframe(Keyframe.Linear(1.0, 10.0));
+            clipTrackA.AddKeyframe(keyBeyond); // Keyframe at 4.5s
+            Assert(clipTrackA.Keys.Count == 2, "clipTrackA has 2 keyframes");
+
+            history.Execute(new AnimationClipDurationCommand(clip1, 5.0, 2.0, 60.0, 30.0, LoopMode.Loop, LoopMode.PingPong, null));
+            Assert(clip1.Duration == 2.0, "Clip duration changed to 2.0s");
+            Assert(clip1.Fps == 30.0, "Clip FPS changed to 30.0");
+            Assert(clip1.LoopMode == LoopMode.PingPong, "Clip LoopMode changed to PingPong");
+            Assert(clipTrackA.Keys.Count == 2, "Keyframes beyond 2.0s duration preserved without truncation");
+            Assert(clipTrackA.Keys[1] == keyBeyond, "Keyframe at 4.5s remains intact");
+
+            history.Undo();
+            Assert(clip1.Duration == 5.0 && clip1.Fps == 60.0 && clip1.LoopMode == LoopMode.Loop, "AnimationClipDurationCommand Undo restored original duration, fps, loop");
+            Assert(clipTrackA.Keys.Count == 2, "Keyframes still intact after Undo");
+
+            history.Redo();
+            Assert(clip1.Duration == 2.0 && clip1.Fps == 30.0 && clip1.LoopMode == LoopMode.PingPong, "AnimationClipDurationCommand Redo re-applied settings");
+
+            // (D) Transaction batching with CompositeCommand (D-04): adding 3 tracks, 6 keyframes, modifying 2 values
+            var batchClip = new Clip(200, "Batch Transaction Clip", 10.0);
+            projectData.Clips.Add(batchClip);
+
+            history.BeginBatch("Multi-Track Keyframe Creation & Tuning");
+            var bTrack1 = new Track(20, (ushort)PropKey.X);
+            var bTrack2 = new Track(20, (ushort)PropKey.Y);
+            var bTrack3 = new Track(20, (ushort)PropKey.Rotation);
+
+            history.Execute(new AddTrackCommand(batchClip, bTrack1, null));
+            history.Execute(new AddTrackCommand(batchClip, bTrack2, null));
+            history.Execute(new AddTrackCommand(batchClip, bTrack3, null));
+
+            var bk1 = Keyframe.Linear(0.0, 0.0);
+            var bk2 = Keyframe.Linear(1.0, 100.0);
+            var bk3 = Keyframe.Linear(0.0, 10.0);
+            var bk4 = Keyframe.Linear(1.0, 200.0);
+            var bk5 = Keyframe.Linear(0.0, 0.0);
+            var bk6 = Keyframe.Linear(1.0, 360.0);
+
+            history.Execute(new AddKeyframeCommand(bTrack1, bk1, null));
+            history.Execute(new AddKeyframeCommand(bTrack1, bk2, null));
+            history.Execute(new AddKeyframeCommand(bTrack2, bk3, null));
+            history.Execute(new AddKeyframeCommand(bTrack2, bk4, null));
+            history.Execute(new AddKeyframeCommand(bTrack3, bk5, null));
+            history.Execute(new AddKeyframeCommand(bTrack3, bk6, null));
+
+            history.Execute(new ModifyKeyframeValueCommand(bk2, 100.0, 150.0, null));
+            history.Execute(new ModifyKeyframeValueCommand(bk4, 200.0, 250.0, null));
+
+            history.EndBatch();
+
+            // Verify batch result forward
+            Assert(batchClip.Tracks.Count == 3, "Batch added 3 tracks");
+            Assert(bTrack1.Keys.Count == 2 && bTrack2.Keys.Count == 2 && bTrack3.Keys.Count == 2, "Batch added 6 keyframes");
+            Assert(bk2.Value == 150.0 && bk4.Value == 250.0, "Batch modified 2 keyframe values");
+
+            // Reverse in a SINGLE Undo step (D-04)
+            history.Undo();
+
+            Assert(batchClip.Tracks.Count == 0, "Single Ctrl+Z reversed all 3 track additions, 6 keyframes, and 2 value changes atomically");
+
+            // Re-apply in a SINGLE Redo step
+            history.Redo();
+
+            Assert(batchClip.Tracks.Count == 3, "Single Redo re-applied all 3 tracks");
+            Assert(bTrack1.Keys.Count == 2 && bTrack2.Keys.Count == 2 && bTrack3.Keys.Count == 2, "Single Redo re-applied all 6 keyframes");
+            Assert(bk2.Value == 150.0 && bk4.Value == 250.0, "Single Redo re-applied modified keyframe values");
         }
     }
 }

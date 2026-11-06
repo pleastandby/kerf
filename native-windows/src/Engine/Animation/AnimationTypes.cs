@@ -373,6 +373,12 @@ namespace Kerf.Engine.Animation
             if (track != null) Tracks.Add(track);
         }
 
+        public bool RemoveTrack(Track track)
+        {
+            if (Tracks == null || track == null) return false;
+            return Tracks.Remove(track);
+        }
+
         public void SampleToPose(double t, Dictionary<uint, Dictionary<ushort, double>> outPose)
         {
             if (outPose == null || Tracks == null) return;
