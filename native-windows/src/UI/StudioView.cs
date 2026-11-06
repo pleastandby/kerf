@@ -3778,8 +3778,8 @@ namespace Kerf.UI
             row3.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
             row3.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var rotBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("∠", primary.Rotation, val => { primary.Rotation = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.Rotation, primary.Rotation); }, suffix: "°"), primary, PropKey.Rotation);
-            var crBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Radius", primary.CornerRadius, val =>
+            var rotBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("∠", primary.Rotation, val => { primary.Rotation = val; InvalidateAndRefresh(primary); AutoKeyProperty(primary, PropKey.Rotation, primary.Rotation); }, suffix: "°", tooltip: "Rotation (degrees)"), primary, PropKey.Rotation);
+            var crBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("R", primary.CornerRadius, val =>
             {
                 double r = Math.Max(0, Math.Round(val, 1));
                 primary.CornerRadius = r;
@@ -3790,7 +3790,7 @@ namespace Kerf.UI
                 InvalidateAndRefresh(primary);
                 AutoKeyProperty(primary, PropKey.CornerRadius, r);
                 History.MarkDirty();
-            }, min: 0, suffix: "px", tooltip: "Corner Radius (px)"), primary, PropKey.CornerRadius);
+            }, min: 0, suffix: "px", tooltip: "Corner Radius (px)", icon: VectorIcons.CornerRadiusGeometry), primary, PropKey.CornerRadius);
             Grid.SetColumn(rotBox, 0); Grid.SetColumn(crBox, 2);
             row3.Children.Add(rotBox); row3.Children.Add(crBox);
             _propertyInspectorStack.Children.Add(row3);
@@ -3808,7 +3808,7 @@ namespace Kerf.UI
                 FrameworkElement sxField = null;
                 FrameworkElement syField = null;
 
-                sxField = ScrubControls.CreateScrubField("ScaleX", currentScaleX, val =>
+                sxField = ScrubControls.CreateScrubField("↔", currentScaleX, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     primary.RenderTransform.ScaleX = val;
@@ -3834,7 +3834,7 @@ namespace Kerf.UI
 
                     _sceneGraph.InvalidateSubtree(primary.Id);
                     RefreshCanvas();
-                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); });
+                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, tooltip: "Scale X (Horizontal Scale factor)", onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); }, icon: VectorIcons.ScaleXGeometry);
 
                 var scaleLockBtn = new Border
                 {
@@ -3867,7 +3867,7 @@ namespace Kerf.UI
                     History.MarkDirty();
                 };
 
-                syField = ScrubControls.CreateScrubField("ScaleY", currentScaleY, val =>
+                syField = ScrubControls.CreateScrubField("↕", currentScaleY, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     primary.RenderTransform.ScaleY = val;
@@ -3893,7 +3893,7 @@ namespace Kerf.UI
 
                     _sceneGraph.InvalidateSubtree(primary.Id);
                     RefreshCanvas();
-                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); });
+                }, min: 0.01, max: 100.0, step: 0.02, decimals: 2, tooltip: "Scale Y (Vertical Scale factor)", onDragComplete: () => { if (primary.LockAspectRatio) RefreshPropertyInspector(); }, icon: VectorIcons.ScaleYGeometry);
 
                 var sxBox = CreateAnimatedPropertyField(sxField, primary, PropKey.ScaleX);
                 var syBox = CreateAnimatedPropertyField(syField, primary, PropKey.ScaleY);
@@ -3910,21 +3910,21 @@ namespace Kerf.UI
                 double currentAnchorX = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.5;
                 double currentAnchorY = primary.RenderTransform != null ? primary.RenderTransform.AnchorY : 0.5;
 
-                var axBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Anc X", currentAnchorX, val =>
+                var axBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Ax", currentAnchorX, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     primary.RenderTransform.AnchorX = val;
                     InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.AnchorX, val);
-                }, step: 0.01, decimals: 2), primary, PropKey.AnchorX);
+                }, step: 0.01, decimals: 2, tooltip: "Anchor Point X (0.0 to 1.0)"), primary, PropKey.AnchorX);
 
-                var ayBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Anc Y", currentAnchorY, val =>
+                var ayBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("Ay", currentAnchorY, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
                     primary.RenderTransform.AnchorY = val;
                     InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.AnchorY, val);
-                }, step: 0.01, decimals: 2), primary, PropKey.AnchorY);
+                }, step: 0.01, decimals: 2, tooltip: "Anchor Point Y (0.0 to 1.0)"), primary, PropKey.AnchorY);
 
                 Grid.SetColumn(axBox, 0); Grid.SetColumn(ayBox, 2);
                 anchorRow.Children.Add(axBox); anchorRow.Children.Add(ayBox);

@@ -30,7 +30,8 @@ namespace Kerf.UI
             string suffix = "",
             string tooltip = null,
             int decimals = 1,
-            Action onDragComplete = null)
+            Action onDragComplete = null,
+            Geometry icon = null)
         {
             var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 6), ToolTip = tooltip ?? label };
 
@@ -59,22 +60,41 @@ namespace Kerf.UI
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            // 1. Scrub Label (SizeWE cursor, click & drag to scrub)
-            var lbl = new TextBlock
+            // 1. Scrub Handle (Label Text or Vector Icon) (SizeWE cursor, click & drag to scrub)
+            FrameworkElement scrubHandle;
+            if (icon != null)
             {
-                Text = label,
-                FontSize = 11,
-                FontWeight = FontWeights.Bold,
-                Foreground = KerfBrand.TextMutedBrush,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(6, 0, 4, 0),
-                MinWidth = 16,
-                Cursor = Cursors.SizeWE,
-                ToolTip = tooltip ?? label
-            };
-            Grid.SetColumn(lbl, 0);
-            grid.Children.Add(lbl);
+                var iconElem = VectorIcons.CreateIcon(icon, strokeBrush: KerfBrand.TextMutedBrush, size: 12, strokeThickness: 1.5);
+                var iconContainer = new Border
+                {
+                    Background = Brushes.Transparent,
+                    Padding = new Thickness(6, 0, 4, 0),
+                    MinWidth = 20,
+                    Cursor = Cursors.SizeWE,
+                    ToolTip = tooltip ?? label,
+                    Child = iconElem
+                };
+                scrubHandle = iconContainer;
+            }
+            else
+            {
+                var lbl = new TextBlock
+                {
+                    Text = label,
+                    FontSize = 11,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(6, 0, 4, 0),
+                    MinWidth = 16,
+                    Cursor = Cursors.SizeWE,
+                    ToolTip = tooltip ?? label
+                };
+                scrubHandle = lbl;
+            }
+            Grid.SetColumn(scrubHandle, 0);
+            grid.Children.Add(scrubHandle);
 
             // 2. Value TextBox
             var tb = new TextBox
@@ -107,22 +127,22 @@ namespace Kerf.UI
             };
             dock.Tag = externalUpdater;
 
-            lbl.MouseLeftButtonDown += (s, e) =>
+            scrubHandle.MouseLeftButtonDown += (s, e) =>
             {
-                lbl.CaptureMouse();
-                startMouse = e.GetPosition(lbl);
+                scrubHandle.CaptureMouse();
+                startMouse = e.GetPosition(scrubHandle);
                 startVal = currentValue;
                 isScrubbing = true;
                 container.BorderBrush = KerfBrand.MintBrush;
             };
 
-            lbl.MouseMove += (s, e) =>
+            scrubHandle.MouseMove += (s, e) =>
             {
-                if (isScrubbing && e.LeftButton == MouseButtonState.Pressed && lbl.IsMouseCaptured)
+                if (isScrubbing && e.LeftButton == MouseButtonState.Pressed && scrubHandle.IsMouseCaptured)
                 {
                     try
                     {
-                        Point cur = e.GetPosition(lbl);
+                        Point cur = e.GetPosition(scrubHandle);
                         double dx = cur.X - startMouse.X;
 
                         double multiplier = step;
@@ -147,20 +167,20 @@ namespace Kerf.UI
                         // Fail-safe to avoid crash during live scrubbing
                     }
                 }
-                else if (lbl.IsMouseCaptured)
+                else if (scrubHandle.IsMouseCaptured)
                 {
-                    lbl.ReleaseMouseCapture();
+                    scrubHandle.ReleaseMouseCapture();
                     isScrubbing = false;
                     container.BorderBrush = KerfBrand.TealBrush;
                     if (onDragComplete != null) onDragComplete();
                 }
             };
 
-            lbl.MouseLeftButtonUp += (s, e) =>
+            scrubHandle.MouseLeftButtonUp += (s, e) =>
             {
-                if (lbl.IsMouseCaptured)
+                if (scrubHandle.IsMouseCaptured)
                 {
-                    lbl.ReleaseMouseCapture();
+                    scrubHandle.ReleaseMouseCapture();
                 }
                 isScrubbing = false;
                 container.BorderBrush = KerfBrand.TealBrush;

@@ -65,6 +65,10 @@ namespace Kerf.UI
         public static Geometry LiquidGlassGeometry { get; private set; }
         public static Geometry GrainGeometry { get; private set; }
         public static Geometry BlurGeometry { get; private set; }
+        public static Geometry CornerRadiusGeometry { get; private set; }
+        public static Geometry ScaleXGeometry { get; private set; }
+        public static Geometry ScaleYGeometry { get; private set; }
+        public static Geometry AnchorPointGeometry { get; private set; }
 
         static VectorIcons()
         {
@@ -124,6 +128,10 @@ namespace Kerf.UI
             LiquidGlassGeometry = Parse("M 12 3 C 7.5 9 6 12.5 6 15.5 C 6 18.8 8.7 21.5 12 21.5 C 15.3 21.5 18 18.8 18 15.5 C 18 12.5 16.5 9 12 3 Z M 9.5 14 C 9.5 12.5 10.5 10.5 12 8.5");
             GrainGeometry = Parse("M 4 4 H 6 V 6 H 4 Z M 11 4 H 13 V 6 H 11 Z M 18 4 H 20 V 6 H 18 Z M 7.5 11 H 9.5 V 13 H 7.5 Z M 14.5 11 H 16.5 V 13 H 14.5 Z M 4 18 H 6 V 20 H 4 Z M 11 18 H 13 V 20 H 11 Z M 18 18 H 20 V 20 H 18 Z");
             BlurGeometry = Parse("M 12 8 A 4 4 0 1 1 11.99 8 M 12 4 A 8 8 0 1 1 11.99 4");
+            CornerRadiusGeometry = Parse("M 3 13 V 7 C 3 4.8 4.8 3 7 3 H 13");
+            ScaleXGeometry = Parse("M 2 8 L 5 5 M 2 8 L 5 11 M 2 8 H 14 M 14 8 L 11 5 M 14 8 L 11 11");
+            ScaleYGeometry = Parse("M 8 2 L 5 5 M 8 2 L 11 5 M 8 2 V 14 M 8 14 L 5 11 M 8 14 L 11 11");
+            AnchorPointGeometry = Parse("M 8 2 V 14 M 2 8 H 14 M 8 5 A 3 3 0 1 1 7.99 5");
         }
 
         private static Geometry Parse(string pathData)
