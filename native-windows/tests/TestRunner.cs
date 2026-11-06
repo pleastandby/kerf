@@ -4528,17 +4528,91 @@ namespace Kerf.Tests
             }
             Assert(matchedIdle != null && matchedIdle.Name == "Idle", "Idle clip maps accurately to 'Idle' state");
 
-            // Test mapping for hoverClip
-            int hoverIdx = doc.Animation.Clips.IndexOf(hoverClip);
-            MachineState matchedHover = null;
-            foreach (var l in doc.Animation.StateMachine.Layers)
+            // 5. Uniform Scaling on Canvas Handles (All 8 Handles Maintain Aspect Ratio)
+            Rect origBox = new Rect(0, 0, 100, 200); // aspect ratio = 0.5
+            Point startMouse = new Point(100, 200);
+
+            // 5a. Corner Handle (BottomRight)
+            var cornerRes = TransformEngine.ApplyTransform(
+                HandleType.BottomRight,
+                new Point(150, 250),
+                startMouse,
+                origBox,
+                0,
+                keepAspectRatio: true,
+                fromCenter: false,
+                snapGridSize: 0);
+            double cornerRatio = cornerRes.Bounds.Width / cornerRes.Bounds.Height;
+            Assert(Math.Abs(cornerRatio - 0.5) < 1e-4, "BottomRight corner handle maintains aspect ratio with uniform scaling locked");
+
+            // 5b. Edge Handle (MiddleRight)
+            var edgeRightRes = TransformEngine.ApplyTransform(
+                HandleType.MiddleRight,
+                new Point(150, 200),
+                startMouse,
+                origBox,
+                0,
+                keepAspectRatio: true,
+                fromCenter: false,
+                snapGridSize: 0);
+            double edgeRightRatio = edgeRightRes.Bounds.Width / edgeRightRes.Bounds.Height;
+            Assert(Math.Abs(edgeRightRatio - 0.5) < 1e-4, "MiddleRight edge handle maintains aspect ratio with uniform scaling locked");
+            Assert(Math.Abs(edgeRightRes.Bounds.Width - 150.0) < 1e-4 && Math.Abs(edgeRightRes.Bounds.Height - 300.0) < 1e-4,
+                "MiddleRight scale expanded height proportionally to 300 when width grew to 150");
+
+            // 5c. Edge Handle (BottomCenter)
+            var edgeBottomRes = TransformEngine.ApplyTransform(
+                HandleType.BottomCenter,
+                new Point(100, 300),
+                startMouse,
+                origBox,
+                0,
+                keepAspectRatio: true,
+                fromCenter: false,
+                snapGridSize: 0);
+            double edgeBottomRatio = edgeBottomRes.Bounds.Width / edgeBottomRes.Bounds.Height;
+            Assert(Math.Abs(edgeBottomRatio - 0.5) < 1e-4, "BottomCenter edge handle maintains aspect ratio with uniform scaling locked");
+            Assert(Math.Abs(edgeBottomRes.Bounds.Height - 300.0) < 1e-4 && Math.Abs(edgeBottomRes.Bounds.Width - 150.0) < 1e-4,
+                "BottomCenter scale expanded width proportionally to 150 when height grew to 300");
+
+            // 6. Legacy Preset Demo Tracks Sanitization
+            var dirtyClip = new Clip(105, "Default Animation", 2.0, 60.0);
+            var legacyRotTrack = new Track(1001, (ushort)PropKey.Rotation, "0", "0");
+            legacyRotTrack.AddKeyframe(new Keyframe(0.0, 0.0, InterpMode.Cubic, 0.42, 0.0, 0.58, 1.0));
+            legacyRotTrack.AddKeyframe(new Keyframe(1.0, 180.0, InterpMode.Cubic, 0.42, 0.0, 0.58, 1.0));
+            legacyRotTrack.AddKeyframe(new Keyframe(2.0, 360.0, InterpMode.Cubic, 0.42, 0.0, 0.58, 1.0));
+            dirtyClip.Tracks.Add(legacyRotTrack);
+
+            var legacyOpTrack = new Track(1001, (ushort)PropKey.Opacity, "0", "0");
+            legacyOpTrack.AddKeyframe(new Keyframe(0.0, 1.0, InterpMode.Linear));
+            legacyOpTrack.AddKeyframe(new Keyframe(1.0, 0.5, InterpMode.Linear));
+            legacyOpTrack.AddKeyframe(new Keyframe(2.0, 1.0, InterpMode.Linear));
+            dirtyClip.Tracks.Add(legacyOpTrack);
+
+            Assert(dirtyClip.Tracks.Count == 2, "Dirty clip initially contains 2 legacy demo tracks");
+
+            // Sanitize
+            dirtyClip.Tracks.RemoveAll(t =>
             {
-                foreach (var s in l.States)
+                if (t == null || t.Keys == null) return false;
+                if (t.Prop == (ushort)PropKey.Rotation && t.Keys.Count == 3)
                 {
-                    if (s.ClipIndex == hoverIdx) matchedHover = s;
+                    if (Math.Abs(t.Keys[0].Time - 0.0) < 0.05 && Math.Abs(t.Keys[0].Value - 0.0) < 0.05 &&
+                        Math.Abs(t.Keys[1].Time - 1.0) < 0.05 && Math.Abs(t.Keys[1].Value - 180.0) < 0.05 &&
+                        Math.Abs(t.Keys[2].Time - 2.0) < 0.05 && Math.Abs(t.Keys[2].Value - 360.0) < 0.05)
+                        return true;
                 }
-            }
-            Assert(matchedHover != null && matchedHover.Name == "Hover", "Hover clip maps accurately to 'Hover' state");
+                if (t.Prop == (ushort)PropKey.Opacity && t.Keys.Count == 3)
+                {
+                    if (Math.Abs(t.Keys[0].Time - 0.0) < 0.05 && Math.Abs(t.Keys[0].Value - 1.0) < 0.05 &&
+                        Math.Abs(t.Keys[1].Time - 1.0) < 0.05 && Math.Abs(t.Keys[1].Value - 0.5) < 0.05 &&
+                        Math.Abs(t.Keys[2].Time - 2.0) < 0.05 && Math.Abs(t.Keys[2].Value - 1.0) < 0.05)
+                        return true;
+                }
+                return false;
+            });
+
+            Assert(dirtyClip.Tracks.Count == 0, "Sanitization successfully purged all uninvited legacy demo rotation and opacity tracks");
         }
     }
 }

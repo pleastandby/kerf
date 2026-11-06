@@ -349,6 +349,7 @@ namespace Kerf.UI
             if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Visible;
             Document = doc ?? new KerfDocument();
             CurrentFilePath = filePath;
+            SanitizeAnimationClips(Document);
             History.Clear();
             _selectedLayers.Clear();
 
@@ -3205,7 +3206,7 @@ namespace Kerf.UI
             {
                 var scaleRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
                 scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 scaleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
                 double currentScaleX = primary.RenderTransform != null ? primary.RenderTransform.ScaleX : 1.0;
@@ -3214,21 +3215,70 @@ namespace Kerf.UI
                 var sxBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("ScaleX", currentScaleX, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
+                    double oldSx = Math.Max(0.001, primary.RenderTransform.ScaleX);
+                    double oldSy = Math.Max(0.001, primary.RenderTransform.ScaleY);
                     primary.RenderTransform.ScaleX = val;
-                    InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.ScaleX, val);
+                    if (primary.LockAspectRatio)
+                    {
+                        double ratio = oldSy / oldSx;
+                        primary.RenderTransform.ScaleY = Math.Max(0.01, Math.Round(val * ratio, 3));
+                        AutoKeyProperty(primary, PropKey.ScaleY, primary.RenderTransform.ScaleY);
+                    }
+                    InvalidateAndRefresh(primary);
+                    if (primary.LockAspectRatio) RefreshPropertyInspector();
                 }, min: 0.01, max: 100.0, step: 0.05), primary, PropKey.ScaleX);
+
+                var scaleLockBtn = new Border
+                {
+                    Width = 20,
+                    Height = 24,
+                    Margin = new Thickness(2, 0, 2, 0),
+                    Background = primary.LockAspectRatio ? new SolidColorBrush(Color.FromArgb(45, 0x46, 0xEF, 0xB1)) : Brushes.Transparent,
+                    BorderBrush = primary.LockAspectRatio ? KerfBrand.MintBrush : KerfBrand.TealBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Cursor = Cursors.Hand,
+                    ToolTip = primary.LockAspectRatio ? "Uniform scale: Locked (Click to unlock aspect ratio)" : "Uniform scale: Unlocked (Click to lock aspect ratio)",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                var scaleLockText = new TextBlock
+                {
+                    Text = primary.LockAspectRatio ? "🔗" : "🔓",
+                    FontSize = 10,
+                    Foreground = primary.LockAspectRatio ? KerfBrand.MintBrush : KerfBrand.TextMutedBrush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                scaleLockBtn.Child = scaleLockText;
+                scaleLockBtn.MouseLeftButtonUp += (s, e) =>
+                {
+                    primary.LockAspectRatio = !primary.LockAspectRatio;
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                    History.MarkDirty();
+                };
 
                 var syBox = CreateAnimatedPropertyField(ScrubControls.CreateScrubField("ScaleY", currentScaleY, val =>
                 {
                     if (primary.RenderTransform == null) primary.RenderTransform = new RenderTransform();
+                    double oldSx = Math.Max(0.001, primary.RenderTransform.ScaleX);
+                    double oldSy = Math.Max(0.001, primary.RenderTransform.ScaleY);
                     primary.RenderTransform.ScaleY = val;
-                    InvalidateAndRefresh(primary);
                     AutoKeyProperty(primary, PropKey.ScaleY, val);
+                    if (primary.LockAspectRatio)
+                    {
+                        double ratio = oldSx / oldSy;
+                        primary.RenderTransform.ScaleX = Math.Max(0.01, Math.Round(val * ratio, 3));
+                        AutoKeyProperty(primary, PropKey.ScaleX, primary.RenderTransform.ScaleX);
+                    }
+                    InvalidateAndRefresh(primary);
+                    if (primary.LockAspectRatio) RefreshPropertyInspector();
                 }, min: 0.01, max: 100.0, step: 0.05), primary, PropKey.ScaleY);
 
-                Grid.SetColumn(sxBox, 0); Grid.SetColumn(syBox, 2);
-                scaleRow.Children.Add(sxBox); scaleRow.Children.Add(syBox);
+                Grid.SetColumn(sxBox, 0); Grid.SetColumn(scaleLockBtn, 1); Grid.SetColumn(syBox, 2);
+                scaleRow.Children.Add(sxBox); scaleRow.Children.Add(scaleLockBtn); scaleRow.Children.Add(syBox);
                 _propertyInspectorStack.Children.Add(scaleRow);
 
                 var anchorRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
@@ -7190,20 +7240,29 @@ namespace Kerf.UI
                 {
                     var union = TransformEngine.UnionBounds(_selectedLayers);
                     double rot = (_selectedLayers.Count == 1) ? _selectedLayers[0].Rotation : 0;
-                    Point testHandlePt = canvasPt;
+                    Rect effectiveBounds = union;
+
                     if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1 && _selectedLayers[0].RenderTransform != null && !_selectedLayers[0].RenderTransform.IsIdentity)
                     {
-                        testHandlePt = RetainedSceneGraph.CanvasToLocalPoint(_selectedLayers[0], canvasPt);
-                        rot = 0;
+                        var primary = _selectedLayers[0];
+                        double curSx = Math.Max(0.001, primary.RenderTransform.ScaleX);
+                        double curSy = Math.Max(0.001, primary.RenderTransform.ScaleY);
+                        double visualW = primary.Width * curSx;
+                        double visualH = primary.Height * curSy;
+                        double visualCenterX = primary.X + primary.Width / 2.0 + primary.RenderTransform.TranslationX;
+                        double visualCenterY = primary.Y + primary.Height / 2.0 + primary.RenderTransform.TranslationY;
+                        effectiveBounds = new Rect(visualCenterX - visualW / 2.0, visualCenterY - visualH / 2.0, visualW, visualH);
+                        rot = primary.Rotation + primary.RenderTransform.Rotation;
                     }
-                    var handle = TransformEngine.HitTestHandle(testHandlePt, union, rot, _zoomScale);
+
+                    var handle = TransformEngine.HitTestHandle(canvasPt, effectiveBounds, rot, _zoomScale);
                     if (handle != HandleType.None)
                     {
                         _activeHandle = handle;
                         _isTransforming = true;
-                        _transformStartBounds = union;
+                        _transformStartBounds = effectiveBounds;
                         _transformStartRot = rot;
-                        _transformStartMouse = testHandlePt;
+                        _transformStartMouse = canvasPt;
                         _dragInitialPositions.Clear();
                         _dragInitialBounds.Clear();
                         _dragInitialRotations.Clear();
@@ -7587,15 +7646,9 @@ namespace Kerf.UI
 
                 if (_activeHandle != HandleType.None)
                 {
-                    Point effectiveCanvasPt = canvasPt;
-                    if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1 && _selectedLayers[0].RenderTransform != null && !_selectedLayers[0].RenderTransform.IsIdentity)
-                    {
-                        effectiveCanvasPt = RetainedSceneGraph.CanvasToLocalPoint(_selectedLayers[0], canvasPt);
-                    }
-
                     var res = TransformEngine.ApplyTransform(
                         _activeHandle,
-                        effectiveCanvasPt,
+                        canvasPt,
                         _transformStartMouse,
                         _transformStartBounds,
                         _transformStartRot,
@@ -7612,13 +7665,15 @@ namespace Kerf.UI
                             // In Animate Mode: scaling a Frame/layer must scale its entire visual contents non-destructively
                             // via RenderTransform.ScaleX/Y and translation offsets, without mutating persistent layout dimensions.
                             if (n.RenderTransform == null) n.RenderTransform = new RenderTransform();
-                            double sx = res.Bounds.Width / Math.Max(0.001, _transformStartBounds.Width);
-                            double sy = res.Bounds.Height / Math.Max(0.001, _transformStartBounds.Height);
+                            double sx = res.Bounds.Width / Math.Max(0.001, n.Width);
+                            double sy = res.Bounds.Height / Math.Max(0.001, n.Height);
                             n.RenderTransform.ScaleX = Math.Max(0.001, sx);
                             n.RenderTransform.ScaleY = Math.Max(0.001, sy);
-                            n.RenderTransform.TranslationX = res.Bounds.X - _transformStartBounds.X;
-                            n.RenderTransform.TranslationY = res.Bounds.Y - _transformStartBounds.Y;
-                            n.RenderTransform.Rotation = res.Rotation - _transformStartRot;
+                            double newCenterX = res.Bounds.X + res.Bounds.Width / 2.0;
+                            double newCenterY = res.Bounds.Y + res.Bounds.Height / 2.0;
+                            n.RenderTransform.TranslationX = newCenterX - (n.X + n.Width / 2.0);
+                            n.RenderTransform.TranslationY = newCenterY - (n.Y + n.Height / 2.0);
+                            n.RenderTransform.Rotation = res.Rotation - n.Rotation;
                             _sceneGraph.InvalidateSubtree(n.Id);
                             RefreshCanvas();
                             RefreshPropertyInspector();
@@ -10937,6 +10992,7 @@ namespace Kerf.UI
                     _timelinePanel.Visibility = Visibility.Visible;
                 }
 
+                SanitizeAnimationClips(Document);
                 EnsureTimelineControllerInitialized();
                 CaptureAnimationRestPose();
                 _isStateMachineMode = true;
@@ -13757,6 +13813,19 @@ namespace Kerf.UI
                 item.Click += (s, e) => SelectAnimationClip(clip);
                 menu.Items.Add(item);
             }
+            menu.Items.Add(new Separator());
+            var clearAllItem = new MenuItem { Header = "Clear All Tracks in Current Clip" };
+            clearAllItem.Click += (s, e) =>
+            {
+                if (_timelineController != null && _timelineController.ActiveClip != null)
+                {
+                    _timelineController.ActiveClip.Tracks.Clear();
+                    History.MarkDirty();
+                    RefreshTimelineUI();
+                }
+            };
+            menu.Items.Add(clearAllItem);
+
             menu.PlacementTarget = target;
             menu.Placement = PlacementMode.Bottom;
             menu.IsOpen = true;
@@ -13971,6 +14040,79 @@ namespace Kerf.UI
             // RenderTransform to all visual children without mutating layout geometry or vector points.
         }
 
+        private static bool IsLegacyPresetDemoTrack(AnimTrack track)
+        {
+            if (track == null || track.Keys == null) return false;
+            // Legacy preset rotation: 0s -> 0, 1s -> 180, 2s -> 360
+            if (track.Prop == (ushort)PropKey.Rotation)
+            {
+                if (track.Keys.Count == 3)
+                {
+                    bool matchTimes = Math.Abs(track.Keys[0].Time - 0.0) < 0.05 &&
+                                      Math.Abs(track.Keys[1].Time - 1.0) < 0.05 &&
+                                      Math.Abs(track.Keys[2].Time - 2.0) < 0.05;
+                    bool matchVals = Math.Abs(track.Keys[0].Value - 0.0) < 0.05 &&
+                                     Math.Abs(track.Keys[1].Value - 180.0) < 0.05 &&
+                                     Math.Abs(track.Keys[2].Value - 360.0) < 0.05;
+                    if (matchTimes && matchVals) return true;
+                }
+            }
+            // Legacy preset opacity: 0s -> 1.0, 1s -> 0.5, 2s -> 1.0
+            if (track.Prop == (ushort)PropKey.Opacity)
+            {
+                if (track.Keys.Count == 3)
+                {
+                    bool matchTimes = Math.Abs(track.Keys[0].Time - 0.0) < 0.05 &&
+                                      Math.Abs(track.Keys[1].Time - 1.0) < 0.05 &&
+                                      Math.Abs(track.Keys[2].Time - 2.0) < 0.05;
+                    bool matchVals = Math.Abs(track.Keys[0].Value - 1.0) < 0.05 &&
+                                     Math.Abs(track.Keys[1].Value - 0.5) < 0.05 &&
+                                     Math.Abs(track.Keys[2].Value - 1.0) < 0.05;
+                    if (matchTimes && matchVals) return true;
+                }
+            }
+            return false;
+        }
+
+        private void SanitizeAnimationClips(KerfDocument doc)
+        {
+            if (doc == null || doc.Animation == null || doc.Animation.Clips == null) return;
+            bool removedAny = false;
+            foreach (var clip in doc.Animation.Clips)
+            {
+                if (clip == null || clip.Tracks == null) continue;
+                int countBefore = clip.Tracks.Count;
+                clip.Tracks.RemoveAll(IsLegacyPresetDemoTrack);
+                if (clip.Tracks.Count != countBefore) removedAny = true;
+            }
+            if (removedAny && History != null)
+            {
+                History.MarkDirty();
+            }
+        }
+
+        private double GetEvaluatedPropertyRaw(LayerNode layer, ushort prop)
+        {
+            if (layer == null) return 0.0;
+            switch ((PropKey)prop)
+            {
+                case PropKey.X: return layer.X + (layer.RenderTransform != null ? layer.RenderTransform.TranslationX : 0.0);
+                case PropKey.Y: return layer.Y + (layer.RenderTransform != null ? layer.RenderTransform.TranslationY : 0.0);
+                case PropKey.ScaleX: return layer.RenderTransform != null ? layer.RenderTransform.ScaleX : 1.0;
+                case PropKey.ScaleY: return layer.RenderTransform != null ? layer.RenderTransform.ScaleY : 1.0;
+                case PropKey.Rotation: return layer.Rotation + (layer.RenderTransform != null ? layer.RenderTransform.Rotation : 0.0);
+                case PropKey.AnchorX: return layer.RenderTransform != null ? layer.RenderTransform.AnchorX : 0.0;
+                case PropKey.AnchorY: return layer.RenderTransform != null ? layer.RenderTransform.AnchorY : 0.0;
+                case PropKey.Opacity: return layer.Opacity;
+                case PropKey.Width:
+                case PropKey.VisualWidth: return layer.RenderTransform != null && layer.RenderTransform.VisualWidth > 0 ? layer.RenderTransform.VisualWidth : layer.Width;
+                case PropKey.Height:
+                case PropKey.VisualHeight: return layer.RenderTransform != null && layer.RenderTransform.VisualHeight > 0 ? layer.RenderTransform.VisualHeight : layer.Height;
+                case PropKey.CornerRadius: return layer.CornerRadius;
+                default: return 0.0;
+            }
+        }
+
         private void EnsureTimelineControllerInitialized()
         {
             if (_timelineController != null) return;
@@ -13995,6 +14137,7 @@ namespace Kerf.UI
 
             if (Document.Animation == null) Document.Animation = new AnimationProjectData();
             if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            SanitizeAnimationClips(Document);
             if (Document.Animation.Clips.Count > 0)
             {
                 Clip activeClip = Document.Animation.Clips.FirstOrDefault(c => c.Id == Document.Animation.ActiveClipId);
@@ -14066,13 +14209,24 @@ namespace Kerf.UI
             double time = _timelineController.CurrentTime;
             uint nodeId = PropertyBinder.GetNumericNodeId(sel.Id);
 
-            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.X, time, sel.X);
-            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Y, time, sel.Y);
-            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Width, time, sel.Width);
-            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Height, time, sel.Height);
-            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Rotation, time, sel.Rotation);
-            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.Opacity, time, sel.Opacity);
-            AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.CornerRadius, time, sel.CornerRadius);
+            var existingTracks = clip.GetTracksForNode(nodeId);
+            if (existingTracks != null && existingTracks.Count > 0)
+            {
+                foreach (var tr in existingTracks)
+                {
+                    double propVal = GetEvaluatedPropertyRaw(sel, tr.Prop);
+                    AddOrUpdateTrackKeyframe(clip, nodeId, tr.Prop, time, propVal);
+                }
+            }
+            else
+            {
+                // No tracks yet: key ScaleX and ScaleY (or Position if translated),
+                // without adding uninvited rotation or opacity presets.
+                double sx = sel.RenderTransform != null ? sel.RenderTransform.ScaleX : 1.0;
+                double sy = sel.RenderTransform != null ? sel.RenderTransform.ScaleY : 1.0;
+                AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.ScaleX, time, sx);
+                AddOrUpdateTrackKeyframe(clip, nodeId, (ushort)PropKey.ScaleY, time, sy);
+            }
 
             if (Document.Animation == null) Document.Animation = new AnimationProjectData();
             if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
@@ -14828,6 +14982,7 @@ namespace Kerf.UI
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) }); // Indent
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Prop name
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Value readout
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) }); // Delete button
 
             var indentBullet = new TextBlock
             {
@@ -14841,9 +14996,13 @@ namespace Kerf.UI
             Grid.SetColumn(indentBullet, 0);
             grid.Children.Add(indentBullet);
 
+            string propDisplay = (track != null && !string.IsNullOrEmpty(track.PropertyPath) && track.PropertyPath != "0")
+                ? track.PropertyPath
+                : GetPropertyName(track != null ? track.Prop : (ushort)0);
+
             var nameBlock = new TextBlock
             {
-                Text = track != null && !string.IsNullOrEmpty(track.PropertyPath) ? track.PropertyPath : GetPropertyName(track != null ? track.Prop : (ushort)0),
+                Text = propDisplay,
                 FontSize = 10,
                 Foreground = new SolidColorBrush(Color.FromRgb(180, 195, 220)),
                 VerticalAlignment = VerticalAlignment.Center
@@ -14857,10 +15016,74 @@ namespace Kerf.UI
                 FontSize = 10,
                 Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 8, 0)
+                Margin = new Thickness(0, 0, 4, 0)
             };
             Grid.SetColumn(valBlock, 2);
             grid.Children.Add(valBlock);
+
+            var delBtn = new Border
+            {
+                Width = 16,
+                Height = 16,
+                Background = Brushes.Transparent,
+                Cursor = Cursors.Hand,
+                ToolTip = "Delete this animation track",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 4, 0)
+            };
+            var delText = new TextBlock
+            {
+                Text = "×",
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(100, 115, 140)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            delBtn.Child = delText;
+            delBtn.MouseEnter += (s, e) => delText.Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+            delBtn.MouseLeave += (s, e) => delText.Foreground = new SolidColorBrush(Color.FromRgb(100, 115, 140));
+
+            var capturedTrack = track;
+            delBtn.MouseLeftButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                if (_timelineController != null && _timelineController.ActiveClip != null && capturedTrack != null)
+                {
+                    _timelineController.ActiveClip.Tracks.Remove(capturedTrack);
+                    History.MarkDirty();
+                    RefreshTimelineUI();
+                }
+            };
+            Grid.SetColumn(delBtn, 3);
+            grid.Children.Add(delBtn);
+
+            var menu = new ContextMenu();
+            var delItem = new MenuItem { Header = "Delete Track" };
+            delItem.Click += (s, e) =>
+            {
+                if (_timelineController != null && _timelineController.ActiveClip != null && capturedTrack != null)
+                {
+                    _timelineController.ActiveClip.Tracks.Remove(capturedTrack);
+                    History.MarkDirty();
+                    RefreshTimelineUI();
+                }
+            };
+            menu.Items.Add(delItem);
+
+            var clearItem = new MenuItem { Header = "Clear All Keyframes on Track" };
+            clearItem.Click += (s, e) =>
+            {
+                if (capturedTrack != null && capturedTrack.Keys != null)
+                {
+                    capturedTrack.Keys.Clear();
+                    History.MarkDirty();
+                    RefreshTimelineUI();
+                }
+            };
+            menu.Items.Add(clearItem);
+
+            grid.ContextMenu = menu;
 
             return grid;
         }

@@ -228,6 +228,12 @@ namespace Kerf.Tools
                 case HandleType.TopCenter:
                     if (fromCenter) { y += dy; h -= 2 * dy; }
                     else { y += dy; h -= dy; }
+                    if (keepAspectRatio)
+                    {
+                        double targetW = h * origRatio;
+                        x -= (targetW - w) / 2.0;
+                        w = targetW;
+                    }
                     break;
 
                 case HandleType.TopRight:
@@ -244,11 +250,23 @@ namespace Kerf.Tools
                 case HandleType.MiddleLeft:
                     if (fromCenter) { x += dx; w -= 2 * dx; }
                     else { x += dx; w -= dx; }
+                    if (keepAspectRatio)
+                    {
+                        double targetH = w / origRatio;
+                        y -= (targetH - h) / 2.0;
+                        h = targetH;
+                    }
                     break;
 
                 case HandleType.MiddleRight:
                     if (fromCenter) { x -= dx; w += 2 * dx; }
                     else { w += dx; }
+                    if (keepAspectRatio)
+                    {
+                        double targetH = w / origRatio;
+                        y -= (targetH - h) / 2.0;
+                        h = targetH;
+                    }
                     break;
 
                 case HandleType.BottomLeft:
@@ -263,6 +281,12 @@ namespace Kerf.Tools
                 case HandleType.BottomCenter:
                     if (fromCenter) { y -= dy; h += 2 * dy; }
                     else { h += dy; }
+                    if (keepAspectRatio)
+                    {
+                        double targetW = h * origRatio;
+                        x -= (targetW - w) / 2.0;
+                        w = targetW;
+                    }
                     break;
 
                 case HandleType.BottomRight:
