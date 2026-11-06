@@ -5788,10 +5788,10 @@ namespace Kerf.Tests
 
             var prevPreset = presetKey.Preset;
             var prevInterp = presetKey.Interp;
-            var newPreset = EasingPreset.BackOut;
+            var newPreset = EasingPreset.Back;
 
             presetHistory.Execute(new ChangeKeyframeEasingCommand(presetKey, prevInterp, InterpMode.Cubic, prevPreset, newPreset, null));
-            Assert(presetKey.Preset == EasingPreset.BackOut, "Preset changed to BackOut");
+            Assert(presetKey.Preset == EasingPreset.Back, "Preset changed to Back");
             Assert(presetKey.Interp == InterpMode.Cubic, "Interp is Cubic");
 
             presetHistory.Undo();
@@ -5799,7 +5799,7 @@ namespace Kerf.Tests
             Assert(Math.Abs(presetKey.X1 - 0.25) < 1e-4 && Math.Abs(presetKey.Y1 - 0.1) < 1e-4, "Undo() restored prior control points");
 
             presetHistory.Redo();
-            Assert(presetKey.Preset == EasingPreset.BackOut, "Redo() re-applied BackOut preset");
+            Assert(presetKey.Preset == EasingPreset.Back, "Redo() re-applied Back preset");
 
             // (C) Multi-keyframe delete across 2 tracks with 4 keyframes: single Undo() restores all 4 keyframes
             var multiTrack1 = new Track(70, (ushort)PropKey.X);
@@ -5886,7 +5886,7 @@ namespace Kerf.Tests
 
             // (C) Verification of Runtime Isolation (ticks, seeks, scrubs generate 0 history entries)
             var isolationHistory = new CommandHistory();
-            var isolationController = new AnimationTimelineController(null);
+            var isolationController = new AnimationTimelineController(5.0, 60.0);
             var isoClip = new Clip(999, "Isolation Clip", 5.0, 60.0);
             var isoTrack = new Track(1, (ushort)PropKey.X);
             isoTrack.AddKeyframe(Keyframe.Linear(0.0, 0.0));
@@ -5905,7 +5905,7 @@ namespace Kerf.Tests
             for (int scrub = 0; scrub < 20; scrub++)
             {
                 isolationController.Seek(scrub * 0.25);
-                isolationController.Evaluate(scrub * 0.25);
+                isoClip.EvaluateAt(scrub * 0.25);
             }
 
             Assert(isolationHistory.CanUndo == false, "CanUndo is false after 100 ticks, 50 seeks, and 20 scrubbing evaluations (Runtime Isolation)");
@@ -5927,9 +5927,8 @@ namespace Kerf.Tests
             modeIsoHistory.Execute(new ModifyRotationCommand(modeIsoLayer, 0.0, 45.0, null)); // 5. Rotation
             modeIsoHistory.Execute(new ModifyCornerRadiusCommand(modeIsoLayer, 0.0, 16.0, null)); // 6. CornerRadius
             modeIsoHistory.Execute(new ModifyOpacityCommand(modeIsoLayer, 1.0, 0.8, null)); // 7. Opacity
-            modeIsoLayer.Fills = new List<Paint> { new Paint { Color = "#FF0000" } }; // 8. Fill
-            modeIsoLayer.Strokes = new List<StrokeData> { new StrokeData { Color = "#0000FF", Width = 3.0 } }; // 9. Stroke
-            modeIsoLayer.StrokeWidth = 3.0; // 10. StrokeWidth
+            modeIsoLayer.Fills = new List<Paint> { new Paint { ColorHex = "#FF0000" } }; // 8. Fill
+            modeIsoLayer.Strokes = new List<StrokeData> { new StrokeData { Paint = new Paint { ColorHex = "#0000FF" }, Width = 3.0 } }; // 9. Stroke
 
             Assert(modeIsoClip.Tracks.Count == 0, "Design Mode operations directly mutate LayerNode and never instantiate animation tracks (Strict Mode Isolation)");
 

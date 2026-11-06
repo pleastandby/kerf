@@ -10663,12 +10663,25 @@ namespace Kerf.UI
         private void InvalidateAndRefresh(LayerNode node)
         {
             if (History != null) History.MarkDirty();
-            if (_currentStudioMode == StudioMode.Animate)
+            if (node != null)
             {
-                if (!_animationRestPose.ContainsKey(node)) CaptureAnimationRestPoseForLayer(node);
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    if (!_animationRestPose.ContainsKey(node)) CaptureAnimationRestPoseForLayer(node);
+                }
+                ReflowAutoLayoutAncestors(node);
+                if (_sceneGraph != null && !string.IsNullOrEmpty(node.Id))
+                {
+                    _sceneGraph.InvalidateSubtree(node.Id);
+                }
             }
-            ReflowAutoLayoutAncestors(node);
-            _sceneGraph.InvalidateSubtree(node.Id);
+            else
+            {
+                if (_sceneGraph != null)
+                {
+                    _sceneGraph.InvalidateAll();
+                }
+            }
             RefreshCanvas();
         }
 
