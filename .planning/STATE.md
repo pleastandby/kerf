@@ -16,16 +16,16 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-11-05)
 
 **Core value:** An industrial-grade animation engine that operates with non-destructive independent transforms, stable keyframes, visual graph curve editing, transactional undo/redo, and interactive state machines without destabilizing or corrupting the design canvas.
-**Current focus:** Phase 3 — Easing Engine & Interactive Graph Curve Editor
+**Current focus:** Phase 3 — Timeline and Keyframe Engine Reconstruction
 
 ## Current Position
 
-Phase: 3 of 7 (Easing Engine & Interactive Graph Curve Editor)
-Plan: 0 of 2 in current phase
-Status: Phase 2 verified; Ready for Phase 3
-Last activity: 2026-11-05 — Phase 2 completed and verified (51/51 tests passing)
+Phase: 3 of 7 (Timeline and Keyframe Engine Reconstruction)
+Plan: 0 of 3 in current phase
+Status: Ready to execute Plan 03-01
+Last activity: 2026-11-06 — Phase 3 plans created (03-01, 03-02, 03-03)
 
-Progress: [███░░░░░░░] 27%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -40,9 +40,11 @@ Progress: [███░░░░░░░] 27%
 |---|---|---|---|
 | 1. Independent Transform Pipeline & Render Separation | 2/2 | 30m | 15m |
 | 2. Independent Transform Architecture and Animation Evaluator | 2/2 | 30m | 15m |
-| 3. Easing Engine & Interactive Graph Curve Editor | 0/2 | - | - |
-| 4. Animation Command History & Full Undo/Redo | 0/2 | - | - |
-| 5. Decoupled Animation Runtime Playback & Transport | 0/2 | - | - |
+| 3. Timeline and Keyframe Engine Reconstruction | 0/3 | - | - |
+| 4. Easing Engine & Interactive Graph Curve Editor | 0/2 | - | - |
+| 5. Animation Command History & Full Undo/Redo | 0/2 | - | - |
+| 6. Interactive State Machine Engine | 0/3 | - | - |
+| 7. Verification, Legacy Migration & Safe Deprecation | 0/2 | - | - |
 | 6. Interactive State Machine Engine | 0/3 | - | - |
 | 7. Verification, Legacy Migration & Safe Deprecation | 0/2 | - | - |
 

@@ -8,9 +8,9 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 
 - [x] **Phase 1: Independent Transform Pipeline & Render Separation** - Introduce decoupled render transforms so animation never destructively mutates layer dimensions or Auto Layout bounds.
 - [x] **Phase 2: Independent Transform Architecture and Animation Evaluator** - Eliminate destructive animation transformations and establish a reliable evaluation pipeline with hierarchical matrix composition, centralized clock, and renderer integration.
-- [ ] **Phase 3: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
-- [ ] **Phase 4: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
-- [ ] **Phase 5: Decoupled Animation Runtime Playback & Transport** - Deterministic timeline playback with isolated evaluation buffers, zero design-state corruption, and instant rest pose recovery.
+- [ ] **Phase 3: Timeline and Keyframe Engine Reconstruction** - Build a structured, multi-track animation timeline with expandable object lanes, time ruler, stable keyframes, scrubbing, and inspector integration.
+- [ ] **Phase 4: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
+- [ ] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [ ] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
 - [ ] **Phase 7: Verification, Legacy Migration & Safe Deprecation** - End-to-end integration tests, legacy project file migration, and deprecation of old property binders with 0 regressions.
 
@@ -55,9 +55,29 @@ Plans:
 
 ---
 
-### Phase 3: Easing Engine & Interactive Graph Curve Editor
-**Goal**: Build a precision cubic Bézier easing engine with standard presets and an interactive Direct2D canvas curve/graph editor widget with draggable tangent handles.
+### Phase 3: Timeline and Keyframe Engine Reconstruction
+**Goal**: Build a structured, reliable, multi-track animation authoring timeline featuring expandable object lanes, time ruler, frame snapping, stable keyframes, scrubbing, and transform inspector integration.
 **Depends on**: Phase 2
+**Requirements**: TIME-01, TIME-02, TIME-03, TIME-04, TIME-05, TIME-06, TIME-07, TIME-08
+**Success Criteria** (what must be TRUE):
+  1. Multiple animated objects and independent property tracks (`PositionX/Y`, `ScaleX/Y`, `Rotation`, `AnchorX/Y`, `Opacity`, `VisualWidth/Height`) can be viewed, expanded, and collapsed in the timeline.
+  2. Time ruler displays frame numbers and time marks; playhead scrubbing updates the canvas in real time using the Phase 2 evaluator.
+  3. Stable keyframe CRUD: create, select, multi-select, move preserving relative timing, duplicate, copy/paste, and delete with stable IDs.
+  4. Animate Mode transform inspector displays current evaluated values with diamond keyframe toggles and jump navigation.
+  5. Dragging keyframes or scrubbing playhead executes with high performance without unneeded UI re-renders or model corruption.
+  6. Automated test fixtures pass covering keyframe CRUD, multi-selection, shifting, duplicate timestamps, clipboard, and evaluator integration.
+**Plans**: 3 plans
+
+Plans:
+- [ ] 03-01: Implement core keyframe data architecture, stable GUIDs, property tracks, keyframe CRUD, clipboard, and sorting.
+- [ ] 03-02: Build hierarchical timeline authoring UI, expandable object lanes, time ruler, frame snapping, and multi-keyframe dragging.
+- [ ] 03-03: Integrate Animate Mode transform inspector, keyframe toggles, and automated verification tests (Test #52).
+
+---
+
+### Phase 4: Easing Engine & Interactive Graph Curve Editor
+**Goal**: Build a precision cubic Bézier easing engine with standard presets and an interactive Direct2D canvas curve/graph editor widget with draggable tangent handles.
+**Depends on**: Phase 3
 **Requirements**: EASE-01, EASE-02, EASE-03, EASE-04
 **Success Criteria** (what must be TRUE):
   1. Cubic Bézier curves evaluate accurately for custom $(x_1, y_1, x_2, y_2)$ control points and match standard presets (Ease In, Ease Out, Ease In-Out, Bounce, Spring).
@@ -67,8 +87,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: Implement enhanced `BezierCurve` evaluation with custom tangents, overshoot clamping, and preset profiles.
-- [ ] 03-02: Build the interactive Direct2D Graph Editor canvas widget with selectable keyframe nodes and draggable tangent handles.
+- [ ] 04-01: Implement enhanced `BezierCurve` evaluation with custom tangents, overshoot clamping, and preset profiles.
+- [ ] 04-02: Build the interactive Direct2D Graph Editor canvas widget with selectable keyframe nodes and draggable tangent handles.
 
 ---
 
