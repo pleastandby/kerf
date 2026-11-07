@@ -20,10 +20,10 @@ See: `.planning/PROJECT.md` (updated 2026-11-05)
 
 ## Current Position
 
-Phase: 5 of 7 (Animation Command History & Full Undo/Redo) — COMPLETED
-Plan: 2 of 2 in Phase 5 completed
-Status: Phase 5 executed and verified. Ready for Phase 6 (or user verification).
-Last activity: 2026-11-06 — Completed Phase 5 execution & verification (11/11 must-haves verified, 59/59 tests passing)
+Phase: 6 of 7 (Interactive State Machine Engine) — IN PROGRESS
+Plan: 0 of 3 in Phase 6
+Status: Phase 6 context gathered and ready for planning.
+Last activity: 2026-11-07 — Completed Phase 6 discussion (06-CONTEXT.md, 06-DISCUSSION-LOG.md)
 
 Progress: [███████░░░] 69%
 
