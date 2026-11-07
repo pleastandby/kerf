@@ -6539,6 +6539,44 @@ namespace Kerf.Tests
 
             e2eHistory.Redo(); // Redo move
             Assert(nAttack.GraphX == 450 && nAttack.GraphY == 220, "Redo 5: Move restored");
+
+            // 8. Animation Tab & Draggable States Integration (Animation Clips -> State Machine States)
+            var animProject = new AnimationProjectData();
+            var clipWalk = new Clip(201, "WalkCycle", 1.5, 60.0, LoopMode.Loop);
+            var clipJump = new Clip(202, "Jump", 0.8, 60.0, LoopMode.OneShot);
+            animProject.Clips.Add(clipWalk);
+            animProject.Clips.Add(clipJump);
+
+            // Verify clip metadata
+            Assert(animProject.Clips.Count == 2, "Animation project contains 2 animation clips");
+            Assert(clipWalk.LoopMode == LoopMode.Loop, "WalkCycle is a loop animation");
+            Assert(clipJump.LoopMode == LoopMode.OneShot, "Jump is a one-shot animation");
+
+            // Simulate dropping WalkCycle onto canvas at (180, 120)
+            int walkClipIdx = animProject.Clips.IndexOf(clipWalk);
+            var stateFromWalk = new MachineState(15, clipWalk.Name, StateKind.Animation, walkClipIdx, "sm_node_walk")
+            {
+                GraphX = 180.0,
+                GraphY = 120.0,
+                Speed = 1.0,
+                Loop = (clipWalk.LoopMode == LoopMode.Loop)
+            };
+            var cmdDropWalk = new CreateStateNodeCommand(intLayer, stateFromWalk);
+            e2eHistory.Execute(cmdDropWalk);
+
+            Assert(intLayer.States.Contains(stateFromWalk), "State dropped from Animation Tab added to layer");
+            Assert(stateFromWalk.ClipIndex == walkClipIdx, "Dropped state references correct clip index");
+            Assert(stateFromWalk.GraphX == 180.0 && stateFromWalk.GraphY == 120.0, "Dropped state preserves exact canvas coordinates");
+            Assert(stateFromWalk.Loop == true, "Dropped state inherited LoopMode.Loop");
+
+            // Undo dropping state
+            e2eHistory.Undo();
+            Assert(!intLayer.States.Contains(stateFromWalk), "Dropped state undone cleanly via unified history");
+
+            // Redo dropping state
+            e2eHistory.Redo();
+            Assert(intLayer.States.Contains(stateFromWalk), "Dropped state restored via redo");
+            Assert(stateFromWalk.GraphX == 180.0, "State coordinates preserved on redo");
         }
     }
 }

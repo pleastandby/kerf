@@ -156,6 +156,17 @@ namespace Kerf.UI
         private System.Windows.Shapes.Rectangle _stateGraphMarqueeVisual;
         private FrameworkElement _stateMachineInspectorPanel;
         private StackPanel _stateMachineInspectorContent;
+        private Panel _stateMachineAnimationsStack;
+        private TextBox _stateMachineAnimationSearch;
+        private Clip _draggedAnimationClip;
+        private int _draggedClipIndex = -1;
+        private Point _animDragStartPoint;
+        private int _stateMachineActiveSidebarTab = 0; // 0 Animations, 1 Inputs, 2 Inspector, 3 All
+        private readonly List<Border> _stateMachineTabButtons = new List<Border>();
+        private Border _inputsSectionBorder;
+        private Border _inspectorSectionBorder;
+        private Border _listenersSectionBorder;
+        private Border _animationsSectionBorder;
         private TextBlock _stateMachineValidationBadge;
         private Canvas _timelineInterpolationGraphCanvas;
         private Canvas _stateMachineInterpolationGraphCanvas;
@@ -14002,14 +14013,60 @@ namespace Kerf.UI
             centerGrid.Children.Add(centerToolbar);
 
             // Center Canvas (No blue graph under, full height)
-            _stateMachineGraphCanvas = new Canvas { Width = 1000, Height = 400, Background = KerfBrand.FigmaCanvasBrush, LayoutTransform = _stateMachineGraphScale };
+            _stateMachineGraphCanvas = new Canvas { Width = 1000, Height = 400, Background = KerfBrand.FigmaCanvasBrush, LayoutTransform = _stateMachineGraphScale, AllowDrop = true };
             _stateMachineGraphCanvas.PreviewMouseDown += HandleStateGraphPanStart;
             _stateMachineGraphCanvas.PreviewMouseUp += HandleStateGraphPanEnd;
             _stateMachineGraphCanvas.MouseMove += HandleStateGraphMouseMove;
             _stateMachineGraphCanvas.MouseLeftButtonDown += HandleStateGraphCanvasMouseDown;
             _stateMachineGraphCanvas.MouseLeftButtonUp += HandleStateGraphMouseUp;
-            _stateMachineGraphScrollViewer = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _stateMachineGraphCanvas };
+            _stateMachineGraphScrollViewer = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _stateMachineGraphCanvas, AllowDrop = true };
             _stateMachineGraphScrollViewer.PreviewMouseWheel += HandleStateGraphMouseWheel;
+
+            DragEventHandler handleCanvasDragOver = (s, e) =>
+            {
+                if (e.Data.GetDataPresent("KerfAnimationClipIndex") || _draggedClipIndex >= 0)
+                {
+                    e.Effects = DragDropEffects.Copy;
+                    e.Handled = true;
+                }
+                else
+                {
+                    e.Effects = DragDropEffects.None;
+                }
+            };
+
+            DragEventHandler handleCanvasDrop = (s, e) =>
+            {
+                int clipIdx = -1;
+                if (e.Data.GetDataPresent("KerfAnimationClipIndex"))
+                {
+                    object val = e.Data.GetData("KerfAnimationClipIndex");
+                    if (val is int) clipIdx = (int)val;
+                    else if (val != null) int.TryParse(val.ToString(), out clipIdx);
+                }
+                if (clipIdx < 0 && _draggedClipIndex >= 0)
+                {
+                    clipIdx = _draggedClipIndex;
+                }
+
+                if (clipIdx >= 0 && Document != null && Document.Animation != null && Document.Animation.Clips != null && clipIdx < Document.Animation.Clips.Count)
+                {
+                    var targetClip = Document.Animation.Clips[clipIdx];
+                    Point dropPos = e.GetPosition(_stateMachineGraphCanvas);
+                    double dropX = Math.Max(20.0, Math.Round(dropPos.X / 10.0) * 10.0);
+                    double dropY = Math.Max(20.0, Math.Round(dropPos.Y / 10.0) * 10.0);
+                    AddClipAsStateToGraph(clipIdx, targetClip, dropX, dropY);
+                    e.Handled = true;
+                }
+                _draggedClipIndex = -1;
+                _draggedAnimationClip = null;
+            };
+
+            _stateMachineGraphCanvas.DragOver += handleCanvasDragOver;
+            _stateMachineGraphCanvas.Drop += handleCanvasDrop;
+            _stateMachineGraphScrollViewer.DragOver += handleCanvasDragOver;
+            _stateMachineGraphScrollViewer.Drop += handleCanvasDrop;
+
             var graphBorder = new Border { Background = KerfBrand.FigmaCanvasBrush, BorderBrush = KerfBrand.FigmaBorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Margin = new Thickness(4, 0, 4, 4), Child = _stateMachineGraphScrollViewer };
             Grid.SetRow(graphBorder, 1);
             centerGrid.Children.Add(graphBorder);
@@ -14033,6 +14090,7 @@ namespace Kerf.UI
             // Expanded view container
             var expandedContainer = new Grid();
             expandedContainer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) }); // Header
+            expandedContainer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) }); // Tab switcher bar
             expandedContainer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Content
 
             // Collapsed view strip (32px)
@@ -14041,7 +14099,7 @@ namespace Kerf.UI
                 Background = KerfBrand.FigmaPanelBrush,
                 Visibility = Visibility.Collapsed,
                 Cursor = Cursors.Hand,
-                ToolTip = "Expand Inputs & Inspector Panel"
+                ToolTip = "Expand State Machine Studio Panel"
             };
             var expandBtn = new Border
             {
@@ -14088,7 +14146,7 @@ namespace Kerf.UI
             var sideHeader = new DockPanel { Margin = new Thickness(10, 0, 8, 0), LastChildFill = false };
             var sideTitle = new TextBlock
             {
-                Text = "Inputs & Inspector",
+                Text = "State Machine",
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.White,
@@ -14104,8 +14162,177 @@ namespace Kerf.UI
             Grid.SetRow(sideHeader, 0);
             expandedContainer.Children.Add(sideHeader);
 
+            // Tab Switcher Bar
+            Action<int> selectSidebarTab = null;
+            selectSidebarTab = (tabIdx) =>
+            {
+                _stateMachineActiveSidebarTab = tabIdx;
+                for (int t = 0; t < _stateMachineTabButtons.Count; t++)
+                {
+                    var btn = _stateMachineTabButtons[t];
+                    bool isAct = (t == tabIdx);
+                    btn.Background = isAct ? KerfBrand.FreezeBrush(new SolidColorBrush(Color.FromArgb(50, 0, 245, 160))) : KerfBrand.FigmaCardBrush;
+                    btn.BorderBrush = isAct ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush;
+                    var tb = btn.Child as TextBlock;
+                    if (tb != null)
+                    {
+                        tb.Foreground = isAct ? KerfBrand.MintBrush : KerfBrand.TextMutedBrush;
+                        tb.FontWeight = isAct ? FontWeights.SemiBold : FontWeights.Normal;
+                    }
+                }
+
+                if (_animationsSectionBorder != null)
+                    _animationsSectionBorder.Visibility = (tabIdx == 0 || tabIdx == 3) ? Visibility.Visible : Visibility.Collapsed;
+                if (_inputsSectionBorder != null)
+                    _inputsSectionBorder.Visibility = (tabIdx == 1 || tabIdx == 3) ? Visibility.Visible : Visibility.Collapsed;
+                if (_listenersSectionBorder != null)
+                    _listenersSectionBorder.Visibility = (tabIdx == 1 || tabIdx == 3) ? Visibility.Visible : Visibility.Collapsed;
+                if (_inspectorSectionBorder != null)
+                    _inspectorSectionBorder.Visibility = (tabIdx == 2 || tabIdx == 3) ? Visibility.Visible : Visibility.Collapsed;
+            };
+
+            var tabBar = new UniformGrid { Rows = 1, Columns = 4, Margin = new Thickness(8, 0, 8, 4) };
+            _stateMachineTabButtons.Clear();
+
+            string[] tabLabels = new string[] { "🎬 Clips", "⚡ Inputs", "⚙ Inspect", "☰ All" };
+            string[] tabTips = new string[] { "Animation Clips (drag onto canvas to create states)", "Inputs & Variables", "State & Transition Inspector", "Show All Sections" };
+
+            for (int t = 0; t < 4; t++)
+            {
+                int currentTab = t;
+                var tabBtn = new Border
+                {
+                    Background = KerfBrand.FigmaCardBrush,
+                    BorderBrush = KerfBrand.FigmaBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(1, 3, 1, 3),
+                    Margin = new Thickness(t == 0 ? 0 : 2, 0, t == 3 ? 0 : 2, 0),
+                    Cursor = Cursors.Hand,
+                    ToolTip = tabTips[t]
+                };
+                var tabText = new TextBlock
+                {
+                    Text = tabLabels[t],
+                    FontSize = 9.5,
+                    TextAlignment = TextAlignment.Center,
+                    Foreground = KerfBrand.TextMutedBrush
+                };
+                tabBtn.Child = tabText;
+                tabBtn.MouseLeftButtonUp += (s, e) => selectSidebarTab(currentTab);
+                _stateMachineTabButtons.Add(tabBtn);
+                tabBar.Children.Add(tabBtn);
+            }
+            Grid.SetRow(tabBar, 1);
+            expandedContainer.Children.Add(tabBar);
+
             // Stack of Collapsible Cards inside ScrollViewer
             var sideStack = new StackPanel { Margin = new Thickness(8, 2, 8, 10) };
+
+            // ----------------------------------------------------
+            // SECTION 0: COLLAPSIBLE ANIMATIONS CARD
+            // ----------------------------------------------------
+            var animationsCard = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            _animationsSectionBorder = animationsCard;
+            var animStack = new StackPanel();
+
+            var animHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 6), LastChildFill = false };
+            var animToggle = new TextBlock
+            {
+                Text = "⌄  Animations (States)",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor = Cursors.Hand
+            };
+            DockPanel.SetDock(animToggle, Dock.Left);
+            animHeader.Children.Add(animToggle);
+
+            var addClipBtn = KerfBrand.CreatePrimaryButton("+ Clip", () => AddAnimationClip(), 4);
+            addClipBtn.Height = 22;
+            addClipBtn.Padding = new Thickness(8, 2, 8, 2);
+            addClipBtn.FontSize = 10;
+            addClipBtn.VerticalAlignment = VerticalAlignment.Center;
+            addClipBtn.ToolTip = "Create a new animation clip";
+            DockPanel.SetDock(addClipBtn, Dock.Right);
+            animHeader.Children.Add(addClipBtn);
+            animStack.Children.Add(animHeader);
+
+            var animBody = new StackPanel();
+
+            _stateMachineAnimationSearch = new TextBox
+            {
+                Text = "Search Animations",
+                Height = 23,
+                Padding = new Thickness(6, 3, 6, 3),
+                Margin = new Thickness(0, 0, 0, 6),
+                Background = KerfBrand.FigmaCanvasBrush,
+                Foreground = KerfBrand.TextMutedBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                FontSize = 10
+            };
+            var animSearch = _stateMachineAnimationSearch;
+            animSearch.GotKeyboardFocus += (s, e) =>
+            {
+                if (string.Equals(animSearch.Text, "Search Animations", StringComparison.Ordinal))
+                {
+                    animSearch.Text = string.Empty;
+                    animSearch.Foreground = new SolidColorBrush(Color.FromRgb(205, 213, 224));
+                }
+            };
+            animSearch.LostKeyboardFocus += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(animSearch.Text))
+                {
+                    animSearch.Text = "Search Animations";
+                    animSearch.Foreground = new SolidColorBrush(Color.FromRgb(118, 130, 149));
+                }
+            };
+            animSearch.TextChanged += (s, e) => FilterStateMachineItems(_stateMachineAnimationsStack, animSearch.Text);
+            animBody.Children.Add(animSearch);
+
+            _stateMachineAnimationsStack = new StackPanel();
+            animBody.Children.Add(_stateMachineAnimationsStack);
+
+            var animHint = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(20, 0, 245, 160)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(50, 0, 245, 160)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 4, 6, 4),
+                Margin = new Thickness(0, 4, 0, 0)
+            };
+            var animHintText = new TextBlock
+            {
+                Text = "💡 Drag any animation onto canvas to drop a new State, or click '+ State'.",
+                FontSize = 9.5,
+                Foreground = KerfBrand.MintBrush,
+                TextWrapping = TextWrapping.Wrap
+            };
+            animHint.Child = animHintText;
+            animBody.Children.Add(animHint);
+
+            animStack.Children.Add(animBody);
+
+            animToggle.MouseLeftButtonUp += (s, e) =>
+            {
+                bool open = animBody.Visibility == Visibility.Visible;
+                animBody.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+                animToggle.Text = (open ? "›  " : "⌄  ") + "Animations (States)";
+            };
+
+            animationsCard.Child = animStack;
+            sideStack.Children.Add(animationsCard);
 
             // ----------------------------------------------------
             // SECTION 1: COLLAPSIBLE INPUTS CARD
@@ -14119,6 +14346,7 @@ namespace Kerf.UI
                 Padding = new Thickness(8),
                 Margin = new Thickness(0, 0, 0, 8)
             };
+            _inputsSectionBorder = inputsCard;
             var inputsStack = new StackPanel();
 
             var inputsHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 6), LastChildFill = false };
@@ -14202,6 +14430,7 @@ namespace Kerf.UI
                 Padding = new Thickness(8),
                 Margin = new Thickness(0, 0, 0, 8)
             };
+            _inspectorSectionBorder = inspectorCard;
             var inspectorStack = new StackPanel();
 
             var inspectorHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 6), LastChildFill = false };
@@ -14236,6 +14465,7 @@ namespace Kerf.UI
             _stateMachineListenersStack = new StackPanel();
             var listenersSection = CreateStateMachineCollapsibleSection("Listeners", _stateMachineListenersStack, ShowAddStateMachineListenerDialog, out _stateMachineListenerSearch);
             listenersSection.Margin = new Thickness(0, 0, 0, 8);
+            _listenersSectionBorder = listenersSection as Border;
             sideStack.Children.Add(listenersSection);
 
             var sideScroll = new ScrollViewer
@@ -14244,7 +14474,7 @@ namespace Kerf.UI
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Content = sideStack
             };
-            Grid.SetRow(sideScroll, 1);
+            Grid.SetRow(sideScroll, 2);
             expandedContainer.Children.Add(sideScroll);
 
             sideGrid.Children.Add(expandedContainer);
@@ -14255,6 +14485,8 @@ namespace Kerf.UI
             mainGrid.Children.Add(sideBorder);
 
             border.Child = mainGrid;
+            selectSidebarTab(_stateMachineActiveSidebarTab);
+            BuildStateMachineAnimationsList();
             BuildStateMachineInputsControls();
             BuildStateMachineListeners();
             BuildStateMachineStatesGraph();
@@ -14315,7 +14547,9 @@ namespace Kerf.UI
         {
             if (items == null) return;
             string filter = (query ?? string.Empty).Trim();
-            if (string.Equals(filter, "Search Inputs", StringComparison.OrdinalIgnoreCase) || string.Equals(filter, "Search Listeners", StringComparison.OrdinalIgnoreCase)) filter = string.Empty;
+            if (string.Equals(filter, "Search Inputs", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(filter, "Search Listeners", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(filter, "Search Animations", StringComparison.OrdinalIgnoreCase)) filter = string.Empty;
             foreach (UIElement item in items.Children)
             {
                 var element = item as FrameworkElement;
@@ -14664,6 +14898,7 @@ namespace Kerf.UI
                             _selectedGraphStateIndices.Clear();
                             _selectedGraphTransition = null;
                             BuildStateMachineStatesGraph();
+                            BuildStateMachineAnimationsList();
                             RefreshStateMachineInspector();
                             RefreshStateMachineValidationBadge();
                         });
@@ -15381,6 +15616,317 @@ namespace Kerf.UI
             }
         }
 
+        private void BuildStateMachineAnimationsList()
+        {
+            if (_stateMachineAnimationsStack == null) return;
+            _stateMachineAnimationsStack.Children.Clear();
+
+            if (Document == null || Document.Animation == null) return;
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (Document.Animation.Clips.Count == 0)
+            {
+                var defaultClip = new Clip(100, "Default Animation", Math.Max(0.1, _timelineController != null ? _timelineController.Duration : 2.0), 60.0, LoopMode.Loop);
+                Document.Animation.Clips.Add(defaultClip);
+                if (_timelineController != null) _timelineController.ActiveClip = defaultClip;
+            }
+
+            var sm = EnsureStateMachineRuntime();
+            var layer = (sm != null && sm.Definition != null && sm.Definition.Layers != null && sm.Definition.Layers.Count > 0) ? sm.Definition.Layers[0] : null;
+
+            var usedClipIndices = new HashSet<int>();
+            if (layer != null && layer.States != null)
+            {
+                for (int s = 0; s < layer.States.Count; s++)
+                {
+                    var st = layer.States[s];
+                    if (st != null && st.Kind == StateKind.Animation && st.ClipIndex >= 0)
+                    {
+                        usedClipIndices.Add(st.ClipIndex);
+                    }
+                }
+            }
+
+            var clips = Document.Animation.Clips;
+            for (int i = 0; i < clips.Count; i++)
+            {
+                int clipIdx = i;
+                var clip = clips[i];
+                if (clip == null) continue;
+
+                bool isInGraph = usedClipIndices.Contains(clipIdx);
+
+                var card = new Border
+                {
+                    Background = KerfBrand.FigmaCardBrush,
+                    BorderBrush = isInGraph ? new SolidColorBrush(Color.FromArgb(70, 0, 245, 160)) : KerfBrand.FigmaBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(8, 6, 8, 6),
+                    Margin = new Thickness(0, 0, 0, 6),
+                    Cursor = Cursors.SizeAll,
+                    ToolTip = "Drag onto State Machine canvas to create a state node, or click '+ State'"
+                };
+                card.Tag = clip.Name;
+
+                var cardGrid = new Grid();
+                cardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                cardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var infoStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                var topRow = new StackPanel { Orientation = Orientation.Horizontal };
+                var icon = new TextBlock
+                {
+                    Text = "🎬",
+                    FontSize = 10,
+                    Margin = new Thickness(0, 0, 6, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                var nameText = new TextBlock
+                {
+                    Text = clip.Name,
+                    FontSize = 11,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = Brushes.White,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxWidth = 130,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                topRow.Children.Add(icon);
+                topRow.Children.Add(nameText);
+
+                if (isInGraph)
+                {
+                    var inGraphBadge = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(35, 0, 245, 160)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(80, 0, 245, 160)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(3),
+                        Padding = new Thickness(4, 1, 4, 1),
+                        Margin = new Thickness(6, 0, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    inGraphBadge.Child = new TextBlock
+                    {
+                        Text = "In Graph",
+                        FontSize = 8.5,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = KerfBrand.MintBrush
+                    };
+                    topRow.Children.Add(inGraphBadge);
+                }
+
+                infoStack.Children.Add(topRow);
+
+                int trackCount = clip.Tracks != null ? clip.Tracks.Count : 0;
+                string subDetails = clip.Duration.ToString("0.00") + "s · " + clip.Fps.ToString("0") + "fps · " + trackCount + (trackCount == 1 ? " track" : " tracks") + (clip.LoopMode == LoopMode.Loop ? " · Loop" : " · Once");
+                var detailsText = new TextBlock
+                {
+                    Text = subDetails,
+                    FontSize = 9,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    Margin = new Thickness(16, 2, 0, 0)
+                };
+                infoStack.Children.Add(detailsText);
+
+                Grid.SetColumn(infoStack, 0);
+                cardGrid.Children.Add(infoStack);
+
+                var rightStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+
+                var addBtn = KerfBrand.CreateSecondaryButton("+ State", () => AddClipAsStateToGraph(clipIdx, clip, null, null), 3);
+                addBtn.Height = 20;
+                addBtn.Padding = new Thickness(6, 1, 6, 1);
+                addBtn.FontSize = 9.5;
+                addBtn.ToolTip = "Add as a state node to the state machine canvas";
+                rightStack.Children.Add(addBtn);
+
+                var dragHint = new TextBlock
+                {
+                    Text = "⋮⋮",
+                    FontSize = 13,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    Margin = new Thickness(6, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    ToolTip = "Drag onto State Machine canvas"
+                };
+                rightStack.Children.Add(dragHint);
+
+                Grid.SetColumn(rightStack, 1);
+                cardGrid.Children.Add(rightStack);
+
+                card.Child = cardGrid;
+
+                card.MouseEnter += (s, e) =>
+                {
+                    card.Background = KerfBrand.FreezeBrush(new SolidColorBrush(Color.FromRgb(38, 43, 54)));
+                    card.BorderBrush = KerfBrand.MintBrush;
+                };
+                card.MouseLeave += (s, e) =>
+                {
+                    card.Background = KerfBrand.FigmaCardBrush;
+                    card.BorderBrush = isInGraph ? new SolidColorBrush(Color.FromArgb(70, 0, 245, 160)) : KerfBrand.FigmaBorderBrush;
+                };
+
+                card.MouseLeftButtonDown += (s, e) =>
+                {
+                    _draggedClipIndex = clipIdx;
+                    _draggedAnimationClip = clip;
+                    _animDragStartPoint = e.GetPosition(this);
+                };
+                card.MouseMove += (s, e) =>
+                {
+                    if (e.LeftButton == MouseButtonState.Pressed && _draggedClipIndex == clipIdx)
+                    {
+                        Point current = e.GetPosition(this);
+                        Vector diff = _animDragStartPoint - current;
+                        if (Math.Abs(diff.X) > SystemParameters.MinimumHorizontalDragDistance ||
+                            Math.Abs(diff.Y) > SystemParameters.MinimumVerticalDragDistance)
+                        {
+                            var dataObj = new DataObject("KerfAnimationClipIndex", clipIdx);
+                            DragDrop.DoDragDrop(card, dataObj, DragDropEffects.Copy);
+                            _draggedClipIndex = -1;
+                            _draggedAnimationClip = null;
+                        }
+                    }
+                };
+                card.MouseLeftButtonUp += (s, e) =>
+                {
+                    _draggedClipIndex = -1;
+                    _draggedAnimationClip = null;
+                };
+
+                _stateMachineAnimationsStack.Children.Add(card);
+            }
+        }
+
+        private void AddClipAsStateToGraph(int clipIndex, Clip clip, double? customX, double? customY)
+        {
+            if (clip == null) return;
+            var sm = EnsureStateMachineRuntime();
+            if (sm == null || sm.Definition == null) return;
+            var layer = EnsureStateMachineGraphLayer(sm.Definition);
+            if (layer == null) return;
+
+            int smClipIndex = 0;
+            if (sm.Clips != null)
+            {
+                smClipIndex = sm.Clips.IndexOf(clip);
+                if (smClipIndex < 0)
+                {
+                    smClipIndex = sm.Clips.Count;
+                    sm.Clips.Add(clip);
+                }
+            }
+
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
+
+            double posX = customX.HasValue ? customX.Value : 260.0;
+            double posY = customY.HasValue ? customY.Value : 60.0;
+            if (!customX.HasValue || !customY.HasValue)
+            {
+                if (layer.States != null && layer.States.Count > 0)
+                {
+                    double maxX = 60.0;
+                    double maxY = 60.0;
+                    for (int s = 0; s < layer.States.Count; s++)
+                    {
+                        var st = layer.States[s];
+                        if (st != null)
+                        {
+                            if (st.GraphX > maxX) maxX = st.GraphX;
+                            if (st.GraphY > maxY) maxY = st.GraphY;
+                        }
+                    }
+                    posX = maxX + 150.0;
+                    posY = Math.Min(maxY, 240.0);
+                }
+            }
+
+            string stateName = !string.IsNullOrWhiteSpace(clip.Name) ? clip.Name : ("State " + (layer.States.Count + 1));
+            int nextId = layer.States.Count;
+            for (int i = 0; i < layer.States.Count; i++)
+            {
+                if (layer.States[i] != null && layer.States[i].Id >= nextId)
+                {
+                    nextId = layer.States[i].Id + 1;
+                }
+            }
+
+            var newState = new MachineState(nextId, stateName, StateKind.Animation, smClipIndex)
+            {
+                GraphX = posX,
+                GraphY = posY,
+                Speed = 1.0,
+                Loop = clip.LoopMode == LoopMode.Loop
+            };
+
+            var cmd = new CreateStateNodeCommand(layer, newState, () =>
+            {
+                _selectedGraphStateIndex = layer.States.IndexOf(newState);
+                if (_selectedGraphStateIndices != null)
+                {
+                    _selectedGraphStateIndices.Clear();
+                    if (_selectedGraphStateIndex >= 0) _selectedGraphStateIndices.Add(_selectedGraphStateIndex);
+                }
+                BuildStateMachineStatesGraph();
+                BuildStateMachineAnimationsList();
+                RefreshStateMachineInspector();
+                RefreshStateMachineValidationBadge();
+            });
+
+            if (History != null)
+            {
+                History.Execute(cmd);
+            }
+            else
+            {
+                cmd.Execute();
+            }
+
+            int entryIndex = layer.States.FindIndex(st => st != null && st.Kind == StateKind.Entry);
+            bool hasEntryTrans = false;
+            if (entryIndex >= 0 && layer.Transitions != null)
+            {
+                for (int t = 0; t < layer.Transitions.Count; t++)
+                {
+                    var tr = layer.Transitions[t];
+                    if (tr != null && tr.FromState == entryIndex)
+                    {
+                        hasEntryTrans = true;
+                        break;
+                    }
+                }
+            }
+            if (entryIndex >= 0 && !hasEntryTrans)
+            {
+                int newStateIndex = layer.States.IndexOf(newState);
+                if (newStateIndex >= 0)
+                {
+                    var transCmd = new CreateTransitionCommand(layer, new StateTransition(entryIndex, newStateIndex, 0.0), () =>
+                    {
+                        BuildStateMachineStatesGraph();
+                        RefreshStateMachineInspector();
+                        RefreshStateMachineValidationBadge();
+                    });
+                    if (History != null) History.Execute(transCmd);
+                    else transCmd.Execute();
+                }
+            }
+
+            _selectedGraphStateIndex = layer.States.IndexOf(newState);
+            if (_selectedGraphStateIndices != null)
+            {
+                _selectedGraphStateIndices.Clear();
+                if (_selectedGraphStateIndex >= 0) _selectedGraphStateIndices.Add(_selectedGraphStateIndex);
+            }
+            BuildStateMachineStatesGraph();
+            BuildStateMachineAnimationsList();
+            RefreshStateMachineInspector();
+            RefreshStateMachineValidationBadge();
+        }
+
         private void BuildStateMachineInputsControls()
         {
             if (_stateMachineInputsStack == null) return;
@@ -15446,6 +15992,7 @@ namespace Kerf.UI
                         {
                             BuildStateMachineInputsControls();
                             BuildStateMachineStatesGraph();
+                            BuildStateMachineAnimationsList();
                             RefreshStateMachineInspector();
                             RefreshStateMachineValidationBadge();
                         });
@@ -15704,6 +16251,7 @@ namespace Kerf.UI
             _selectedGraphStateIndex = stateIndex;
             History.MarkDirty();
             BuildStateMachineStatesGraph();
+            BuildStateMachineAnimationsList();
             RefreshTimelineUI();
         }
 
@@ -17665,6 +18213,7 @@ namespace Kerf.UI
             var clip = new Clip(id, "Animation " + (Document.Animation.Clips.Count + 1), Math.Max(0.1, _timelineController.Duration), _timelineController.Fps, _timelineController.LoopMode);
             Document.Animation.Clips.Add(clip);
             SelectAnimationClip(clip);
+            BuildStateMachineAnimationsList();
         }
 
         public void ToggleAnimationPlayback()
@@ -18555,6 +19104,7 @@ namespace Kerf.UI
             UpdateTimelineTimeReadout();
             UpdateTimelineScrubberPosition();
             RefreshTimelineStateTabs();
+            BuildStateMachineAnimationsList();
         }
 
         private void RefreshTimelineTracks()
