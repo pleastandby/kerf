@@ -87,6 +87,7 @@ namespace Kerf.Tests
             RunTest("Universal Graph Editor Sidebar Consolidation & Clean Timeline", TestUniversalGraphEditorConsolidationAndCleanTimeline);
             RunTest("Single Corner Radius Control & Design vs Animate Mode Isolation", TestSingleCornerRadiusControlAndDesignAnimateIsolation);
             RunTest("Animation Command History, Full Undo/Redo & Runtime Isolation", TestAnimationCommandHistoryAndFullUndoRedo);
+            RunTest("Interactive State Machine Engine: Graph Model, Condition Groups, Inputs, Validation & Undo/Redo", TestInteractiveStateMachineEngine);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -5950,6 +5951,176 @@ namespace Kerf.Tests
             redoHistory.Execute(cmdC);
             Assert(redoHistory.CanRedo == false, "Redo stack cleared and CanRedo is false after new command execution");
             Assert(redoHistory.CanUndo == true, "CanUndo is true for cmdC");
+        }
+
+        private static void TestInteractiveStateMachineEngine()
+        {
+            // 1. Stable string GUID initialization and index adapter bidirectional resolution (D-02)
+            var smDef = new StateMachineDefinition("InteractiveSM");
+            int bHoverIdx = smDef.AddInput(MachineInput.Bool("isHover", false));
+            int nSpeedIdx = smDef.AddInput(MachineInput.Number("speed", 2.5, "sm_input_custom_speed"));
+            int tClickIdx = smDef.AddInput(MachineInput.Trigger("onClick"));
+
+            Assert(smDef.Inputs[bHoverIdx].InputId.StartsWith("sm_input_"), "MachineInput auto-generates stable GUID starting with sm_input_");
+            Assert(smDef.Inputs[nSpeedIdx].InputId == "sm_input_custom_speed", "MachineInput accepts explicit stable GUID");
+            Assert(smDef.FindInputById("sm_input_custom_speed") == smDef.Inputs[nSpeedIdx], "FindInputById resolves input by stable string GUID");
+            Assert(smDef.GetInputIndex("sm_input_custom_speed") == nSpeedIdx, "GetInputIndex resolves index from stable string GUID");
+            Assert(smDef.GetInputIndex("speed") == nSpeedIdx, "GetInputIndex resolves index from input name");
+            Assert(smDef.FindInputById("isHover") == smDef.Inputs[bHoverIdx], "FindInputById resolves input by name");
+            Assert(smDef.FindInputById(bHoverIdx) == smDef.Inputs[bHoverIdx], "FindInputById resolves input by integer index");
+
+            var layer = new MachineLayer("BaseLayer");
+            int sEntry = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int sIdle = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0, "sm_node_idle"));
+            int sHover = layer.AddState(new MachineState(2, "Hover", StateKind.Animation, 1, "sm_node_hover"));
+            int sClick = layer.AddState(new MachineState(3, "Click", StateKind.Animation, 2, "sm_node_click"));
+
+            Assert(layer.States[sEntry].NodeId.StartsWith("sm_node_"), "MachineState auto-generates stable GUID starting with sm_node_");
+            Assert(layer.States[sIdle].NodeId == "sm_node_idle", "MachineState accepts explicit stable GUID");
+            Assert(layer.FindStateById("sm_node_idle") == layer.States[sIdle], "FindStateById resolves state by stable string GUID");
+            Assert(layer.GetStateIndex("sm_node_idle") == sIdle, "GetStateIndex resolves index from stable string GUID");
+            Assert(layer.GetStateNodeId(sIdle) == "sm_node_idle", "GetStateNodeId resolves string GUID from integer index");
+            Assert(layer.FindStateById(sIdle) == layer.States[sIdle], "FindStateById resolves state by integer index");
+            Assert(layer.States[sIdle].Speed == 1.0, "MachineState defaults Speed to 1.0");
+            Assert(layer.States[sIdle].Loop == true, "MachineState defaults Loop to true");
+            Assert(layer.States[sIdle].GraphX == -1.0 && layer.States[sIdle].GraphY == -1.0, "MachineState defaults canvas coordinates to -1.0");
+
+            var transEntry = new StateTransition(sEntry, sIdle, 0.0, "sm_trans_entry_to_idle");
+            layer.AddTransition(transEntry);
+            smDef.AddLayer(layer);
+
+            Assert(transEntry.TransitionId == "sm_trans_entry_to_idle", "StateTransition accepts explicit stable GUID");
+            Assert(transEntry.ToStateId == "sm_node_idle", "AddTransition syncs ToStateId from destination state");
+            Assert(smDef.FindStateById("sm_node_hover") == layer.States[sHover], "StateMachineDefinition.FindStateById searches layers for state");
+
+            // 2. Compound Condition Groups (OR between groups, AND within a group) (D-03)
+            var transIdleHover = new StateTransition(sIdle, sHover, 0.2, "sm_trans_idle_to_hover");
+            // Group 1: isHover == 1.0 AND speed > 10.0 (Will FAIL because speed = 2.5)
+            var cg1 = new ConditionGroup("cg_fast_hover");
+            cg1.Conditions.Add(new TransitionCondition("isHover", ConditionOp.Eq, 1.0));
+            cg1.Conditions.Add(new TransitionCondition("sm_input_custom_speed", ConditionOp.Gt, 10.0));
+            transIdleHover.WithConditionGroup(cg1);
+
+            // Group 2: isHover == 1.0 AND speed >= 1.0 (Will PASS because isHover = 1.0 and speed = 2.5)
+            var cg2 = new ConditionGroup("cg_normal_hover");
+            cg2.Conditions.Add(new TransitionCondition("isHover", ConditionOp.Eq, 1.0));
+            cg2.Conditions.Add(new TransitionCondition("sm_input_custom_speed", ConditionOp.Ge, 1.0));
+            transIdleHover.WithConditionGroup(cg2);
+
+            layer.AddTransition(transIdleHover);
+
+            // Verify condition group evaluation logic
+            // Initially isHover is 0.0: both groups fail
+            Assert(cg1.Evaluate(smDef.Inputs, null, smDef) == false, "Group 1 fails when isHover is false");
+            Assert(cg2.Evaluate(smDef.Inputs, null, smDef) == false, "Group 2 fails when isHover is false");
+            Assert(transIdleHover.EvaluateConditions(smDef.Inputs, null, smDef) == false, "Transition conditions evaluate false when both groups fail");
+
+            // Set isHover = true (value = 1.0, speed = 2.5)
+            smDef.Inputs[bHoverIdx].Value = 1.0;
+            Assert(cg1.Evaluate(smDef.Inputs, null, smDef) == false, "Group 1 fails because speed (2.5) is not > 10.0 (AND inside group)");
+            Assert(cg2.Evaluate(smDef.Inputs, null, smDef) == true, "Group 2 succeeds because isHover == 1.0 and speed >= 1.0 (AND inside group)");
+            Assert(transIdleHover.EvaluateConditions(smDef.Inputs, null, smDef) == true, "Transition succeeds because Group 2 is true (OR between groups)");
+
+            // If speed is dropped below 1.0 (e.g. 0.5), both groups should now fail
+            smDef.Inputs[nSpeedIdx].Value = 0.5;
+            Assert(cg2.Evaluate(smDef.Inputs, null, smDef) == false, "Group 2 fails when speed drops to 0.5");
+            Assert(transIdleHover.EvaluateConditions(smDef.Inputs, null, smDef) == false, "Transition fails when all groups fail");
+
+            // Restore speed to 2.5
+            smDef.Inputs[nSpeedIdx].Value = 2.5;
+
+            // 3. Runtime Execution & Trigger Auto-Clearing (D-03)
+            var clips = new List<Clip>
+            {
+                new Clip(0, "IdleClip", 1.0),
+                new Clip(1, "HoverClip", 1.0),
+                new Clip(2, "ClickClip", 1.0)
+            };
+
+            var transHoverClick = new StateTransition(sHover, sClick, 0.1, "sm_trans_hover_to_click");
+            transHoverClick.WithCondition(new TransitionCondition("onClick", ConditionOp.Eq, 1.0));
+            layer.AddTransition(transHoverClick);
+
+            var smRuntime = new StateMachineRuntime(smDef, clips);
+            var testPose = new Dictionary<uint, Dictionary<ushort, double>>();
+
+            // First frame: Entry resolves instantly to Idle
+            smRuntime.Update(0.016, testPose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sIdle, "Zero-duration transition resolves Entry to Idle state on first frame");
+
+            // Trigger transition to Hover via isHover = true (via string GUID API)
+            smRuntime.SetBool("isHover", true);
+            smRuntime.Update(0.016, testPose);
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition != null, "Transition to Hover started via Compound Condition Groups");
+
+            // Advance through blend to reach Hover
+            smRuntime.Update(0.25, testPose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sHover, "Transition to Hover completed");
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition == null, "Active transition cleared upon completion");
+
+            // Fire trigger onClick via string GUID API
+            smRuntime.FireTrigger("onClick");
+            Assert(smDef.Inputs[tClickIdx].Fired == true, "Trigger is active before update");
+            smRuntime.Update(0.016, testPose);
+            Assert(smDef.Inputs[tClickIdx].Fired == false, "Trigger automatically cleared after 1 update frame");
+            Assert(smRuntime.LayerRuntimes[0].ActiveTransition != null, "Transition to Click started via Trigger condition");
+
+            smRuntime.Update(0.15, testPose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sClick, "Transition to Click state completed");
+
+            // 4. Non-Destructive StateMachineValidator Diagnostics Engine (D-07)
+            // 4a. Valid graph passes with zero errors
+            var validResult = StateMachineValidator.Validate(smDef, clips);
+            Assert(validResult.HasErrors == false, "Valid state machine graph has zero validation errors");
+
+            // 4b. Diagnosing MISSING_ENTRY
+            var badDef = new StateMachineDefinition("BrokenGraph");
+            var badLayer = new MachineLayer("BrokenLayer");
+            badLayer.AddState(new MachineState(0, "SoloState", StateKind.Animation, 0));
+            badDef.AddLayer(badLayer);
+
+            var rMissingEntry = StateMachineValidator.Validate(badDef, clips);
+            Assert(rMissingEntry.HasCode(StateMachineValidator.MISSING_ENTRY), "Validator detects MISSING_ENTRY when layer has no Entry node");
+            Assert(rMissingEntry.HasErrors == true, "MISSING_ENTRY is flagged as Error severity");
+
+            // 4c. Diagnosing DANGLING_TRANSITION
+            badLayer.AddState(new MachineState(1, "EntryNode", StateKind.Entry));
+            badLayer.AddTransition(new StateTransition(1, 99, 0.0)); // Target state 99 does not exist
+            var rDangling = StateMachineValidator.Validate(badDef, clips);
+            Assert(rDangling.HasCode(StateMachineValidator.DANGLING_TRANSITION), "Validator detects DANGLING_TRANSITION for non-existent target ID");
+
+            // 4d. Diagnosing INVALID_TARGET_ENTRY & INVALID_TARGET_ANY
+            badLayer.Transitions.Clear();
+            badLayer.AddTransition(new StateTransition(0, 1, 0.0)); // Points to Entry as target
+            var rInvalidEntryTarget = StateMachineValidator.Validate(badDef, clips);
+            Assert(rInvalidEntryTarget.HasCode(StateMachineValidator.INVALID_TARGET_ENTRY), "Validator detects INVALID_TARGET_ENTRY");
+
+            int sAny = badLayer.AddState(new MachineState(2, "AnyNode", StateKind.Any));
+            badLayer.Transitions.Clear();
+            badLayer.AddTransition(new StateTransition(1, sAny, 0.0)); // Points to Any as target
+            var rInvalidAnyTarget = StateMachineValidator.Validate(badDef, clips);
+            Assert(rInvalidAnyTarget.HasCode(StateMachineValidator.INVALID_TARGET_ANY), "Validator detects INVALID_TARGET_ANY");
+
+            // 4e. Diagnosing UNREACHABLE_STATE
+            badLayer.Transitions.Clear();
+            // Entry is node 1, SoloState is node 0, AnyNode is node 2. Add transition 1 -> 2. Node 0 has no incoming transitions.
+            var rUnreachable = StateMachineValidator.Validate(badDef, clips);
+            Assert(rUnreachable.HasCode(StateMachineValidator.UNREACHABLE_STATE), "Validator detects UNREACHABLE_STATE for disconnected node");
+            Assert(rUnreachable.HasWarnings == true, "UNREACHABLE_STATE is flagged as Warning severity");
+
+            // 4f. Diagnosing TYPE_MISMATCH on Boolean conditions
+            int bFlagIdx = badDef.AddInput(MachineInput.Bool("bFlag", false));
+            var transTypeMismatch = new StateTransition(1, 0, 0.0);
+            transTypeMismatch.WithCondition(new TransitionCondition(bFlagIdx, ConditionOp.Gt, 0.5));
+            badLayer.AddTransition(transTypeMismatch);
+
+            var rTypeMismatch = StateMachineValidator.Validate(badDef, clips);
+            Assert(rTypeMismatch.HasCode(StateMachineValidator.TYPE_MISMATCH), "Validator detects TYPE_MISMATCH when relational comparison is used on Boolean input");
+
+            // 4g. Non-destructive guarantee: validator did not mutate or delete anything
+            Assert(badDef.Layers[0].States.Count == 3, "StateMachineValidator is strictly read-only: state count unchanged");
+            Assert(badDef.Layers[0].Transitions.Count == 1, "StateMachineValidator is strictly read-only: transition count unchanged");
+            Assert(badDef.Inputs.Count == 1, "StateMachineValidator is strictly read-only: input count unchanged");
         }
     }
 }
