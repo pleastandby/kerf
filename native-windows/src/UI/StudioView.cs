@@ -4019,43 +4019,51 @@ namespace Kerf.UI
             }, suffix: "°", tooltip: "Rotation (degrees)");
             var rotBox = CreateAnimatedPropertyField(rotField, primary, PropKey.Rotation);
 
-            double startR = primary.CornerRadius;
-            var crField = ScrubControls.CreateScrubField("R", primary.CornerRadius, val =>
+            if (primary.Type != ElementType.Group)
             {
-                double r = Math.Max(0, Math.Round(val, 1));
-                primary.CornerRadius = r;
-                primary.CornerRadiusTopLeft = r;
-                primary.CornerRadiusTopRight = r;
-                primary.CornerRadiusBottomRight = r;
-                primary.CornerRadiusBottomLeft = r;
-                InvalidateAndRefresh(primary);
-                if (_currentStudioMode == StudioMode.Animate)
+                double startR = primary.CornerRadius;
+                var crField = ScrubControls.CreateScrubField("R", primary.CornerRadius, val =>
                 {
-                    AutoKeyPropertyLivePreview(primary, PropKey.CornerRadius, r);
-                }
-            }, onDragComplete: () =>
-            {
-                double finalR = primary.CornerRadius;
-                if (Math.Abs(finalR - startR) > 1e-6)
-                {
+                    double r = Math.Max(0, Math.Round(val, 1));
+                    primary.CornerRadius = r;
+                    primary.CornerRadiusTopLeft = r;
+                    primary.CornerRadiusTopRight = r;
+                    primary.CornerRadiusBottomRight = r;
+                    primary.CornerRadiusBottomLeft = r;
+                    InvalidateAndRefresh(primary);
                     if (_currentStudioMode == StudioMode.Animate)
                     {
-                        CommitKeyframeValueChange(primary, PropKey.CornerRadius, startR, finalR);
+                        AutoKeyPropertyLivePreview(primary, PropKey.CornerRadius, r);
                     }
-                    else
+                }, onDragComplete: () =>
+                {
+                    double finalR = primary.CornerRadius;
+                    if (Math.Abs(finalR - startR) > 1e-6)
                     {
-                        History.Execute(new ModifyCornerRadiusCommand(primary, startR, finalR, () =>
+                        if (_currentStudioMode == StudioMode.Animate)
                         {
-                            InvalidateAndRefresh(primary);
-                            RefreshPropertyInspector();
-                        }));
+                            CommitKeyframeValueChange(primary, PropKey.CornerRadius, startR, finalR);
+                        }
+                        else
+                        {
+                            History.Execute(new ModifyCornerRadiusCommand(primary, startR, finalR, () =>
+                            {
+                                InvalidateAndRefresh(primary);
+                                RefreshPropertyInspector();
+                            }));
+                        }
+                        startR = finalR;
                     }
-                    startR = finalR;
-                }
-            }, min: 0, suffix: "px", tooltip: "Corner Radius (px)", icon: VectorIcons.CornerRadiusGeometry);
-            var crBox = CreateAnimatedPropertyField(crField, primary, PropKey.CornerRadius);
-            Grid.SetColumn(rotBox, 0); Grid.SetColumn(crBox, 2);
-            row3.Children.Add(rotBox); row3.Children.Add(crBox);
+                }, min: 0, suffix: "px", tooltip: "Corner Radius (px)", icon: VectorIcons.CornerRadiusGeometry);
+                var crBox = CreateAnimatedPropertyField(crField, primary, PropKey.CornerRadius);
+                Grid.SetColumn(rotBox, 0); Grid.SetColumn(crBox, 2);
+                row3.Children.Add(rotBox); row3.Children.Add(crBox);
+            }
+            else
+            {
+                Grid.SetColumn(rotBox, 0);
+                row3.Children.Add(rotBox);
+            }
             _propertyInspectorStack.Children.Add(row3);
 
             if (_currentStudioMode == StudioMode.Animate)
@@ -4312,15 +4320,17 @@ namespace Kerf.UI
                 _propertyInspectorStack.Children.Add(CreateAutoLayoutChildCard(primary, parentNode));
             }
 
-            // 3. Multiple Fills Section (Figma style)
-            BuildFillsSection(primary);
+            if (primary.Type != ElementType.Group)
+            {
+                // 3. Multiple Fills Section (Figma style)
+                BuildFillsSection(primary);
 
-            // 4. Multiple Strokes Section (Figma style)
-            BuildStrokesSection(primary);
+                // 4. Multiple Strokes Section (Figma style)
+                BuildStrokesSection(primary);
 
-            // 5. Effects Section (Drop Shadow & Blur)
-            // 5. Effects Section (Drop Shadow, Inner Shadow, Layer Blur, Liquid Glass, Grain, Background Blur)
-            BuildEffectsSection(primary);
+                // 5. Effects Section (Drop Shadow, Inner Shadow, Layer Blur, Liquid Glass, Grain, Background Blur)
+                BuildEffectsSection(primary);
+            }
 
             // 6. Typography Section (if Text - System Fonts, Alignments, Resizing, Style)
             if (primary.Type == ElementType.Text)
@@ -8165,7 +8175,7 @@ namespace Kerf.UI
                 if (_selectedLayers.Count == 1 && _activeTool == ToolType.Select)
                 {
                     var primary = _selectedLayers[0];
-                    if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Group || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
+                    if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
                     {
                         if (TransformEngine.HitTestCornerRadiusHandle(canvasPt, primary.GetBounds(), primary.Rotation, primary.CornerRadius, _zoomScale))
                         {
@@ -9275,7 +9285,7 @@ namespace Kerf.UI
             if (_selectedLayers.Count == 1 && _activeTool == ToolType.Select && !_isTransforming && !_isPanning && !_isDrawingNew && !_isDraggingGradientHandle)
             {
                 var primary = _selectedLayers[0];
-                if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Group || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
+                if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
                 {
                     if (TransformEngine.HitTestCornerRadiusHandle(canvasPt, primary.GetBounds(), primary.Rotation, primary.CornerRadius, _zoomScale))
                     {
@@ -10227,7 +10237,7 @@ namespace Kerf.UI
             if (_selectedLayers.Count == 1)
             {
                 var primary = _selectedLayers[0];
-                if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Group || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
+                if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
                 {
                     var crPoints = TransformEngine.GetCornerRadiusHandlePositions(union, primary.CornerRadius, _zoomScale);
                     double crRadius = 4.0 / _zoomScale;
@@ -11206,17 +11216,11 @@ namespace Kerf.UI
             if (page == null) return;
 
             var bounds = TransformEngine.UnionBounds(_selectedLayers);
-            var group = new LayerNode
-            {
-                Id = Guid.NewGuid().ToString().Substring(0, 8),
-                Name = "Group " + (_layerGroupCounter++),
-                Type = ElementType.Group,
-                X = bounds.X,
-                Y = bounds.Y,
-                Width = Math.Max(1, bounds.Width),
-                Height = Math.Max(1, bounds.Height),
-                Children = new List<LayerNode>()
-            };
+            var group = LayerNode.CreateGroup("Group " + (_layerGroupCounter++));
+            group.X = bounds.X;
+            group.Y = bounds.Y;
+            group.Width = Math.Max(1, bounds.Width);
+            group.Height = Math.Max(1, bounds.Height);
 
             var first = _selectedLayers[0];
             LayerNode targetParent;
@@ -11225,24 +11229,14 @@ namespace Kerf.UI
             int insertIdx = container.IndexOf(first);
             if (insertIdx < 0) insertIdx = container.Count;
 
-            foreach (var layer in _selectedLayers.ToArray())
+            var toGroup = _selectedLayers.ToArray();
+            var cmd = new GroupSelectionCommand(page, group, toGroup, targetParent != null ? targetParent.Id : null, insertIdx, () =>
             {
-                page.RemoveLayerEverywhere(layer);
-                layer.ParentId = group.Id;
-                layer.X = layer.X - bounds.X;
-                layer.Y = layer.Y - bounds.Y;
-                group.Children.Add(layer);
-            }
-
-            group.ParentId = targetParent != null ? targetParent.Id : null;
-            if (insertIdx <= container.Count)
-            {
-                container.Insert(insertIdx, group);
-            }
-            else
-            {
-                container.Add(group);
-            }
+                _sceneGraph.Synchronize(page);
+                RefreshCanvas();
+                RefreshLayersList();
+            });
+            History.Execute(cmd);
 
             _selectedLayers.Clear();
             _selectedLayers.Add(group);
@@ -11250,7 +11244,6 @@ namespace Kerf.UI
             OnSelectionChanged();
             RefreshCanvas();
             RefreshLayersList();
-            History.MarkDirty();
         }
 
         public void UngroupSelectedLayers()
@@ -11259,46 +11252,31 @@ namespace Kerf.UI
             var page = Document.GetActivePage();
             if (page == null) return;
 
-            var newSelection = new List<LayerNode>();
+            var groupsToUngroup = new List<LayerNode>();
             foreach (var layer in _selectedLayers.ToArray())
             {
                 if ((layer.Type == ElementType.Group || layer.Type == ElementType.Frame) && layer.Children != null && layer.Children.Count > 0)
                 {
-                    LayerNode parent;
-                    var container = page.FindContainer(layer, out parent);
-                    if (container == null) container = page.Layers;
-                    int idx = container.IndexOf(layer);
-                    if (idx < 0) idx = container.Count;
-
-                    container.Remove(layer);
-
-                    var children = layer.Children.ToArray();
-                    for (int i = 0; i < children.Length; i++)
-                    {
-                        var child = children[i];
-                        child.ParentId = parent != null ? parent.Id : null;
-                        child.X += layer.X;
-                        child.Y += layer.Y;
-                        container.Insert(Math.Min(idx + i, container.Count), child);
-                        newSelection.Add(child);
-                    }
-                }
-                else
-                {
-                    newSelection.Add(layer);
+                    groupsToUngroup.Add(layer);
                 }
             }
 
-            if (newSelection.Count > 0)
+            if (groupsToUngroup.Count == 0) return;
+
+            var cmd = new UngroupSelectionCommand(page, groupsToUngroup, () =>
             {
-                _selectedLayers.Clear();
-                _selectedLayers.AddRange(newSelection);
                 _sceneGraph.Synchronize(page);
-                OnSelectionChanged();
                 RefreshCanvas();
                 RefreshLayersList();
-                History.MarkDirty();
-            }
+            });
+            History.Execute(cmd);
+
+            _selectedLayers.Clear();
+            _selectedLayers.AddRange(cmd.UnpackedChildren);
+            _sceneGraph.Synchronize(page);
+            OnSelectionChanged();
+            RefreshCanvas();
+            RefreshLayersList();
         }
 
         public void MoveLayerHierarchy(LayerNode source, LayerNode target, DropPosition position)
@@ -11943,6 +11921,19 @@ namespace Kerf.UI
             _isFinishingRename = false;
         }
 
+        private void CollectDescendants(LayerNode node, HashSet<LayerNode> set)
+        {
+            if (node == null || set.Contains(node)) return;
+            set.Add(node);
+            if (node.Children != null)
+            {
+                foreach (var child in node.Children)
+                {
+                    CollectDescendants(child, set);
+                }
+            }
+        }
+
         public void NudgeSelectedLayers(double dx, double dy)
         {
             if (_selectedLayers.Count == 0) return;
@@ -11951,7 +11942,13 @@ namespace Kerf.UI
             var afterPos = new Dictionary<LayerNode, Point>();
             var afterGeos = new Dictionary<LayerNode, VectorGeometry>();
 
-            foreach (var layer in _selectedLayers)
+            var allTargets = new HashSet<LayerNode>();
+            foreach (var l in _selectedLayers)
+            {
+                CollectDescendants(l, allTargets);
+            }
+
+            foreach (var layer in allTargets)
             {
                 beforePos[layer] = new Point(layer.X, layer.Y);
                 if (layer.Type == ElementType.Path && layer.Geometry != null)
@@ -11972,7 +11969,7 @@ namespace Kerf.UI
 
             var cmd = new MoveLayersPositionsCommand(beforePos, afterPos, beforeGeos, afterGeos, () =>
             {
-                foreach (var l in _selectedLayers) _sceneGraph.InvalidateNode(l.Id);
+                foreach (var l in allTargets) _sceneGraph.InvalidateNode(l.Id);
                 RefreshPropertyInspector();
                 RefreshCanvas();
             });

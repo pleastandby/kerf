@@ -1128,8 +1128,11 @@ namespace Kerf.Engine
                     RenderImage(node, dc);
                     break;
 
-                case ElementType.Frame:
                 case ElementType.Group:
+                    // Groups are pure organizational containers and do not render background geometry
+                    break;
+
+                case ElementType.Frame:
                 case ElementType.Rectangle:
                 case ElementType.Ellipse:
                 case ElementType.Star:

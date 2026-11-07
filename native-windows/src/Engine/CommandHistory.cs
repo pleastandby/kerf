@@ -1723,6 +1723,192 @@ namespace Kerf.Engine
         }
     }
 
+    public class GroupSelectionCommand : ICommand
+    {
+        public string Description { get { return "Group Selection"; } }
+        private readonly Page _page;
+        private readonly LayerNode _group;
+        private readonly List<LayerNode> _children;
+        private readonly string _origParentId;
+        private readonly int _origIndex;
+        private readonly Action _onRender;
+
+        public GroupSelectionCommand(Page page, LayerNode group, IEnumerable<LayerNode> children, string origParentId, int origIndex, Action onRender)
+        {
+            _page = page;
+            _group = group;
+            _children = new List<LayerNode>(children);
+            _origParentId = origParentId;
+            _origIndex = origIndex;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            List<LayerNode> container;
+            if (string.IsNullOrEmpty(_origParentId))
+            {
+                container = _page.Layers;
+            }
+            else
+            {
+                var p = _page.FindLayerById(_origParentId);
+                container = (p != null && p.Children != null) ? p.Children : _page.Layers;
+            }
+
+            foreach (var child in _children)
+            {
+                _page.RemoveLayerEverywhere(child);
+                child.ParentId = _group.Id;
+                if (_group.Children == null) _group.Children = new List<LayerNode>();
+                if (!_group.Children.Contains(child)) _group.Children.Add(child);
+            }
+
+            int idx = Math.Max(0, Math.Min(_origIndex, container.Count));
+            if (!container.Contains(_group))
+            {
+                container.Insert(idx, _group);
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            List<LayerNode> container;
+            if (string.IsNullOrEmpty(_origParentId))
+            {
+                container = _page.Layers;
+            }
+            else
+            {
+                var p = _page.FindLayerById(_origParentId);
+                container = (p != null && p.Children != null) ? p.Children : _page.Layers;
+            }
+
+            _page.RemoveLayerEverywhere(_group);
+
+            int idx = Math.Max(0, Math.Min(_origIndex, container.Count));
+            for (int i = 0; i < _children.Count; i++)
+            {
+                var child = _children[i];
+                child.ParentId = _origParentId;
+                container.Insert(Math.Min(idx + i, container.Count), child);
+            }
+
+            _group.Children.Clear();
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class UngroupSelectionCommand : ICommand
+    {
+        public string Description { get { return "Ungroup Selection"; } }
+        private readonly Page _page;
+        private readonly List<LayerNode> _containers;
+        private readonly List<UngroupItemState> _states;
+        private readonly Action _onRender;
+        public List<LayerNode> UnpackedChildren { get; private set; }
+
+        private class UngroupItemState
+        {
+            public LayerNode Container;
+            public string ParentId;
+            public int Index;
+            public List<LayerNode> Children;
+        }
+
+        public UngroupSelectionCommand(Page page, IEnumerable<LayerNode> containers, Action onRender)
+        {
+            _page = page;
+            _containers = new List<LayerNode>(containers);
+            _onRender = onRender;
+            _states = new List<UngroupItemState>();
+            UnpackedChildren = new List<LayerNode>();
+
+            foreach (var c in _containers)
+            {
+                LayerNode parent;
+                var list = _page.FindContainer(c, out parent);
+                if (list == null) list = _page.Layers;
+                int idx = list.IndexOf(c);
+                if (idx < 0) idx = list.Count;
+
+                _states.Add(new UngroupItemState
+                {
+                    Container = c,
+                    ParentId = parent != null ? parent.Id : null,
+                    Index = idx,
+                    Children = c.Children != null ? new List<LayerNode>(c.Children) : new List<LayerNode>()
+                });
+            }
+        }
+
+        public void Execute()
+        {
+            UnpackedChildren.Clear();
+            foreach (var state in _states)
+            {
+                List<LayerNode> list;
+                if (string.IsNullOrEmpty(state.ParentId))
+                {
+                    list = _page.Layers;
+                }
+                else
+                {
+                    var p = _page.FindLayerById(state.ParentId);
+                    list = (p != null && p.Children != null) ? p.Children : _page.Layers;
+                }
+
+                list.Remove(state.Container);
+                state.Container.Children.Clear();
+
+                for (int i = 0; i < state.Children.Count; i++)
+                {
+                    var child = state.Children[i];
+                    child.ParentId = state.ParentId;
+                    int targetIdx = Math.Min(state.Index + i, list.Count);
+                    list.Insert(targetIdx, child);
+                    UnpackedChildren.Add(child);
+                }
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            foreach (var state in _states)
+            {
+                List<LayerNode> list;
+                if (string.IsNullOrEmpty(state.ParentId))
+                {
+                    list = _page.Layers;
+                }
+                else
+                {
+                    var p = _page.FindLayerById(state.ParentId);
+                    list = (p != null && p.Children != null) ? p.Children : _page.Layers;
+                }
+
+                foreach (var child in state.Children)
+                {
+                    list.Remove(child);
+                    child.ParentId = state.Container.Id;
+                    if (!state.Container.Children.Contains(child))
+                    {
+                        state.Container.Children.Add(child);
+                    }
+                }
+
+                int targetIdx = Math.Min(state.Index, list.Count);
+                if (!list.Contains(state.Container))
+                {
+                    list.Insert(targetIdx, state.Container);
+                }
+            }
+            if (_onRender != null) _onRender();
+        }
+    }
+
     public class AutoLayoutSelectionCommand : ICommand
     {
         public string Description { get { return "Add Auto Layout"; } }

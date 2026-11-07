@@ -89,6 +89,7 @@ namespace Kerf.Tests
             RunTest("Animation Command History, Full Undo/Redo & Runtime Isolation", TestAnimationCommandHistoryAndFullUndoRedo);
             RunTest("Interactive State Machine Engine: Graph Model, Condition Groups, Inputs, Validation & Undo/Redo", TestInteractiveStateMachineEngine);
             RunTest("FigCraft Optical Liquid Glass Model & Effects Panel Parity", TestFigCraftLiquidGlassAndEffectsPanel);
+            RunTest("Group Bounds Lockstep, Zero Fill Default, HitTest & Undo/Redo", TestGroupingBoundingBoxAndNoFillDefault);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -6656,6 +6657,121 @@ namespace Kerf.Tests
                 -0.707f, -0.707f, Colors.White, 0.15f, 0.8f);
             Assert(bmp != null, "RenderLiquidGlassBackdropTexture produced valid BitmapSource");
             Assert(bmp.PixelWidth == w && bmp.PixelHeight == h, "Output texture matches target dimensions");
+        }
+
+        private static void TestGroupingBoundingBoxAndNoFillDefault()
+        {
+            var page = new Page();
+            var history = new CommandHistory();
+
+            var rect1 = new LayerNode
+            {
+                Id = "rect_1",
+                Name = "Rectangle 1",
+                Type = ElementType.Rectangle,
+                X = 200,
+                Y = 100,
+                Width = 150,
+                Height = 80
+            };
+            var rect2 = new LayerNode
+            {
+                Id = "rect_2",
+                Name = "Rectangle 2",
+                Type = ElementType.Rectangle,
+                X = 200,
+                Y = 220,
+                Width = 150,
+                Height = 80
+            };
+            page.Layers.Add(rect1);
+            page.Layers.Add(rect2);
+
+            // 1. Verify default creation of group has NO fills and NO strokes
+            var group = LayerNode.CreateGroup("Group 1");
+            Assert(group.Type == ElementType.Group, "Group type is ElementType.Group");
+            Assert(group.Fills != null && group.Fills.Count == 0, "Group has 0 fills by default (no gray background)");
+            Assert(group.Strokes != null && group.Strokes.Count == 0, "Group has 0 strokes by default");
+            Assert(group.Effects != null && group.Effects.Count == 0, "Group has 0 effects by default");
+
+            // 2. Group the two rectangles with GroupSelectionCommand
+            var selected = new List<LayerNode> { rect1, rect2 };
+            var union = TransformEngine.UnionBounds(selected);
+            Assert(union.X == 200 && union.Y == 100 && union.Width == 150 && union.Height == 200, "Union bounds correctly encompass both rectangles (Y 100 to 300)");
+
+            group.X = union.X;
+            group.Y = union.Y;
+            group.Width = union.Width;
+            group.Height = union.Height;
+
+            var groupCmd = new GroupSelectionCommand(page, group, selected, null, 0, null);
+            history.Execute(groupCmd);
+
+            Assert(page.Layers.Contains(group), "Group is now in page.Layers");
+            Assert(!page.Layers.Contains(rect1), "rect1 is removed from top-level page.Layers");
+            Assert(!page.Layers.Contains(rect2), "rect2 is removed from top-level page.Layers");
+            Assert(group.Children.Count == 2, "Group has 2 children");
+            Assert(rect1.ParentId == group.Id, "rect1 has group ParentId");
+            Assert(rect2.ParentId == group.Id, "rect2 has group ParentId");
+
+            // CRITICAL VERIFICATION: Child coordinates MUST NOT jump or subtract bounds!
+            Assert(rect1.X == 200 && rect1.Y == 100, "rect1 preserved exact canvas coordinates (did not jump to 0,0)");
+            Assert(rect2.X == 200 && rect2.Y == 220, "rect2 preserved exact canvas coordinates (did not jump to 0,120)");
+
+            // Bounding box lockstep: group.GetBounds() matches union of its children
+            var gBounds = group.GetBounds();
+            Assert(gBounds.X == 200 && gBounds.Y == 100, "group.GetBounds() X and Y match children union");
+            Assert(gBounds.Width == 150 && gBounds.Height == 200, "group.GetBounds() Width and Height match children union");
+
+            // 3. Dynamic Bounding Box Update: Move child, verify group bounds updates automatically
+            rect2.Y = 320; // 320 + 80 = 400 bottom
+            var updatedBounds = group.GetBounds();
+            Assert(updatedBounds.Height == 300, "group.GetBounds() dynamically expanded Height to 300 when child moved");
+            Assert(group.Height == 300, "group.Height synchronized in lockstep");
+            rect2.Y = 220; // restore
+            group.GetBounds();
+
+            // 4. Hit-testing: Groups have no background fill and cannot be hit in empty space
+            var hitRect1 = CanvasInteractionController.HitTest(page, new Point(250, 140));
+            Assert(hitRect1.HasHit, "Hit test on rect1 succeeded");
+            Assert(hitRect1.DeepestNode == rect1, "Deepest node is rect1");
+            Assert(hitRect1.OutermostNode == group, "Outermost node is group (selecting group on first click)");
+
+            // Empty space test between rect1 (bottom 180) and rect2 (top 220) at Y=200
+            var hitGap = CanvasInteractionController.HitTest(page, new Point(250, 200));
+            Assert(!hitGap.HasHit, "Empty space between group children does NOT hit the group (no invisible fill box)");
+
+            // 5. Undo / Redo for GroupSelectionCommand
+            history.Undo();
+            Assert(!page.Layers.Contains(group), "Undo: Group removed from page");
+            Assert(page.Layers.Contains(rect1) && page.Layers.Contains(rect2), "Undo: Both rects restored to page.Layers");
+            Assert(rect1.ParentId == null && rect2.ParentId == null, "Undo: ParentIds reset to null");
+            Assert(rect1.X == 200 && rect1.Y == 100, "Undo: rect1 position intact");
+            Assert(rect2.X == 200 && rect2.Y == 220, "Undo: rect2 position intact");
+
+            history.Redo();
+            Assert(page.Layers.Contains(group), "Redo: Group restored to page");
+            Assert(group.Children.Contains(rect1) && group.Children.Contains(rect2), "Redo: Children restored to group");
+            Assert(rect1.ParentId == group.Id, "Redo: rect1 parent set to group");
+
+            // 6. UngroupSelectionCommand
+            var ungroupCmd = new UngroupSelectionCommand(page, new List<LayerNode> { group }, null);
+            history.Execute(ungroupCmd);
+
+            Assert(!page.Layers.Contains(group), "Ungroup: Group removed from page");
+            Assert(page.Layers.Contains(rect1) && page.Layers.Contains(rect2), "Ungroup: Children unpacked to page");
+            Assert(rect1.X == 200 && rect1.Y == 100, "Ungroup: rect1 position intact (no jumping)");
+            Assert(rect2.X == 200 && rect2.Y == 220, "Ungroup: rect2 position intact (no jumping)");
+
+            // Undo Ungroup:
+            history.Undo();
+            Assert(page.Layers.Contains(group), "Undo Ungroup: Group restored");
+            Assert(group.Children.Contains(rect1), "Undo Ungroup: rect1 restored inside group");
+
+            // Redo Ungroup:
+            history.Redo();
+            Assert(!page.Layers.Contains(group), "Redo Ungroup: Group removed again");
+            Assert(page.Layers.Contains(rect1), "Redo Ungroup: rect1 unpacked");
         }
     }
 }

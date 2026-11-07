@@ -125,7 +125,8 @@ namespace Kerf.Tools
             }
 
             // If no child was hit, test if this container / shape itself contains the point
-            if (selfContains)
+            // Note: Groups have no background geometry and cannot be hit in empty space
+            if (selfContains && node.Type != ElementType.Group)
             {
                 result.DeepestNode = node;
                 result.OutermostNode = currentPath[0];
@@ -152,7 +153,7 @@ namespace Kerf.Tools
                 }
             }
 
-            if (selfContains && !candidates.Contains(node))
+            if (selfContains && node.Type != ElementType.Group && !candidates.Contains(node))
             {
                 candidates.Add(node);
             }

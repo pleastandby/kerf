@@ -909,8 +909,53 @@ namespace Kerf.Model
             Children = new List<LayerNode>();
         }
 
+        public static LayerNode CreateGroup(string name = null)
+        {
+            return new LayerNode
+            {
+                Type = ElementType.Group,
+                Name = name ?? "Group",
+                Fills = new List<Paint>(),
+                Strokes = new List<StrokeData>(),
+                Effects = new List<EffectData>(),
+                Children = new List<LayerNode>()
+            };
+        }
+
         public Rect GetBounds()
         {
+            if (Type == ElementType.Group && Children != null && Children.Count > 0)
+            {
+                double minX = double.MaxValue;
+                double minY = double.MaxValue;
+                double maxX = double.MinValue;
+                double maxY = double.MinValue;
+                bool hasChild = false;
+
+                for (int i = 0; i < Children.Count; i++)
+                {
+                    var child = Children[i];
+                    if (child == null || !child.IsVisible) continue;
+                    var b = child.GetBounds();
+                    if (!b.IsEmpty && (b.Width > 0 || b.Height > 0))
+                    {
+                        if (b.X < minX) minX = b.X;
+                        if (b.Y < minY) minY = b.Y;
+                        if (b.Right > maxX) maxX = b.Right;
+                        if (b.Bottom > maxY) maxY = b.Bottom;
+                        hasChild = true;
+                    }
+                }
+
+                if (hasChild)
+                {
+                    X = minX;
+                    Y = minY;
+                    Width = Math.Max(1.0, maxX - minX);
+                    Height = Math.Max(1.0, maxY - minY);
+                    return new Rect(X, Y, Width, Height);
+                }
+            }
             return new Rect(X, Y, Math.Max(1, Width), Math.Max(1, Height));
         }
 

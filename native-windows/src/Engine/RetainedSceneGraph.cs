@@ -503,8 +503,8 @@ namespace Kerf.Engine
                 if (hit != null) return hit;
             }
 
-            // Check self bounds
-            if (bounds.Contains(localPt))
+            // Check self bounds (Groups have no background geometry and cannot be hit in empty space)
+            if (vNode.ModelNode.Type != ElementType.Group && bounds.Contains(localPt))
             {
                 return vNode.ModelNode;
             }
