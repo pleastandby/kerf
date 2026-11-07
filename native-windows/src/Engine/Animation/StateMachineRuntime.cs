@@ -61,6 +61,16 @@ namespace Kerf.Engine.Animation
             LayerRuntimes = new List<LayerRuntimeState>();
             ReportedEvents = new List<string>();
 
+            for (int i = 0; i < Definition.Inputs.Count; i++)
+            {
+                if (Definition.Inputs[i] == null) continue;
+                Definition.Inputs[i].Id = i;
+                if (string.IsNullOrEmpty(Definition.Inputs[i].InputId))
+                {
+                    Definition.Inputs[i].InputId = "sm_input_" + Guid.NewGuid().ToString("N");
+                }
+            }
+
             for (int i = 0; i < Definition.Layers.Count; i++)
             {
                 MachineLayer layer = Definition.Layers[i];
@@ -74,6 +84,11 @@ namespace Kerf.Engine.Animation
                 for (int s = 0; s < layer.States.Count; s++)
                 {
                     if (layer.States[s] == null) layer.States[s] = new MachineState(s, "State", StateKind.Animation);
+                    layer.States[s].Id = s;
+                    if (string.IsNullOrEmpty(layer.States[s].NodeId))
+                    {
+                        layer.States[s].NodeId = "sm_node_" + Guid.NewGuid().ToString("N");
+                    }
                     if (layer.States[s].Blend1DItems == null) layer.States[s].Blend1DItems = new List<Blend1DItem>();
                     if (layer.States[s].BlendDirectItems == null) layer.States[s].BlendDirectItems = new List<BlendDirectItem>();
                     layer.States[s].Blend1DItems = layer.States[s].Blend1DItems.OrderBy(item => item == null ? double.MaxValue : item.Threshold).ToList();
@@ -83,8 +98,40 @@ namespace Kerf.Engine.Animation
                 for (int t = 0; t < layer.Transitions.Count; t++)
                 {
                     if (layer.Transitions[t] == null) layer.Transitions[t] = new StateTransition(0, 0);
-                    if (layer.Transitions[t].Conditions == null) layer.Transitions[t].Conditions = new List<TransitionCondition>();
-                    layer.Transitions[t].Conditions.RemoveAll(condition => condition == null);
+                    StateTransition trans = layer.Transitions[t];
+                    if (string.IsNullOrEmpty(trans.TransitionId))
+                    {
+                        trans.TransitionId = "sm_trans_" + Guid.NewGuid().ToString("N");
+                    }
+                    if (trans.FromState < 0 && !string.IsNullOrEmpty(trans.FromStateId))
+                    {
+                        trans.FromState = layer.GetStateIndex(trans.FromStateId);
+                    }
+                    else if (string.IsNullOrEmpty(trans.FromStateId) && trans.FromState >= 0 && trans.FromState < layer.States.Count)
+                    {
+                        trans.FromStateId = layer.States[trans.FromState].NodeId;
+                    }
+
+                    if (trans.ToState < 0 && !string.IsNullOrEmpty(trans.ToStateId))
+                    {
+                        trans.ToState = layer.GetStateIndex(trans.ToStateId);
+                    }
+                    else if (string.IsNullOrEmpty(trans.ToStateId) && trans.ToState >= 0 && trans.ToState < layer.States.Count)
+                    {
+                        trans.ToStateId = layer.States[trans.ToState].NodeId;
+                    }
+
+                    if (trans.ConditionGroups == null) trans.ConditionGroups = new List<ConditionGroup>();
+                    for (int g = 0; g < trans.ConditionGroups.Count; g++)
+                    {
+                        if (trans.ConditionGroups[g] == null) trans.ConditionGroups[g] = new ConditionGroup();
+                        if (string.IsNullOrEmpty(trans.ConditionGroups[g].Id))
+                        {
+                            trans.ConditionGroups[g].Id = "sm_cg_" + Guid.NewGuid().ToString("N");
+                        }
+                        if (trans.ConditionGroups[g].Conditions == null) trans.ConditionGroups[g].Conditions = new List<TransitionCondition>();
+                        trans.ConditionGroups[g].Conditions.RemoveAll(condition => condition == null);
+                    }
                 }
                 int entryIdx = 0;
                 for (int s = 0; s < layer.States.Count; s++)
@@ -142,12 +189,24 @@ namespace Kerf.Engine.Animation
             }
         }
 
+        public void SetBool(string inputId, bool val)
+        {
+            int idx = Definition.GetInputIndex(inputId);
+            if (idx >= 0) SetBool(idx, val);
+        }
+
         public void SetNumber(int inputIdx, double val)
         {
             if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Number && !double.IsNaN(val) && !double.IsInfinity(val))
             {
                 Definition.Inputs[inputIdx].Value = val;
             }
+        }
+
+        public void SetNumber(string inputId, double val)
+        {
+            int idx = Definition.GetInputIndex(inputId);
+            if (idx >= 0) SetNumber(idx, val);
         }
 
         public void FireTrigger(int inputIdx)
@@ -158,6 +217,12 @@ namespace Kerf.Engine.Animation
             }
         }
 
+        public void FireTrigger(string inputId)
+        {
+            int idx = Definition.GetInputIndex(inputId);
+            if (idx >= 0) FireTrigger(idx);
+        }
+
         public double GetInputValue(int inputIdx)
         {
             if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null)
@@ -165,6 +230,12 @@ namespace Kerf.Engine.Animation
                 return Definition.Inputs[inputIdx].Value;
             }
             return 0.0;
+        }
+
+        public double GetInputValue(string inputId)
+        {
+            int idx = Definition.GetInputIndex(inputId);
+            return idx >= 0 ? GetInputValue(idx) : 0.0;
         }
 
         public bool SetViewModelBool(string name, bool value)
@@ -250,6 +321,20 @@ namespace Kerf.Engine.Animation
             return 1.0;
         }
 
+        public bool CanTransition(StateTransition trans, double progress)
+        {
+            if (trans == null) return false;
+
+            // Check exit time
+            if (trans.ExitTime.HasValue && progress < trans.ExitTime.Value)
+            {
+                return false;
+            }
+
+            // Evaluate condition groups (OR of ANDs)
+            return trans.EvaluateConditions(Definition.Inputs, ViewModel, Definition);
+        }
+
         private StateTransition FindValidTransition(MachineLayer layer, int currentState, double curTime, int activeTransitionToState)
         {
             int anyStateIdx = -1;
@@ -301,24 +386,8 @@ namespace Kerf.Engine.Animation
                     continue;
                 }
 
-                // Check exit time
-                if (trans.ExitTime.HasValue && progress < trans.ExitTime.Value)
-                {
-                    continue;
-                }
-
-                // Check all conditions
-                bool allConditionsPassed = true;
-                for (int c = 0; trans.Conditions != null && c < trans.Conditions.Count; c++)
-                {
-                    if (!trans.Conditions[c].IsTrue(Definition.Inputs, ViewModel))
-                    {
-                        allConditionsPassed = false;
-                        break;
-                    }
-                }
-
-                if (allConditionsPassed)
+                // Check transition feasibility via CanTransition
+                if (CanTransition(trans, progress))
                 {
                     return trans;
                 }
@@ -354,7 +423,8 @@ namespace Kerf.Engine.Animation
                     if (curState.Kind == StateKind.Animation && curState.ClipIndex >= 0 && curState.ClipIndex < Clips.Count)
                     {
                         Clip clip = Clips[curState.ClipIndex];
-                        layerRt.CurTime.Advance(dt, clip.Duration, clip.LoopMode);
+                        double stateSpeed = (curState.Speed > 0.0 || curState.Speed < 0.0) ? curState.Speed : 1.0;
+                        layerRt.CurTime.Advance(dt * stateSpeed, clip.Duration, curState.Loop ? clip.LoopMode : LoopMode.OneShot);
                         needsRedraw = true;
                     }
                 }
@@ -372,7 +442,8 @@ namespace Kerf.Engine.Animation
                         if (toState.Kind == StateKind.Animation && toState.ClipIndex >= 0 && toState.ClipIndex < Clips.Count)
                         {
                             Clip clip = Clips[toState.ClipIndex];
-                            layerRt.ActiveTransition.ToTime.Advance(dt, clip.Duration, clip.LoopMode);
+                            double toStateSpeed = (toState.Speed > 0.0 || toState.Speed < 0.0) ? toState.Speed : 1.0;
+                            layerRt.ActiveTransition.ToTime.Advance(dt * toStateSpeed, clip.Duration, toState.Loop ? clip.LoopMode : LoopMode.OneShot);
                         }
                     }
                 }
@@ -513,7 +584,7 @@ namespace Kerf.Engine.Animation
             // 6. Clear triggers: triggers last exactly one update frame!
             for (int i = 0; i < Definition.Inputs.Count; i++)
             {
-                if (Definition.Inputs[i].Kind == InputKind.Trigger)
+                if (Definition.Inputs[i] != null && Definition.Inputs[i].Kind == InputKind.Trigger)
                 {
                     Definition.Inputs[i].Fired = false;
                 }
