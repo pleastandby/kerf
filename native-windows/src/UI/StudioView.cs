@@ -6083,11 +6083,83 @@ namespace Kerf.UI
             }
         }
 
+        private FrameworkElement CreateFigCraftColorRow(string hexVal, double opacityVal, Action<string> onHexChange, Action<double> onOpacityChange)
+        {
+            var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+
+            var swatch = new Border
+            {
+                Width = 20,
+                Height = 20,
+                CornerRadius = new CornerRadius(4),
+                Background = new SolidColorBrush(GpuRenderer.ParseHexColor(hexVal, 1.0)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(65, 75, 102)),
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(0, 0, 6, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Color Picker"
+            };
+            DockPanel.SetDock(swatch, Dock.Left);
+            dock.Children.Add(swatch);
+
+            var opField = ScrubControls.CreateScrubField("", Math.Round(opacityVal * 100), new Action<double>(val =>
+            {
+                if (onOpacityChange != null) onOpacityChange(Math.Max(0.0, Math.Min(100.0, val)) / 100.0);
+            }), 0, 100, 1.0, "%", "Opacity (%)");
+            opField.Width = 60;
+            DockPanel.SetDock(opField, Dock.Right);
+            dock.Children.Add(opField);
+
+            var tbBorder = new Border
+            {
+                Height = 22,
+                Background = new SolidColorBrush(Color.FromRgb(26, 30, 44)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(48, 56, 78)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Margin = new Thickness(0, 0, 6, 0)
+            };
+            var tb = new TextBox
+            {
+                Text = hexVal,
+                FontSize = 11,
+                Background = Brushes.Transparent,
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(6, 1, 6, 1),
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            tbBorder.Child = tb;
+
+            swatch.MouseLeftButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                ColorPickerPopup.ShowAt(swatch, tb.Text, newHex =>
+                {
+                    tb.Text = newHex;
+                    swatch.Background = new SolidColorBrush(GpuRenderer.ParseHexColor(newHex, 1.0));
+                    if (onHexChange != null) onHexChange(newHex);
+                });
+            };
+
+            tb.TextChanged += (s, e) =>
+            {
+                if (tb.Text.StartsWith("#") && (tb.Text.Length == 7 || tb.Text.Length == 4 || tb.Text.Length == 9))
+                {
+                    swatch.Background = new SolidColorBrush(GpuRenderer.ParseHexColor(tb.Text, 1.0));
+                    if (onHexChange != null) onHexChange(tb.Text);
+                }
+            };
+
+            dock.Children.Add(tbBorder);
+            return dock;
+        }
+
         private void BuildEffectsSection(LayerNode primary)
         {
             if (primary.Effects == null) primary.Effects = new List<EffectData>();
 
-            _propertyInspectorStack.Children.Add(CreateInspectorSectionWithAdd("Effects", () =>
+            Action addDefaultEffect = () =>
             {
                 var newFx = new EffectData
                 {
@@ -6096,40 +6168,72 @@ namespace Kerf.UI
                     IsExpanded = true,
                     ColorHex = "#000000",
                     Opacity = 0.25,
-                    Direction = 90.0,
-                    Distance = 4.0,
+                    OffsetX = 0,
+                    OffsetY = 4,
                     Blur = 8,
                     Spread = 0
                 };
-                newFx.UpdateOffsetsFromPolar();
+                newFx.UpdatePolarFromOffsets();
                 primary.Effects.Add(newFx);
                 History.MarkDirty();
                 InvalidateAndRefresh(primary);
                 RefreshPropertyInspector();
-            }));
+            };
+
+            // Section Header: "Effects" with [Styles ❖] and [Add +] buttons matching FigCraft
+            var headerDock = new DockPanel { Margin = new Thickness(0, 12, 0, 8) };
+            var headerTitle = new TextBlock
+            {
+                Text = "Effects",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(headerTitle, Dock.Left);
+            headerDock.Children.Add(headerTitle);
+
+            var addBtn = new Button
+            {
+                Template = CreateRoundedButtonTemplate(4),
+                Content = "+",
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Width = 22,
+                Height = 22,
+                Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                Foreground = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(55, 65, 90)),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = "Add effect"
+            };
+            addBtn.Click += (s, e) => addDefaultEffect();
+            DockPanel.SetDock(addBtn, Dock.Right);
+            headerDock.Children.Add(addBtn);
+
+            var stylesBtn = new Button
+            {
+                Template = CreateRoundedButtonTemplate(4),
+                Content = "❖",
+                FontSize = 11,
+                Width = 22,
+                Height = 22,
+                Background = Brushes.Transparent,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175)),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                Margin = new Thickness(0, 0, 4, 0),
+                ToolTip = "Effect Styles"
+            };
+            DockPanel.SetDock(stylesBtn, Dock.Right);
+            headerDock.Children.Add(stylesBtn);
+
+            _propertyInspectorStack.Children.Add(headerDock);
 
             if (primary.Effects.Count == 0)
             {
-                var emptyBtn = CreateSmallButton("+ Add Effect", "Add drop shadow, inner shadow, liquid glass, grain, or blur", () =>
-                {
-                    var newFx = new EffectData
-                    {
-                        Type = EffectType.DropShadow,
-                        Enabled = true,
-                        IsExpanded = true,
-                        ColorHex = "#000000",
-                        Opacity = 0.25,
-                        Direction = 90.0,
-                        Distance = 4.0,
-                        Blur = 8,
-                        Spread = 0
-                    };
-                    newFx.UpdateOffsetsFromPolar();
-                    primary.Effects.Add(newFx);
-                    History.MarkDirty();
-                    InvalidateAndRefresh(primary);
-                    RefreshPropertyInspector();
-                });
+                var emptyBtn = CreateSmallButton("+ Add Effect", "Add drop shadow, inner shadow, glass, noise, or blur", () => addDefaultEffect());
                 _propertyInspectorStack.Children.Add(emptyBtn);
                 return;
             }
@@ -6141,55 +6245,57 @@ namespace Kerf.UI
 
                 var card = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(40, 45, 63)), // #282D3F
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(57, 65, 90)), // #39415A
+                    Background = new SolidColorBrush(Color.FromRgb(34, 39, 54)), // FigCraft dark card background
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(48, 55, 78)),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(6),
-                    Padding = new Thickness(8),
+                    Padding = new Thickness(6),
                     Margin = new Thickness(0, 0, 0, 8)
                 };
 
                 var cardStack = new StackPanel();
 
-                // Top row: Eye toggle, Type Dropdown, Collapse/Expand Chevron, Delete button
-                var topRow = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, fx.IsExpanded ? 6 : 0) };
+                // 32px Row Header: [✨ Settings Toggle] [Dropdown ComboBox] [👁 Visibility] [— Remove]
+                var headerRow = new DockPanel { Height = 28, LastChildFill = true, Margin = new Thickness(0, 0, 0, fx.IsExpanded ? 8 : 0) };
 
-                var eyeBtn = new Button
+                // Left Settings Toggle Button (FigCraft: Icon::Effects, active highlight when open)
+                var settingsBtn = new Button
                 {
                     Template = CreateRoundedButtonTemplate(4),
-                    Content = fx.Enabled ? "👁" : "—",
-                    FontSize = 10,
-                    Width = 22,
-                    Height = 22,
-                    Background = fx.Enabled ? new SolidColorBrush(Color.FromRgb(50, 58, 80)) : Brushes.Transparent,
-                    Foreground = fx.Enabled ? Brushes.White : new SolidColorBrush(Color.FromRgb(120, 130, 150)),
-                    BorderThickness = new Thickness(0),
+                    Content = "✨",
+                    FontSize = 11,
+                    Width = 24,
+                    Height = 24,
+                    Background = fx.IsExpanded ? new SolidColorBrush(Color.FromRgb(55, 66, 95)) : Brushes.Transparent,
+                    Foreground = fx.IsExpanded ? Brushes.White : new SolidColorBrush(Color.FromRgb(150, 165, 195)),
+                    BorderBrush = fx.IsExpanded ? new SolidColorBrush(Color.FromRgb(75, 90, 125)) : Brushes.Transparent,
+                    BorderThickness = new Thickness(fx.IsExpanded ? 1 : 0),
                     Cursor = Cursors.Hand,
-                    ToolTip = fx.Enabled ? "Disable effect" : "Enable effect"
+                    ToolTip = "Effect settings"
                 };
-                eyeBtn.Click += (s, e) =>
+                settingsBtn.Click += (s, e) =>
                 {
-                    fx.Enabled = !fx.Enabled;
-                    History.MarkDirty();
-                    InvalidateAndRefresh(primary);
+                    fx.IsExpanded = !fx.IsExpanded;
                     RefreshPropertyInspector();
                 };
-                DockPanel.SetDock(eyeBtn, Dock.Left);
-                topRow.Children.Add(eyeBtn);
+                DockPanel.SetDock(settingsBtn, Dock.Left);
+                headerRow.Children.Add(settingsBtn);
 
+                // Right tight-end: [— Remove] then [👁 Visibility]
                 var delBtn = new Button
                 {
                     Template = CreateRoundedButtonTemplate(4),
-                    Content = "✕",
-                    FontSize = 10,
+                    Content = "—",
+                    FontSize = 12,
+                    FontWeight = FontWeights.Bold,
                     Width = 22,
                     Height = 22,
                     Background = Brushes.Transparent,
-                    Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113)),
+                    Foreground = new SolidColorBrush(Color.FromRgb(180, 190, 210)),
                     BorderThickness = new Thickness(0),
                     Cursor = Cursors.Hand,
                     ToolTip = "Remove effect",
-                    Margin = new Thickness(4, 0, 0, 0)
+                    Margin = new Thickness(2, 0, 0, 0)
                 };
                 delBtn.Click += (s, e) =>
                 {
@@ -6202,43 +6308,41 @@ namespace Kerf.UI
                     }
                 };
                 DockPanel.SetDock(delBtn, Dock.Right);
-                topRow.Children.Add(delBtn);
+                headerRow.Children.Add(delBtn);
 
-                // Option to collapse and expand the effects controls
-                var expandBtn = new Button
+                var eyeBtn = new Button
                 {
                     Template = CreateRoundedButtonTemplate(4),
-                    Content = fx.IsExpanded ? "▾" : "▸",
-                    FontSize = 11,
-                    FontWeight = FontWeights.Bold,
+                    Content = fx.Enabled ? "👁" : "—",
+                    FontSize = 10,
                     Width = 22,
                     Height = 22,
-                    Background = Brushes.Transparent,
-                    Foreground = new SolidColorBrush(Color.FromRgb(160, 175, 205)),
+                    Background = fx.Enabled ? new SolidColorBrush(Color.FromRgb(42, 50, 72)) : Brushes.Transparent,
+                    Foreground = fx.Enabled ? Brushes.White : new SolidColorBrush(Color.FromRgb(110, 120, 140)),
                     BorderThickness = new Thickness(0),
                     Cursor = Cursors.Hand,
-                    ToolTip = fx.IsExpanded ? "Collapse effect controls" : "Expand effect controls",
-                    Margin = new Thickness(2, 0, 0, 0)
+                    ToolTip = fx.Enabled ? "Disable effect" : "Enable effect"
                 };
-                expandBtn.Click += (s, e) =>
+                eyeBtn.Click += (s, e) =>
                 {
-                    fx.IsExpanded = !fx.IsExpanded;
+                    fx.Enabled = !fx.Enabled;
+                    History.MarkDirty();
+                    InvalidateAndRefresh(primary);
                     RefreshPropertyInspector();
                 };
-                DockPanel.SetDock(expandBtn, Dock.Right);
-                topRow.Children.Add(expandBtn);
+                DockPanel.SetDock(eyeBtn, Dock.Right);
+                headerRow.Children.Add(eyeBtn);
 
-                // Type ComboBox
+                // Center: Type Dropdown ComboBox (fills available width)
                 var typeCombo = CreateModernComboBox(22);
-                typeCombo.Margin = new Thickness(6, 0, 4, 0);
-                typeCombo.Items.Add(CreateModernComboBoxItem("Drop Shadow", EffectType.DropShadow));
-                typeCombo.Items.Add(CreateModernComboBoxItem("Inner Shadow", EffectType.InnerShadow));
-                typeCombo.Items.Add(CreateModernComboBoxItem("Layer Blur", EffectType.LayerBlur));
-                typeCombo.Items.Add(CreateModernComboBoxItem("Liquid Glass", EffectType.LiquidGlass));
-                typeCombo.Items.Add(CreateModernComboBoxItem("Film Grain", EffectType.Grain));
-                typeCombo.Items.Add(CreateModernComboBoxItem("Background Blur", EffectType.BackgroundBlur));
+                typeCombo.Margin = new Thickness(4, 0, 4, 0);
+                typeCombo.Items.Add(CreateModernComboBoxItem("Drop shadow", EffectType.DropShadow));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Inner shadow", EffectType.InnerShadow));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Layer blur", EffectType.LayerBlur));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Background blur", EffectType.BackgroundBlur));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Noise", EffectType.Grain));
+                typeCombo.Items.Add(CreateModernComboBoxItem("Glass", EffectType.LiquidGlass));
 
-                // Select current
                 for (int c = 0; c < typeCombo.Items.Count; c++)
                 {
                     var item = typeCombo.Items[c] as ComboBoxItem;
@@ -6259,25 +6363,18 @@ namespace Kerf.UI
                         if (fx.Type != newType)
                         {
                             fx.Type = newType;
-                            // Set suitable Apple pro defaults for specific types
                             if (newType == EffectType.LiquidGlass)
                             {
-                                fx.Intensity = 0.85;
-                                fx.Direction = 315;
-                                fx.Spread = 2.2;
-                                fx.Blur = 16;
+                                fx.EnsureGlassDefaults();
                                 fx.ColorHex = "#FFFFFF";
                                 fx.Opacity = 0.15;
-                                fx.Scale = 1.0;
-                                fx.Distance = 60.0;
-                                fx.UpdateOffsetsFromPolar();
                             }
                             else if (newType == EffectType.Grain)
                             {
-                                fx.Intensity = 0.25;
                                 fx.Scale = 1.0;
-                                fx.Blur = 0.0;
+                                fx.Intensity = 0.25;
                                 fx.ColorHex = "#FFFFFF";
+                                fx.Opacity = 0.25;
                             }
                             else if (newType == EffectType.LayerBlur || newType == EffectType.BackgroundBlur)
                             {
@@ -6289,304 +6386,258 @@ namespace Kerf.UI
                         }
                     }
                 };
-                topRow.Children.Add(typeCombo);
-                cardStack.Children.Add(topRow);
+                headerRow.Children.Add(typeCombo);
+                cardStack.Children.Add(headerRow);
 
-                // Controls rendered only when enabled and expanded
-                if (fx.Enabled && fx.IsExpanded)
+                // Expanded Settings Sub-panel (matching FigCraft)
+                if (fx.IsExpanded)
                 {
+                    var settingsStack = new StackPanel();
+
+                    // Helper to create 50/50 two-column rows
+                    Func<FrameworkElement, FrameworkElement, Grid> makeTwoCol = (left, right) =>
+                    {
+                        var g = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        Grid.SetColumn(left, 0);
+                        Grid.SetColumn(right, 2);
+                        g.Children.Add(left);
+                        g.Children.Add(right);
+                        return g;
+                    };
+
                     switch (fx.Type)
                     {
-                        case EffectType.DropShadow:
-                        case EffectType.InnerShadow:
+                        case EffectType.LiquidGlass:
                         {
-                            // Color Row with icon
-                            string sColor = string.IsNullOrEmpty(fx.ColorHex) ? "#000000" : fx.ColorHex;
-                            cardStack.Children.Add(CreateColorRow("🎨", sColor, hex =>
+                            fx.EnsureGlassDefaults();
+
+                            // Row 1: Light (°) | Intensity (%)
+                            var lightField = ScrubControls.CreateScrubField("Light", fx.LightAngle, new Action<double>(val =>
+                            {
+                                double deg = (val % 360.0);
+                                if (deg > 180.0) deg -= 360.0;
+                                else if (deg < -180.0) deg += 360.0;
+                                fx.LightAngle = Math.Round(deg, 1);
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), -180, 180, 1.0, "°", "Where the light comes from (-180° to 180°)");
+
+                            var intField = ScrubControls.CreateScrubField("Intensity", Math.Round(fx.LightIntensity * 100), new Action<double>(val =>
+                            {
+                                fx.LightIntensity = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), 0, 100, 1.0, "%", "Brightness of the edge highlights (0-100%)");
+
+                            settingsStack.Children.Add(makeTwoCol(lightField, intField));
+
+                            // Row 2: Refraction (%) | Depth (px)
+                            var refrField = ScrubControls.CreateScrubField("Refraction", Math.Round(fx.Refraction * 100), new Action<double>(val =>
+                            {
+                                fx.Refraction = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), 0, 100, 1.0, "%", "How strongly the curved edge bends the backdrop (0-100%)");
+
+                            var depthField = ScrubControls.CreateScrubField("Depth", fx.Depth, new Action<double>(val =>
+                            {
+                                fx.Depth = Math.Max(1.0, Math.Min(1000.0, val));
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), 1, 1000, 1.0, "px", "How far the curved edge reaches in from the border (1-1000px)");
+
+                            settingsStack.Children.Add(makeTwoCol(refrField, depthField));
+
+                            // Row 3: Dispersion (%) | Frost (px)
+                            var dispField = ScrubControls.CreateScrubField("Dispersion", Math.Round(fx.Dispersion * 100), new Action<double>(val =>
+                            {
+                                fx.Dispersion = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), 0, 100, 1.0, "%", "Colour splitting along the curved edge (0-100%)");
+
+                            var frostField = ScrubControls.CreateScrubField("Frost", fx.Frost, new Action<double>(val =>
+                            {
+                                fx.Frost = Math.Max(0.0, Math.Min(100.0, val));
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), 0, 100, 1.0, "px", "Blur of the backdrop (0-100px)");
+
+                            settingsStack.Children.Add(makeTwoCol(dispField, frostField));
+
+                            // Row 4: Splay (%)
+                            var splayField = ScrubControls.CreateScrubField("Splay", Math.Round(fx.Splay * 100), new Action<double>(val =>
+                            {
+                                fx.Splay = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), 0, 100, 1.0, "%", "Bend direction: towards core (0%) to away from center (100%)");
+                            settingsStack.Children.Add(splayField);
+
+                            // Row 5: Tint Color Swatch + Hex + Opacity %
+                            string gColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
+                            var colorRow = CreateFigCraftColorRow(gColor, fx.Opacity, new Action<string>(hex =>
                             {
                                 fx.ColorHex = hex;
                                 History.MarkDirty();
                                 InvalidateAndRefresh(primary);
+                            }), new Action<double>(op =>
+                            {
+                                fx.Opacity = op;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
                             }));
+                            settingsStack.Children.Add(colorRow);
+                            break;
+                        }
 
-                            // Direction & Distance (Polar controls with icons)
-                            var polarGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
-                            polarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                            polarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-                            polarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        case EffectType.DropShadow:
+                        case EffectType.InnerShadow:
+                        {
+                            bool isDrop = (fx.Type == EffectType.DropShadow);
 
-                            var dirBox = ScrubControls.CreateScrubField("∠", fx.Direction, val =>
-                            {
-                                double deg = (val % 360.0);
-                                if (deg < 0) deg += 360.0;
-                                fx.Direction = Math.Round(deg, 1);
-                                fx.UpdateOffsetsFromPolar();
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, min: 0, max: 360, suffix: "°", tooltip: "Light Direction / Angle (°)");
-
-                            var distBox = ScrubControls.CreateScrubField("⇥", fx.Distance, val =>
-                            {
-                                fx.Distance = Math.Max(0, val);
-                                fx.UpdateOffsetsFromPolar();
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, min: 0, max: 500, suffix: "px", tooltip: "Shadow Distance (px)");
-
-                            Grid.SetColumn(dirBox, 0); Grid.SetColumn(distBox, 2);
-                            polarGrid.Children.Add(dirBox); polarGrid.Children.Add(distBox);
-                            cardStack.Children.Add(polarGrid);
-
-                            // Offset X & Offset Y (Cartesian controls with icons)
-                            var cartGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
-                            cartGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                            cartGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-                            cartGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                            var offXBox = ScrubControls.CreateScrubField("X", fx.OffsetX, val =>
+                            // Row 1: X | Y
+                            var xBox = ScrubControls.CreateScrubField("X", fx.OffsetX, new Action<double>(val =>
                             {
                                 fx.OffsetX = val;
                                 fx.UpdatePolarFromOffsets();
                                 History.MarkDirty();
                                 InvalidateAndRefresh(primary);
-                            }, suffix: "px", tooltip: "Horizontal Offset X (px)");
+                            }), -500, 500, 1.0, "px", "Offset X (px)");
 
-                            var offYBox = ScrubControls.CreateScrubField("Y", fx.OffsetY, val =>
+                            var yBox = ScrubControls.CreateScrubField("Y", fx.OffsetY, new Action<double>(val =>
                             {
                                 fx.OffsetY = val;
                                 fx.UpdatePolarFromOffsets();
                                 History.MarkDirty();
                                 InvalidateAndRefresh(primary);
-                            }, suffix: "px", tooltip: "Vertical Offset Y (px)");
+                            }), -500, 500, 1.0, "px", "Offset Y (px)");
 
-                            Grid.SetColumn(offXBox, 0); Grid.SetColumn(offYBox, 2);
-                            cartGrid.Children.Add(offXBox); cartGrid.Children.Add(offYBox);
-                            cardStack.Children.Add(cartGrid);
+                            settingsStack.Children.Add(makeTwoCol(xBox, yBox));
 
-                            // Blur & Spread with icons
-                            var blurGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
-                            blurGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                            blurGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-                            blurGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                            var blurBox = ScrubControls.CreateScrubField("◌", fx.Blur, val =>
+                            // Row 2: Blur | Spread
+                            var blurBox = ScrubControls.CreateScrubField("Blur", fx.Blur, new Action<double>(val =>
                             {
                                 fx.Blur = Math.Max(0, val);
                                 History.MarkDirty();
                                 InvalidateAndRefresh(primary);
-                            }, min: 0, max: 200, suffix: "px", tooltip: "Blur Radius (px)");
+                            }), 0, 200, 1.0, "px", "Blur Radius (px)");
 
-                            var spreadBox = ScrubControls.CreateScrubField("⤢", fx.Spread, val =>
+                            var spreadBox = ScrubControls.CreateScrubField("Spread", fx.Spread, new Action<double>(val =>
                             {
                                 fx.Spread = val;
                                 History.MarkDirty();
                                 InvalidateAndRefresh(primary);
-                            }, min: -50, max: 100, suffix: "px", tooltip: "Shadow Spread (px)");
+                            }), -50, 100, 1.0, "px", "Shadow Spread (px)");
 
-                            Grid.SetColumn(blurBox, 0); Grid.SetColumn(spreadBox, 2);
-                            blurGrid.Children.Add(blurBox); blurGrid.Children.Add(spreadBox);
-                            cardStack.Children.Add(blurGrid);
+                            settingsStack.Children.Add(makeTwoCol(blurBox, spreadBox));
 
-                            // Opacity Slider with icon
-                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("◐", Math.Round(fx.Opacity * 100), 0, 100, val =>
-                            {
-                                fx.Opacity = val / 100.0;
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, "%", tooltip: "Shadow Opacity (%)"));
-                            break;
-                        }
-
-                        case EffectType.LiquidGlass:
-                        {
-                            // 1. Quick Presets Bar
-                            var presetWrap = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
-                            Action<string, double, double, double, double, string, double, double, double> applyPreset = 
-                                (name, intensity, dir, rim, blur, color, opacity, bulge, dispersion) =>
-                            {
-                                fx.Intensity = intensity;
-                                fx.Direction = dir;
-                                fx.Spread = rim;
-                                fx.Blur = blur;
-                                fx.ColorHex = color;
-                                fx.Opacity = opacity;
-                                fx.Scale = bulge;
-                                fx.Distance = dispersion;
-                                fx.UpdateOffsetsFromPolar();
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                                RefreshPropertyInspector();
-                            };
-
-                            presetWrap.Children.Add(CreatePresetPill("VisionOS", () => applyPreset("VisionOS", 0.85, 315, 2.2, 16, "#FFFFFF", 0.15, 1.0, 60.0)));
-                            presetWrap.Children.Add(CreatePresetPill("Frosted", () => applyPreset("Frosted", 0.65, 300, 2.0, 32, "#F1F5F9", 0.35, 1.2, 40.0)));
-                            presetWrap.Children.Add(CreatePresetPill("Smoked", () => applyPreset("Smoked", 0.90, 315, 2.5, 20, "#0F172A", 0.65, 1.0, 35.0)));
-                            presetWrap.Children.Add(CreatePresetPill("Crystal", () => applyPreset("Crystal", 1.00, 270, 3.0, 4, "#E0F2FE", 0.08, 1.4, 95.0)));
-                            cardStack.Children.Add(presetWrap);
-
-                            // 2. Glass Tint Color Row with icon
-                            string glassColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
-                            cardStack.Children.Add(CreateColorRow("🎨", glassColor, hex =>
+                            // Row 3: Color Swatch + Hex + Opacity %
+                            string sColor = string.IsNullOrEmpty(fx.ColorHex) ? "#000000" : fx.ColorHex;
+                            var colorRow = CreateFigCraftColorRow(sColor, fx.Opacity, new Action<string>(hex =>
                             {
                                 fx.ColorHex = hex;
                                 History.MarkDirty();
                                 InvalidateAndRefresh(primary);
-                            }));
-
-                            // 3. Glass Body Translucency / Opacity Slider with icon
-                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("◐", Math.Round(fx.Opacity * 100), 0, 100, val =>
+                            }), new Action<double>(op =>
                             {
-                                fx.Opacity = val / 100.0;
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, "%", tooltip: "Glass Translucency / Opacity (%)"));
-
-                            // 4. Direction & Caustic Rim Width Grid with icons
-                            var lightGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
-                            lightGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                            lightGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-                            lightGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                            var dirBox = ScrubControls.CreateScrubField("☼", fx.Direction, val =>
-                            {
-                                double deg = (val % 360.0);
-                                if (deg < 0) deg += 360.0;
-                                fx.Direction = Math.Round(deg, 1);
-                                fx.UpdateOffsetsFromPolar();
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, min: 0, max: 360, suffix: "°", tooltip: "Light Direction Angle (°)");
-
-                            var rimBox = ScrubControls.CreateScrubField("◎", fx.Spread > 0 ? fx.Spread : 2.2, val =>
-                            {
-                                fx.Spread = Math.Max(0.5, Math.Min(15.0, val));
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, min: 0.5, max: 15.0, suffix: "px", tooltip: "Caustic Rim Thickness (px)");
-
-                            Grid.SetColumn(dirBox, 0); Grid.SetColumn(rimBox, 2);
-                            lightGrid.Children.Add(dirBox); lightGrid.Children.Add(rimBox);
-                            cardStack.Children.Add(lightGrid);
-
-                            // 5. Specular Lens Highlight Intensity Slider with icon
-                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("✦", Math.Round(fx.Intensity * 100), 0, 100, val =>
-                            {
-                                fx.Intensity = val / 100.0;
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, "%", tooltip: "Specular Lens Highlight (%)"));
-
-                            // 6. Curvature & Frost Diffusion Grid with icons
-                            var optGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
-                            optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                            optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-                            optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                            var curveBox = ScrubControls.CreateScrubField("⌒", fx.Scale > 0 ? fx.Scale : 1.0, val =>
-                            {
-                                fx.Scale = Math.Max(0.2, Math.Min(3.0, val));
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, min: 0.2, max: 3.0, suffix: "x", tooltip: "Lens Bulge / Curvature (x)");
-
-                            var blurBox = ScrubControls.CreateScrubField("❄", fx.Blur > 0 ? fx.Blur : 16, val =>
-                            {
-                                fx.Blur = Math.Max(0, val);
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, min: 0, max: 100, suffix: "px", tooltip: "Frost Diffusion Blur (px)");
-
-                            Grid.SetColumn(curveBox, 0); Grid.SetColumn(blurBox, 2);
-                            optGrid.Children.Add(curveBox); optGrid.Children.Add(blurBox);
-                            cardStack.Children.Add(optGrid);
-
-                            // 7. Chromatic Aberration Dispersion Slider with icon
-                            double currentDisp = fx.Distance > 0 ? fx.Distance : 60.0;
-                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("🌈", currentDisp, 0, 100, val =>
-                            {
-                                fx.Distance = val;
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, "%", tooltip: "Chromatic Aberration Dispersion (%)"));
-                            break;
-                        }
-
-                        case EffectType.Grain:
-                        {
-                            // Color Row with icon
-                            string gColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
-                            cardStack.Children.Add(CreateColorRow("🎨", gColor, hex =>
-                            {
-                                fx.ColorHex = hex;
+                                fx.Opacity = op;
                                 History.MarkDirty();
                                 InvalidateAndRefresh(primary);
                             }));
+                            settingsStack.Children.Add(colorRow);
 
-                            // Grain Intensity Slider with icon
-                            cardStack.Children.Add(ScrubControls.CreateSmoothSlider("▦", Math.Round(fx.Intensity * 100), 0, 100, val =>
+                            // Row 4 (Drop Shadow only): Show behind transparent areas
+                            if (isDrop)
                             {
-                                fx.Intensity = val / 100.0;
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, "%", tooltip: "Grain Intensity (%)"));
-
-                            // Grain Scale & Softness Grid with icons
-                            var gGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
-                            gGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                            gGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-                            gGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                            var scaleBox = ScrubControls.CreateScrubField("⛶", fx.Scale > 0 ? fx.Scale : 1.0, val =>
-                            {
-                                fx.Scale = Math.Max(0.2, Math.Min(6.0, val));
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, min: 0.2, max: 6.0, suffix: "x", tooltip: "Grain Texture Scale");
-
-                            var softBox = ScrubControls.CreateScrubField("☁", fx.Blur, val =>
-                            {
-                                fx.Blur = Math.Max(0, Math.Min(10.0, val));
-                                History.MarkDirty();
-                                InvalidateAndRefresh(primary);
-                            }, min: 0, max: 10.0, suffix: "px", tooltip: "Grain Softness (px)");
-
-                            Grid.SetColumn(scaleBox, 0); Grid.SetColumn(softBox, 2);
-                            gGrid.Children.Add(scaleBox); gGrid.Children.Add(softBox);
-                            cardStack.Children.Add(gGrid);
+                                var chk = new CheckBox
+                                {
+                                    Content = "Show behind transparent areas",
+                                    IsChecked = fx.ShowBehind,
+                                    Foreground = new SolidColorBrush(Color.FromRgb(160, 175, 205)),
+                                    FontSize = 11,
+                                    Margin = new Thickness(2, 4, 0, 4)
+                                };
+                                chk.Click += (s, e) =>
+                                {
+                                    fx.ShowBehind = (chk.IsChecked == true);
+                                    History.MarkDirty();
+                                    InvalidateAndRefresh(primary);
+                                };
+                                settingsStack.Children.Add(chk);
+                            }
                             break;
                         }
 
                         case EffectType.LayerBlur:
                         case EffectType.BackgroundBlur:
                         {
-                            if (fx.Type == EffectType.BackgroundBlur)
-                            {
-                                string bColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
-                                cardStack.Children.Add(CreateColorRow("🎨", bColor, hex =>
-                                {
-                                    fx.ColorHex = hex;
-                                    History.MarkDirty();
-                                    InvalidateAndRefresh(primary);
-                                }));
-
-                                cardStack.Children.Add(ScrubControls.CreateSmoothSlider("◐", Math.Round(fx.Opacity * 100), 0, 100, val =>
-                                {
-                                    fx.Opacity = val / 100.0;
-                                    History.MarkDirty();
-                                    InvalidateAndRefresh(primary);
-                                }, "%", tooltip: "Tint Opacity (%)"));
-                            }
-
-                            var blurBox = ScrubControls.CreateScrubField("◌", fx.Blur > 0 ? fx.Blur : 8, val =>
+                            var blurBox = ScrubControls.CreateScrubField("Blur", fx.Blur > 0 ? fx.Blur : 8, new Action<double>(val =>
                             {
                                 fx.Blur = Math.Max(0, val);
                                 History.MarkDirty();
                                 InvalidateAndRefresh(primary);
-                            }, min: 0, max: 200, suffix: "px", tooltip: "Blur Radius (px)");
-                            cardStack.Children.Add(blurBox);
+                            }), 0, 200, 1.0, "px", "Blur Radius (px)");
+                            settingsStack.Children.Add(blurBox);
+
+                            if (fx.Type == EffectType.BackgroundBlur)
+                            {
+                                string bColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
+                                var colorRow = CreateFigCraftColorRow(bColor, fx.Opacity, new Action<string>(hex =>
+                                {
+                                    fx.ColorHex = hex;
+                                    History.MarkDirty();
+                                    InvalidateAndRefresh(primary);
+                                }), new Action<double>(op =>
+                                {
+                                    fx.Opacity = op;
+                                    History.MarkDirty();
+                                    InvalidateAndRefresh(primary);
+                                }));
+                                settingsStack.Children.Add(colorRow);
+                            }
+                            break;
+                        }
+
+                        case EffectType.Grain:
+                        {
+                            var sizeBox = ScrubControls.CreateScrubField("Size", fx.Scale > 0 ? fx.Scale : 1.0, new Action<double>(val =>
+                            {
+                                fx.Scale = Math.Max(0.1, Math.Min(100.0, val));
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), 0.1, 100.0, 0.1, "", "Noise grain size");
+
+                            var denBox = ScrubControls.CreateScrubField("Density", Math.Round(fx.Intensity * 100), new Action<double>(val =>
+                            {
+                                fx.Intensity = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), 0, 100, 1.0, "%", "Noise density (%)");
+
+                            settingsStack.Children.Add(makeTwoCol(sizeBox, denBox));
+
+                            string gColor = string.IsNullOrEmpty(fx.ColorHex) ? "#FFFFFF" : fx.ColorHex;
+                            var colorRow = CreateFigCraftColorRow(gColor, fx.Opacity, new Action<string>(hex =>
+                            {
+                                fx.ColorHex = hex;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }), new Action<double>(op =>
+                            {
+                                fx.Opacity = op;
+                                History.MarkDirty();
+                                InvalidateAndRefresh(primary);
+                            }));
+                            settingsStack.Children.Add(colorRow);
                             break;
                         }
                     }
+
+                    cardStack.Children.Add(settingsStack);
                 }
 
                 card.Child = cardStack;

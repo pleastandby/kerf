@@ -441,6 +441,16 @@ namespace Kerf.Model
         public bool Enabled { get; set; }
         public bool IsExpanded { get; set; }
 
+        // FigCraft Optical Glass Model Parameters
+        public double LightAngle { get; set; }      // -180 to 180 deg (default -45.0)
+        public double LightIntensity { get; set; }  // 0.0 to 1.0 (default 0.8)
+        public double Refraction { get; set; }      // 0.0 to 1.0 (default 0.8)
+        public double Depth { get; set; }           // 1.0 to 1000.0 px (default 20.0)
+        public double Dispersion { get; set; }      // 0.0 to 1.0 (default 0.5)
+        public double Frost { get; set; }           // 0.0 to 100.0 px (default 4.0)
+        public double Splay { get; set; }           // 0.0 to 1.0 (default 0.0)
+        public bool ShowBehind { get; set; }        // Show behind transparent areas (Drop Shadow)
+
         public EffectData()
         {
             Type = EffectType.DropShadow;
@@ -456,6 +466,25 @@ namespace Kerf.Model
             Opacity = 0.25;
             Enabled = true;
             IsExpanded = true;
+
+            LightAngle = -45.0;
+            LightIntensity = 0.8;
+            Refraction = 0.8;
+            Depth = 20.0;
+            Dispersion = 0.5;
+            Frost = 4.0;
+            Splay = 0.0;
+            ShowBehind = false;
+        }
+
+        public void EnsureGlassDefaults()
+        {
+            if (Depth <= 0.0) Depth = 20.0;
+            if (Refraction <= 0.0) Refraction = 0.8;
+            if (LightIntensity <= 0.0) LightIntensity = 0.8;
+            if (LightAngle == 0.0) LightAngle = -45.0;
+            if (Dispersion <= 0.0) Dispersion = 0.5;
+            if (Frost <= 0.0) Frost = 4.0;
         }
 
         public void UpdateOffsetsFromPolar()
@@ -489,7 +518,15 @@ namespace Kerf.Model
                 ColorHex = this.ColorHex,
                 Opacity = this.Opacity,
                 Enabled = this.Enabled,
-                IsExpanded = this.IsExpanded
+                IsExpanded = this.IsExpanded,
+                LightAngle = this.LightAngle,
+                LightIntensity = this.LightIntensity,
+                Refraction = this.Refraction,
+                Depth = this.Depth,
+                Dispersion = this.Dispersion,
+                Frost = this.Frost,
+                Splay = this.Splay,
+                ShowBehind = this.ShowBehind
             };
         }
     }

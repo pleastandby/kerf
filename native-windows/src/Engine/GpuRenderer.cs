@@ -310,6 +310,126 @@ namespace Kerf.Engine
             return top * (1.0f - fy) + bot * fy;
         }
 
+        private const float GlassBevel = 1.0f;
+        private const float GlassProfileExp = 3.5f;
+        private const float GlassMaxBend = 0.999f;
+        private const float GlassRimBend = 0.2f;
+        private const float GlassDispersionSpread = 0.16f;
+        private const int GlassDispersionSteps = 8;
+        private const float GlassHlLo = 0.35f;
+        private const float GlassHlSecondary = 0.6f;
+        private const float GlassBroad = 0.05f;
+        private const float GlassOneSampleSplitPx = 1.0f / 256.0f;
+
+        private static float GlassLin(float a, float b, float x)
+        {
+            float span = Math.Abs(b - a);
+            if (span < 1e-5f) span = 1e-5f;
+            float t = (x - a) / span;
+            return Math.Max(0.0f, Math.Min(1.0f, t));
+        }
+
+        private static float GlassSmoothstep(float a, float b, float x)
+        {
+            float span = Math.Abs(b - a);
+            if (span < 1e-5f) span = 1e-5f;
+            float t = Math.Max(0.0f, Math.Min(1.0f, (x - a) / span));
+            return t * t * (3.0f - 2.0f * t);
+        }
+
+        private static float GlassRimLightAt(float x, float bevel)
+        {
+            return GlassSmoothstep(-bevel - 0.001f, -0.2f * bevel, -x);
+        }
+
+        private static float GlassCatches(float facing)
+        {
+            return GlassSmoothstep(GlassHlLo, 1.0f, facing) + GlassHlSecondary * GlassSmoothstep(GlassHlLo, 1.0f, -facing);
+        }
+
+        private static float GlassSheenAt(float x, float depth, float bevel)
+        {
+            float l = GlassLin(-depth, -bevel + 1e-4f, -x);
+            return l * l;
+        }
+
+        private static float GlassBendAt(float x, float depth, float bevel, float refraction)
+        {
+            if (x >= Math.Max(1e-4f, depth) + bevel) return 0.0f;
+            float sd = -x;
+            float t = GlassLin(-depth - bevel, -bevel, sd);
+            float most = GlassMaxBend * depth;
+            float core = Math.Max(-most, Math.Min(most, (float)Math.Pow(t, GlassProfileExp) * depth * refraction));
+            float rim = refraction * GlassRimBend * most;
+            float u = GlassLin(-bevel - 1e-4f, -0.3f * bevel, sd);
+            return core + (rim - core) * u;
+        }
+
+        private static float[] GlassSampleRgba(byte[] buf, int w, int h, int stride, float x, float y)
+        {
+            if (w <= 0 || h <= 0 || buf == null || buf.Length == 0) return new float[] { 0, 0, 0, 0 };
+            x = x - 0.5f;
+            y = y - 0.5f;
+            int x0 = (int)Math.Floor(x);
+            int y0 = (int)Math.Floor(y);
+            float tx = x - x0;
+            float ty = y - y0;
+
+            Func<int, int, float[]> px = (xi, yi) =>
+            {
+                if (xi < 0 || yi < 0 || xi >= w || yi >= h) return new float[] { 0, 0, 0, 0 };
+                int idx = yi * stride + xi * 4;
+                if (idx + 3 < buf.Length)
+                {
+                    // Bgra
+                    return new float[] { buf[idx + 2], buf[idx + 1], buf[idx], buf[idx + 3] };
+                }
+                return new float[] { 0, 0, 0, 0 };
+            };
+
+            float[] a = px(x0, y0);
+            float[] b = px(x0 + 1, y0);
+            float[] c = px(x0, y0 + 1);
+            float[] d = px(x0 + 1, y0 + 1);
+
+            float[] outVal = new float[4];
+            for (int k = 0; k < 4; k++)
+            {
+                float top = a[k] + (b[k] - a[k]) * tx;
+                float bot = c[k] + (d[k] - c[k]) * tx;
+                outVal[k] = top + (bot - top) * ty;
+            }
+            return outVal;
+        }
+
+        private static float[] GlassDispersed(byte[] buf, int w, int h, int stride, float x, float y, float dx, float dy, float k)
+        {
+            float len = (float)Math.Sqrt(dx * dx + dy * dy);
+            if (k < 0.001f || len * k < GlassOneSampleSplitPx)
+            {
+                float[] s = GlassSampleRgba(buf, w, h, stride, x + dx, y + dy);
+                return new float[] { Math.Min(s[0], s[3]), Math.Min(s[1], s[3]), Math.Min(s[2], s[3]), s[3] };
+            }
+            float last = GlassDispersionSteps - 1.0f;
+            float[] acc = new float[4];
+            float sum = 0.0f;
+            for (int i = 1; i < GlassDispersionSteps - 1; i++)
+            {
+                float t = i / last - 0.5f;
+                float weight = 1.0f - Math.Abs(2.0f * t);
+                float[] r = GlassSampleRgba(buf, w, h, stride, x + dx * (1.0f + (t + 0.5f) * k), y + dy * (1.0f + (t + 0.5f) * k));
+                float[] g = GlassSampleRgba(buf, w, h, stride, x + dx * (1.0f + t * k), y + dy * (1.0f + t * k));
+                float[] b = GlassSampleRgba(buf, w, h, stride, x + dx * (1.0f + (t - 0.5f) * k), y + dy * (1.0f + (t - 0.5f) * k));
+                acc[0] += r[0] * weight;
+                acc[1] += g[1] * weight;
+                acc[2] += b[2] * weight;
+                acc[3] += Math.Max(r[3], Math.Max(g[3], b[3])) * weight;
+                sum += weight;
+            }
+            float alpha = acc[3] / Math.Max(1e-5f, sum);
+            return new float[] { Math.Min(acc[0] / sum, alpha), Math.Min(acc[1] / sum, alpha), Math.Min(acc[2] / sum, alpha), alpha };
+        }
+
         private static readonly GpuRenderer _defaultInstance = new GpuRenderer();
 
         private static void RenderLiquidGlassManagedV2(
@@ -337,19 +457,17 @@ namespace Kerf.Engine
             float tintAlpha,
             float specularIntensity)
         {
-            float dIor = dispersion <= 0.0f ? 0.08f : Math.Max(0.01f, Math.Min(0.25f, dispersion));
-            // In Bgra format: channel 0 = Blue, channel 1 = Green, channel 2 = Red
-            // Red bends less (lower IOR), Blue bends more (higher IOR)
-            float[] ior = new float[] { 1.50f + dIor, 1.50f, 1.50f - dIor };
+            float depth = bezel > 0.0f ? bezel : 20.0f;
+            float refraction = bezelHeight > 0.0f && bezelHeight <= 1.0f ? bezelHeight : (bezelHeight > 1.0f ? Math.Min(1.0f, bezelHeight / 100.0f) : 0.8f);
+            float splay = Math.Max(0.0f, Math.Min(1.0f, thickness));
+            float disp = dispersion > 0.0f ? Math.Min(1.0f, dispersion) : 0.5f;
+            float intensity = specularIntensity > 0.0f ? Math.Min(1.0f, specularIntensity) : 0.8f;
+            float kDisp = disp * GlassDispersionSpread;
 
             float lightLen = (float)Math.Sqrt(lightX * lightX + lightY * lightY);
             if (lightLen < 1e-5f) lightLen = 1.0f;
             float lx = lightX / lightLen;
             float ly = lightY / lightLen;
-
-            float bezelVal = Math.Max(2.0f, bezel);
-            float bezelH = Math.Max(1.0f, bezelHeight);
-            float thick = Math.Max(5.0f, thickness);
 
             float hw = outW * 0.5f;
             float hh = outH * 0.5f;
@@ -379,6 +497,8 @@ namespace Kerf.Engine
                         continue;
                     }
 
+                    float distIn = -d;
+
                     // Outward 2D normal from SDF gradient
                     float e = 0.5f;
                     float gx = SdfSquircle(fx + e, fy, cx, cy, hw, hh, radius) - SdfSquircle(fx - e, fy, cx, cy, hw, hh, radius);
@@ -387,53 +507,52 @@ namespace Kerf.Engine
                     if (gl < 1e-6f) gl = 1e-6f;
                     float n2x = gx / gl;
                     float n2y = gy / gl;
+                    float inwardX = -n2x;
+                    float inwardY = -n2y;
 
-                    float depth = -d;
-                    float t = Math.Max(0.0f, Math.Min(1.0f, depth / bezelVal));
-                    float slope = SquircleHeightSlope(t) * (bezelH / bezelVal);
-                    bool inBezel = depth < bezelVal;
+                    // Center-relative direction for splay
+                    float px = fx - cx;
+                    float py = fy - cy;
+                    float plen = (float)Math.Sqrt(px * px + py * py);
+                    float awayX = plen > 1e-6f ? px / plen : 0.0f;
+                    float awayY = plen > 1e-6f ? py / plen : 0.0f;
 
-                    // 3D surface normal
-                    float nx = inBezel ? n2x * slope : 0.0f;
-                    float ny = inBezel ? n2y * slope : 0.0f;
-                    float nl = (float)Math.Sqrt(nx * nx + ny * ny + 1.0f);
-                    float normX = nx / nl;
-                    float normY = ny / nl;
-                    float normZ = 1.0f / nl;
+                    // Bend direction
+                    float outDirX = -inwardX * (1.0f - splay) + awayX * splay;
+                    float outDirY = -inwardY * (1.0f - splay) + awayY * splay;
 
-                    // Refract per channel (chromatic dispersion with Snell's law)
-                    float[] refractedBgr = new float[3];
-                    for (int c = 0; c < 3; c++)
+                    // FigCraft bend displacement
+                    float bend = GlassBendAt(distIn, depth, GlassBevel, refraction);
+                    float moveX = -outDirX * bend;
+                    float moveY = -outDirY * bend;
+                    float k = bend == 0.0f ? 0.0f : kDisp;
+
+                    float[] baseRgba = GlassDispersed(bg, bgW, bgH, bgStride, bgFx, bgFy, moveX, moveY, k);
+
+                    // FigCraft Rim light and Sheen
+                    float facing = -(inwardX * lx + inwardY * ly);
+                    float rim = GlassRimLightAt(distIn, GlassBevel) * GlassCatches(facing);
+                    float sheen = -(outDirX * lx + outDirY * ly) * GlassSheenAt(distIn, depth, GlassBevel) * GlassBroad;
+                    float add = 255.0f * intensity * (rim + sheen);
+
+                    // Tint composite
+                    if (tintAlpha > 0.0f)
                     {
-                        float rx, ry, rz;
-                        SnellRefract(0.0f, 0.0f, -1.0f, normX, normY, normZ, 1.0f / ior[c], out rx, out ry, out rz);
-                        float travel = thick / Math.Max(0.05f, -rz);
-                        float sx = bgFx + rx * travel;
-                        float sy = bgFy + ry * travel;
-
-                        refractedBgr[c] = SampleBilinearChannel(bg, bgW, bgH, bgStride, sx, sy, c);
+                        baseRgba[0] = baseRgba[0] * (1.0f - tintAlpha) + tintR * tintAlpha;
+                        baseRgba[1] = baseRgba[1] * (1.0f - tintAlpha) + tintG * tintAlpha;
+                        baseRgba[2] = baseRgba[2] * (1.0f - tintAlpha) + tintB * tintAlpha;
                     }
 
-                    // Specular highlight on bezel facing light
-                    float spec = 0.0f;
-                    if (inBezel)
-                    {
-                        float facing = Math.Abs(n2x * lx + n2y * ly);
-                        spec = (float)Math.Pow(facing, 1.5) * (1.0f - t) * (1.0f - t) * 0.9f * specularIntensity;
-                    }
+                    // Direct background sample for anti-aliasing
+                    float[] directBg = GlassSampleRgba(bg, bgW, bgH, bgStride, bgFx, bgFy);
+                    float finalR = (directBg[0] * (1.0f - coverage) + Math.Max(0.0f, Math.Min(255.0f, baseRgba[0] + add)) * coverage);
+                    float finalG = (directBg[1] * (1.0f - coverage) + Math.Max(0.0f, Math.Min(255.0f, baseRgba[1] + add)) * coverage);
+                    float finalB = (directBg[2] * (1.0f - coverage) + Math.Max(0.0f, Math.Min(255.0f, baseRgba[2] + add)) * coverage);
 
-                    // Composite tint and specular highlight
-                    float finalB = Math.Min(255.0f, refractedBgr[0] * (1.0f - tintAlpha) + tintB * tintAlpha + 255.0f * spec);
-                    float finalG = Math.Min(255.0f, refractedBgr[1] * (1.0f - tintAlpha) + tintG * tintAlpha + 255.0f * spec);
-                    float finalR = Math.Min(255.0f, refractedBgr[2] * (1.0f - tintAlpha) + tintR * tintAlpha + 255.0f * spec);
-
-                    float baseB = SampleBilinearChannel(bg, bgW, bgH, bgStride, bgFx, bgFy, 0);
-                    float baseG = SampleBilinearChannel(bg, bgW, bgH, bgStride, bgFx, bgFy, 1);
-                    float baseR = SampleBilinearChannel(bg, bgW, bgH, bgStride, bgFx, bgFy, 2);
-
-                    output[outIdx] = (byte)(baseB * (1.0f - coverage) + finalB * coverage);
-                    output[outIdx + 1] = (byte)(baseG * (1.0f - coverage) + finalG * coverage);
-                    output[outIdx + 2] = (byte)(baseR * (1.0f - coverage) + finalR * coverage);
+                    // Output in BGRA order
+                    output[outIdx] = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(finalB)));
+                    output[outIdx + 1] = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(finalG)));
+                    output[outIdx + 2] = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(finalR)));
                     output[outIdx + 3] = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(coverage * 255.0f)));
                 }
             }
@@ -800,12 +919,23 @@ namespace Kerf.Engine
 
         public static void RenderAppleLiquidGlass(LayerNode node, DrawingContext dc, Geometry geo, Rect bounds, EffectData glass)
         {
-            if (glass == null || !glass.Enabled || glass.Intensity <= 0.0) return;
+            if (glass == null || !glass.Enabled) return;
             if (geo == null || bounds.Width <= 0 || bounds.Height <= 0) return;
 
-            double intensity = Math.Max(0.05, Math.Min(1.0, glass.Intensity));
-            double lightAngleDeg = glass.Direction > 0 ? glass.Direction : 315.0; // Default 315° = top-left studio light
+            glass.EnsureGlassDefaults();
+
+            float intensity = (float)Math.Max(0.0, Math.Min(1.0, glass.LightIntensity));
+            float refraction = (float)Math.Max(0.0, Math.Min(1.0, glass.Refraction));
+            float depth = (float)Math.Max(1.0, Math.Min(1000.0, glass.Depth));
+            float dispersion = (float)Math.Max(0.0, Math.Min(1.0, glass.Dispersion));
+            float frost = (float)Math.Max(0.0, Math.Min(100.0, glass.Frost));
+            float splay = (float)Math.Max(0.0, Math.Min(1.0, glass.Splay));
+
+            double lightAngleDeg = glass.LightAngle; // -180 to 180 degrees clockwise from top
             double rad = lightAngleDeg * (Math.PI / 180.0);
+            float lightX = (float)Math.Sin(rad);
+            float lightY = -(float)Math.Cos(rad);
+
             double lightCos = Math.Cos(rad);
             double lightSin = Math.Sin(rad);
 
@@ -818,7 +948,7 @@ namespace Kerf.Engine
                 Math.Max(0.0, Math.Min(1.0, 0.5 + lightSin * 0.5)));
 
             // 1. Apple Physical Contact & Occlusion Depth Shadow (elevates glass slab above canvas)
-            double shadowOffsetDist = Math.Max(2.0, Math.Min(16.0, (glass.Spread > 0 ? glass.Spread : 2.5) * 1.5));
+            double shadowOffsetDist = Math.Max(2.0, Math.Min(16.0, depth * 0.25));
             double shadowX = lightCos * shadowOffsetDist;
             double shadowY = lightSin * shadowOffsetDist;
 
@@ -841,28 +971,18 @@ namespace Kerf.Engine
 
             // 2a. Real Optical Liquid Glass Refraction & Chromatic Dispersion Texture
             float radius = (float)Math.Min(bounds.Width * 0.5, Math.Min(bounds.Height * 0.5, node.CornerRadius > 0 ? node.CornerRadius : bounds.Height * 0.5));
-            float bezel = (float)Math.Min(bounds.Width * 0.5, Math.Min(bounds.Height * 0.5, glass.Spread > 0 ? glass.Spread * 15.0 : 40.0));
-            float bezelHeight = (float)(32.0 * (glass.Scale > 0 ? glass.Scale : 1.0));
-            float thickness = 60.0f;
-            float frostSigma = (float)(glass.Blur > 0 ? glass.Blur * 0.4 : 6.0);
-            float lightX = -(float)lightCos;
-            float lightY = -(float)lightSin;
 
             int texW = (int)Math.Max(16, Math.Round(bounds.Width));
             int texH = (int)Math.Max(16, Math.Round(bounds.Height));
-            int margin = (int)Math.Max(20, Math.Min(60, bezel));
+            int margin = (int)Math.Max(20, Math.Min(120, depth + 10.0f));
 
             int bgW, bgH, bgStride;
             byte[] bg = CaptureBackdrop(node, bounds, margin, out bgW, out bgH, out bgStride);
 
-            // Chromatic dispersion: glass.Distance represents chromatic dispersion % (0 to 100, default 60%)
-            // 60% -> 0.08, giving vivid 6-10px spectral rainbow caustics
-            float dispersionVal = (float)(glass.Distance > 0.0 ? glass.Distance * 0.0015 : 0.08);
-
             var glassBmp = RenderLiquidGlassBackdropTexture(
                 bg, bgW, bgH, bgStride, margin, margin,
-                texW, texH, radius, bezel, bezelHeight, thickness, frostSigma, dispersionVal,
-                lightX, lightY, tintColor, (float)bodyAlpha, (float)intensity);
+                texW, texH, radius, depth, refraction, splay, frost, dispersion,
+                lightX, lightY, tintColor, (float)bodyAlpha, intensity);
 
             if (glassBmp != null)
             {

@@ -1,10 +1,118 @@
-/// Liquid Glass Optical Refraction Engine
-/// Implements Snell refraction, chromatic dispersion (per-channel IOR),
-/// squircle SDF height-profile slope distortion, and specular highlights.
+/// Liquid Glass Optical Refraction Engine — FigCraft Optical Thick-Lens Model
+/// Implements FigCraft's exact physical thick-lens curvature profile,
+/// Euclidean distance bevel bending, chromatic dispersion window,
+/// rim lighting, facing angle highlights, and sheen gradient.
 
-pub const DEFAULT_IOR: [f32; 3] = [1.44, 1.50, 1.56]; // R, G, B chromatic dispersion
+pub const DEFAULT_IOR: [f32; 3] = [1.44, 1.50, 1.56];
 
-/// Bilinear interpolation sampler over a 4-byte-per-pixel buffer (BGRA or RGBA).
+pub const BEVEL: f32 = 1.0;
+pub const PROFILE_EXP: f32 = 3.5;
+pub const MAX_BEND: f32 = 0.999;
+pub const RIM_BEND: f32 = 0.2;
+pub const DISPERSION_SPREAD: f32 = 0.16;
+pub const DISPERSION_STEPS: usize = 8;
+pub const HL_LO: f32 = 0.35;
+pub const HL_SECONDARY: f32 = 0.6;
+pub const BROAD: f32 = 0.05;
+pub const ONE_SAMPLE_SPLIT_PX: f32 = 1.0 / 256.0;
+
+#[inline(always)]
+pub fn lin(a: f32, b: f32, x: f32) -> f32 {
+    ((x - a) / (b - a).abs().max(1e-5)).clamp(0.0, 1.0)
+}
+
+#[inline(always)]
+pub fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a).abs().max(1e-5)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// How much of the rim light falls x pixels in from the edge, for a bevel pixels deep.
+#[inline(always)]
+pub fn rim_light_at(x: f32, bevel: f32) -> f32 {
+    smoothstep(-bevel - 0.001, -0.2 * bevel, -x)
+}
+
+/// How much light an edge catches, facing being the cosine between outward normal and light.
+#[inline(always)]
+pub fn catches(facing: f32) -> f32 {
+    smoothstep(HL_LO, 1.0, facing) + HL_SECONDARY * smoothstep(HL_LO, 1.0, -facing)
+}
+
+/// How strongly the gradient across the curve shows x pixels in from the edge.
+#[inline(always)]
+pub fn sheen_at(x: f32, depth: f32, bevel: f32) -> f32 {
+    lin(-depth, -bevel + 1e-4, -x).powi(2)
+}
+
+/// How far the backdrop moves at x pixels in from the edge (FigCraft thick-lens curve profile).
+#[inline(always)]
+pub fn bend_at(x: f32, depth: f32, bevel: f32, refraction: f32) -> f32 {
+    if x >= depth.max(1e-4) + bevel {
+        return 0.0;
+    }
+    let sd = -x;
+    let t = lin(-depth - bevel, -bevel, sd);
+    let most = MAX_BEND * depth;
+    let core = (t.powf(PROFILE_EXP) * depth * refraction).clamp(-most, most);
+    let rim = refraction * RIM_BEND * most;
+    let u = lin(-bevel - 1e-4, -0.3 * bevel, sd);
+    core + (rim - core) * u
+}
+
+/// Bilinear sample of 4-channel buffer at (x, y), returns [R, G, B, A] in 0..=255.
+#[inline(always)]
+pub fn sample_rgba(
+    buf: &[u8],
+    w: i32,
+    h: i32,
+    stride: i32,
+    x: f32,
+    y: f32,
+    is_bgra: bool,
+) -> [f32; 4] {
+    if w <= 0 || h <= 0 || buf.is_empty() {
+        return [0.0, 0.0, 0.0, 0.0];
+    }
+    let x = x - 0.5;
+    let y = y - 0.5;
+    let x0 = x.floor() as i32;
+    let y0 = y.floor() as i32;
+    let tx = x - x0 as f32;
+    let ty = y - y0 as f32;
+
+    let px = |xi: i32, yi: i32| -> [f32; 4] {
+        if xi < 0 || yi < 0 || xi >= w || yi >= h {
+            return [0.0, 0.0, 0.0, 0.0];
+        }
+        let i = (yi as usize) * (stride as usize) + (xi as usize) * 4;
+        if i + 3 < buf.len() {
+            if is_bgra {
+                // Buffer is B, G, R, A -> return R, G, B, A
+                [buf[i + 2] as f32, buf[i + 1] as f32, buf[i] as f32, buf[i + 3] as f32]
+            } else {
+                [buf[i] as f32, buf[i + 1] as f32, buf[i + 2] as f32, buf[i + 3] as f32]
+            }
+        } else {
+            [0.0, 0.0, 0.0, 0.0]
+        }
+    };
+
+    let a = px(x0, y0);
+    let b = px(x0 + 1, y0);
+    let c = px(x0, y0 + 1);
+    let d = px(x0 + 1, y0 + 1);
+
+    let mut out = [0.0f32; 4];
+    for k in 0..4 {
+        let top = a[k] + (b[k] - a[k]) * tx;
+        let bot = c[k] + (d[k] - c[k]) * tx;
+        out[k] = top + (bot - top) * ty;
+    }
+    out
+}
+
+/// Bilinear interpolation sampler over a 4-byte-per-pixel buffer (BGRA or RGBA), returning [R, G, B].
 #[inline(always)]
 pub fn sample_bilinear(
     buf: &[u8],
@@ -15,48 +123,59 @@ pub fn sample_bilinear(
     y: f32,
     is_bgra: bool,
 ) -> [f32; 3] {
-    if w <= 0 || h <= 0 || buf.is_empty() {
-        return [255.0, 255.0, 255.0];
+    let s = sample_rgba(buf, w, h, stride, x, y, is_bgra);
+    [s[0], s[1], s[2]]
+}
+
+/// Dispersed backdrop sampling with FigCraft chromatic aberration window.
+pub fn dispersed(
+    buf: &[u8],
+    w: i32,
+    h: i32,
+    stride: i32,
+    x: f32,
+    y: f32,
+    dx: f32,
+    dy: f32,
+    k: f32,
+    is_bgra: bool,
+) -> [f32; 4] {
+    if k < 0.001 || (dx * dx + dy * dy).sqrt() * k < ONE_SAMPLE_SPLIT_PX {
+        let s = sample_rgba(buf, w, h, stride, x + dx, y + dy, is_bgra);
+        return [s[0].min(s[3]), s[1].min(s[3]), s[2].min(s[3]), s[3]];
     }
+    dispersion_window(buf, w, h, stride, x, y, dx, dy, k, is_bgra)
+}
 
-    let x = x.max(0.0).min((w - 1) as f32);
-    let y = y.max(0.0).min((h - 1) as f32);
-
-    let x0 = x.floor() as i32;
-    let y0 = y.floor() as i32;
-    let x1 = (x0 + 1).min(w - 1);
-    let y1 = (y0 + 1).min(h - 1);
-
-    let fx = x - x0 as f32;
-    let fy = y - y0 as f32;
-
-    let get_rgb = |xx: i32, yy: i32| -> [f32; 3] {
-        let idx = (yy as usize) * (stride as usize) + (xx as usize) * 4;
-        if idx + 3 < buf.len() {
-            if is_bgra {
-                // Buffer is B, G, R, A -> return R, G, B
-                [buf[idx + 2] as f32, buf[idx + 1] as f32, buf[idx] as f32]
-            } else {
-                // Buffer is R, G, B, A -> return R, G, B
-                [buf[idx] as f32, buf[idx + 1] as f32, buf[idx + 2] as f32]
-            }
-        } else {
-            [255.0, 255.0, 255.0]
-        }
-    };
-
-    let a = get_rgb(x0, y0);
-    let b = get_rgb(x1, y0);
-    let c = get_rgb(x0, y1);
-    let d = get_rgb(x1, y1);
-
-    let mut out = [0.0f32; 3];
-    for i in 0..3 {
-        let top = a[i] * (1.0 - fx) + b[i] * fx;
-        let bot = c[i] * (1.0 - fx) + d[i] * fx;
-        out[i] = top * (1.0 - fy) + bot * fy;
+fn dispersion_window(
+    buf: &[u8],
+    w: i32,
+    h: i32,
+    stride: i32,
+    x: f32,
+    y: f32,
+    dx: f32,
+    dy: f32,
+    k: f32,
+    is_bgra: bool,
+) -> [f32; 4] {
+    let last = (DISPERSION_STEPS - 1) as f32;
+    let mut acc = [0.0f32; 4];
+    let mut sum = 0.0f32;
+    for i in 1..DISPERSION_STEPS - 1 {
+        let t = i as f32 / last - 0.5;
+        let weight = 1.0 - (2.0 * t).abs();
+        let r = sample_rgba(buf, w, h, stride, x + dx * (1.0 + (t + 0.5) * k), y + dy * (1.0 + (t + 0.5) * k), is_bgra);
+        let g = sample_rgba(buf, w, h, stride, x + dx * (1.0 + t * k), y + dy * (1.0 + t * k), is_bgra);
+        let b = sample_rgba(buf, w, h, stride, x + dx * (1.0 + (t - 0.5) * k), y + dy * (1.0 + (t - 0.5) * k), is_bgra);
+        acc[0] += r[0] * weight;
+        acc[1] += g[1] * weight;
+        acc[2] += b[2] * weight;
+        acc[3] += r[3].max(g[3]).max(b[3]) * weight;
+        sum += weight;
     }
-    out
+    let a = acc[3] / sum.max(1e-5);
+    [(acc[0] / sum).min(a), (acc[1] / sum).min(a), (acc[2] / sum).min(a), a]
 }
 
 /// Signed distance to a rounded rectangle (negative inside).
@@ -69,7 +188,7 @@ pub fn sdf(px: f32, py: f32, cx: f32, cy: f32, hw: f32, hh: f32, r: f32) -> f32 
     outside + qx.max(qy).min(0.0) - r
 }
 
-/// Convex squircle height profile, x in [0,1] (0 = outer edge, 1 = flat top).
+/// Convex squircle height profile, x in [0,1].
 #[inline(always)]
 pub fn height(x: f32) -> f32 {
     let clamped = x.max(0.0).min(1.0);
@@ -84,13 +203,13 @@ pub fn height_slope(x: f32) -> f32 {
     (height(x + e) - height(x - e)) / (2.0 * e)
 }
 
-/// Snell refraction. `i` and `n` are unit vectors, eta = n1/n2.
+/// Snell refraction.
 #[inline(always)]
 pub fn refract(i: [f32; 3], n: [f32; 3], eta: f32) -> [f32; 3] {
     let d = i[0] * n[0] + i[1] * n[1] + i[2] * n[2];
     let k = 1.0 - eta * eta * (1.0 - d * d);
     if k < 0.0 {
-        return [0.0, 0.0, -1.0]; // total internal reflection fallback
+        return [0.0, 0.0, -1.0];
     }
     let s = eta * d + k.sqrt();
     [
@@ -178,9 +297,8 @@ pub fn apply_box_blur(
 }
 
 /// Full optical liquid glass renderer (v2):
-/// Supports backdrop buffers with extended border margins, real Snell optical refraction,
-/// chromatic dispersion (per-channel IOR splitting), frosted glass diffusion,
-/// squircle slope distortion, specular highlights, and antialiased transparency.
+/// Supports FigCraft optical thick-lens refraction, chromatic dispersion window,
+/// rim lighting, facing highlights, sheen gradient, and antialiased transparency.
 pub fn render_liquid_glass_v2(
     bg_buf: &[u8],
     bg_w: i32,
@@ -208,8 +326,22 @@ pub fn render_liquid_glass_v2(
         return;
     }
 
-    // Prepare frosted buffer if frost_sigma > 0
-    let frost_radius = (frost_sigma * 1.5).round() as i32;
+    // Unpack FigCraft optical parameters
+    let depth = if bezel > 0.0 { bezel } else { 20.0 };
+    let refraction = if bezel_height > 0.0 && bezel_height <= 1.0 {
+        bezel_height
+    } else if bezel_height > 1.0 {
+        (bezel_height / 100.0).min(1.0)
+    } else {
+        0.8
+    };
+    let splay = glass_thickness.max(0.0).min(1.0);
+    let frost = frost_sigma.max(0.0);
+    let disp = if dispersion > 0.0 { dispersion.min(1.0) } else { 0.5 };
+    let intensity = if specular_intensity > 0.0 { specular_intensity.min(1.0) } else { 0.8 };
+
+    // Prepare frosted buffer if frost > 0
+    let frost_radius = (frost * 1.0).round() as i32;
     let frosted_storage;
     let frosted_ref: &[u8] = if frost_radius > 0 {
         let mut fbuf = vec![0u8; bg_buf.len()];
@@ -220,25 +352,16 @@ pub fn render_liquid_glass_v2(
         bg_buf
     };
 
-    let bezel_val = bezel.max(2.0);
-    let bezel_h = bezel_height.max(1.0);
-    let thickness = glass_thickness.max(5.0);
-
-    // Light direction normalization
+    // Normalize light vector
     let light_len = (light_dir[0] * light_dir[0] + light_dir[1] * light_dir[1]).sqrt().max(1e-6);
     let light = [light_dir[0] / light_len, light_dir[1] / light_len];
-
-    let incident = [0.0f32, 0.0f32, -1.0f32];
-
-    // Chromatic dispersion indices of refraction (Red, Green, Blue)
-    // Red bends less (lower IOR), Blue bends more (higher IOR)
-    let d_ior = if dispersion <= 0.0 { 0.07f32 } else { dispersion.max(0.01).min(0.25) };
-    let ior = [1.50f32 - d_ior, 1.50f32, 1.50f32 + d_ior];
 
     let hw = out_w as f32 * 0.5f32;
     let hh = out_h as f32 * 0.5f32;
     let cx = hw;
     let cy = hh;
+
+    let k_disp = disp * DISPERSION_SPREAD;
 
     for y in 0..out_h {
         let out_row_idx = (y * out_stride) as usize;
@@ -253,7 +376,6 @@ pub fn render_liquid_glass_v2(
             let d = sdf(fx, fy, cx, cy, hw, hh, radius);
             let coverage = (0.5f32 - d).max(0.0).min(1.0);
             if coverage <= 0.0 {
-                // Outside the squircle: transparent
                 out_buf[out_px_idx] = 0;
                 out_buf[out_px_idx + 1] = 0;
                 out_buf[out_px_idx + 2] = 0;
@@ -261,57 +383,56 @@ pub fn render_liquid_glass_v2(
                 continue;
             }
 
+            let dist_in = -d;
+
             // Outward 2D normal from SDF gradient
             let e = 0.5f32;
             let gx = sdf(fx + e, fy, cx, cy, hw, hh, radius) - sdf(fx - e, fy, cx, cy, hw, hh, radius);
             let gy = sdf(fx, fy + e, cx, cy, hw, hh, radius) - sdf(fx, fy - e, cx, cy, hw, hh, radius);
             let gl = (gx * gx + gy * gy).sqrt().max(1e-6);
             let n2 = [gx / gl, gy / gl];
+            let inward = [-n2[0], -n2[1]];
 
-            let depth = -d;
-            let t = (depth / bezel_val).max(0.0).min(1.0);
-            let slope = height_slope(t) * (bezel_h / bezel_val);
-            let in_bezel = depth < bezel_val;
+            // Direction away from layer centre (for splay)
+            let px = fx - cx;
+            let py = fy - cy;
+            let len = (px * px + py * py).sqrt();
+            let away = if len > 1e-6 { [px / len, py / len] } else { [0.0, 0.0] };
 
-            // 3D surface normal
-            let (nx, ny) = if in_bezel {
-                (n2[0] * slope, n2[1] * slope)
-            } else {
-                (0.0, 0.0)
-            };
-            let nl = (nx * nx + ny * ny + 1.0).sqrt();
-            let normal = [nx / nl, ny / nl, 1.0 / nl];
+            // Outward bend direction: away from core, modified by splay
+            let toward = inward;
+            let out_dir = [
+                -toward[0] * (1.0 - splay) + away[0] * splay,
+                -toward[1] * (1.0 - splay) + away[1] * splay,
+            ];
 
-            // Refract per channel -> chromatic dispersion (separate IOR per R, G, B)
-            let mut refracted_rgb = [0.0f32; 3];
-            for c in 0..3 {
-                let r = refract(incident, normal, 1.0 / ior[c]);
-                let travel = thickness / (-r[2]).max(0.05);
-                let sx = bg_fx + r[0] * travel;
-                let sy = bg_fy + r[1] * travel;
-                refracted_rgb[c] = sample_bilinear(frosted_ref, bg_w, bg_h, bg_stride, sx, sy, is_bgra)[c];
+            // FigCraft bend displacement
+            let bend = bend_at(dist_in, depth, BEVEL, refraction);
+            let move_x = -out_dir[0] * bend;
+            let move_y = -out_dir[1] * bend;
+            let k = if bend == 0.0 { 0.0 } else { k_disp };
+
+            // Dispersed background sampling
+            let mut base = dispersed(frosted_ref, bg_w, bg_h, bg_stride, bg_fx, bg_fy, move_x, move_y, k, is_bgra);
+
+            // FigCraft Rim light and Sheen
+            let facing = -(inward[0] * light[0] + inward[1] * light[1]);
+            let rim = rim_light_at(dist_in, BEVEL) * catches(facing);
+            let sheen = -(out_dir[0] * light[0] + out_dir[1] * light[1]) * sheen_at(dist_in, depth, BEVEL) * BROAD;
+            let add = 255.0 * intensity * (rim + sheen);
+
+            // Composite tint
+            if tint_alpha > 0.0 {
+                base[0] = base[0] * (1.0 - tint_alpha) + tint_rgb[0] * tint_alpha;
+                base[1] = base[1] * (1.0 - tint_alpha) + tint_rgb[1] * tint_alpha;
+                base[2] = base[2] * (1.0 - tint_alpha) + tint_rgb[2] * tint_alpha;
             }
 
-            // Specular highlight on bezel facing the light
-            let spec = if in_bezel {
-                let facing = (n2[0] * light[0] + n2[1] * light[1]).abs();
-                facing.powf(1.5) * (1.0 - t).powi(2) * 0.9f32 * specular_intensity
-            } else {
-                0.0
-            };
-
-            // Composite tint, refraction, and specular highlight
-            let mut col = [0.0f32; 3];
-            for c in 0..3 {
-                let blended = refracted_rgb[c] * (1.0 - tint_alpha) + tint_rgb[c] * tint_alpha;
-                col[c] = (blended + 255.0 * spec).min(255.0).max(0.0);
-            }
-
-            // Anti-aliased outer edge compositing against direct background pixel
-            let base_rgb = sample_bilinear(bg_buf, bg_w, bg_h, bg_stride, bg_fx, bg_fy, is_bgra);
-            let final_r = (base_rgb[0] * (1.0 - coverage) + col[0] * coverage) as u8;
-            let final_g = (base_rgb[1] * (1.0 - coverage) + col[1] * coverage) as u8;
-            let final_b = (base_rgb[2] * (1.0 - coverage) + col[2] * coverage) as u8;
+            // Antialiased outer edge compositing against direct background pixel
+            let base_rgb = sample_rgba(bg_buf, bg_w, bg_h, bg_stride, bg_fx, bg_fy, is_bgra);
+            let final_r = ((base_rgb[0] * (1.0 - coverage) + (base[0] + add).clamp(0.0, 255.0) * coverage)).round().min(255.0).max(0.0) as u8;
+            let final_g = ((base_rgb[1] * (1.0 - coverage) + (base[1] + add).clamp(0.0, 255.0) * coverage)).round().min(255.0).max(0.0) as u8;
+            let final_b = ((base_rgb[2] * (1.0 - coverage) + (base[2] + add).clamp(0.0, 255.0) * coverage)).round().min(255.0).max(0.0) as u8;
             let final_a = (coverage * 255.0f32).round().min(255.0).max(0.0) as u8;
 
             if is_bgra {
@@ -367,11 +488,52 @@ pub fn render_liquid_glass(
         bezel_height,
         glass_thickness,
         frost_sigma,
-        0.07,
+        0.5,
         light_dir,
         tint_rgb,
         tint_alpha,
         specular_intensity,
         is_bgra,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_figcraft_light_and_gradient_profile() {
+        for (x, rim, sheen) in [
+            (0.10f32, 1.0f32, 1.0f32),
+            (0.25, 0.9888, 1.0),
+            (0.50, 0.6843, 1.0),
+            (0.75, 0.2330, 1.0),
+            (1.00, 0.0, 1.0),
+            (2.0, 0.0, 0.8975),
+            (4.0, 0.0, 0.7091),
+            (6.0, 0.0, 0.5429),
+            (8.0, 0.0, 0.3989),
+            (16.0, 0.0, 0.0443),
+            (20.0, 0.0, 0.0),
+            (30.0, 0.0, 0.0),
+        ] {
+            assert!((rim_light_at(x, 1.0) - rim).abs() < 1e-3, "rim at {}: {} vs {}", x, rim_light_at(x, 1.0), rim);
+            assert!((sheen_at(x, 20.0, 1.0) - sheen).abs() < 1e-3, "sheen at {}: {} vs {}", x, sheen_at(x, 20.0, 1.0), sheen);
+        }
+
+        assert!((catches(1.0) - 1.0).abs() < 1e-6);
+        assert!((catches(std::f32::consts::FRAC_1_SQRT_2) - 0.574).abs() < 1e-3);
+        assert_eq!(catches(0.0), 0.0);
+        assert!((catches(-1.0) - 0.6).abs() < 1e-6);
+        assert!((catches(-std::f32::consts::FRAC_1_SQRT_2) - 0.6 * 0.574).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_figcraft_bend_profile() {
+        assert_eq!(bend_at(25.0, 20.0, 1.0, 0.8), 0.0);
+        let b0 = bend_at(0.0, 20.0, 1.0, 0.8);
+        assert!(b0 > 0.0 && b0 < 20.0, "b0 = {}", b0);
+        let b1 = bend_at(1.0, 20.0, 1.0, 0.8);
+        assert!(b1 > b0, "b1 ({}) should be > b0 ({})", b1, b0);
+    }
 }
