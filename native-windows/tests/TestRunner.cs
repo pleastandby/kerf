@@ -6266,6 +6266,154 @@ namespace Kerf.Tests
 
             history.Redo();
             Assert(testLayer.Transitions.Count == 1 && !testLayer.Transitions.Contains(transPatrolToAlert), "DeleteTransitionsCommand redone");
+
+            // 6. Input & Compound Condition Reversible Commands with CompositeCommand Transaction Batching (D-03, D-06)
+            var inputHistory = new CommandHistory(100);
+
+            // 6a. CreateInputCommand Execution, Undo, and Redo
+            var inputHealth = MachineInput.Number("health", 100.0, "sm_input_health");
+            var cmdCreateInput = new CreateInputCommand(testDef, inputHealth);
+
+            inputHistory.Execute(cmdCreateInput);
+            Assert(testDef.Inputs.Contains(inputHealth), "CreateInputCommand executed: health input added to definition");
+            Assert(testDef.FindInputById("sm_input_health") == inputHealth, "FindInputById resolves health input by stable GUID");
+
+            inputHistory.Undo();
+            Assert(!testDef.Inputs.Contains(inputHealth), "CreateInputCommand undone: health input removed");
+            Assert(testDef.FindInputById("sm_input_health") == null, "FindInputById returns null for health input after undo");
+
+            inputHistory.Redo();
+            Assert(testDef.Inputs.Contains(inputHealth), "CreateInputCommand redone: health input restored");
+            Assert(testDef.FindInputById("sm_input_health") == inputHealth, "FindInputById resolves health input after redo");
+
+            // 6b. ModifyInputCommand Execution, Undo, and Redo
+            var cmdModInput = new ModifyInputCommand(inputHealth, "health", "maxHealth", 100.0, 200.0);
+            inputHistory.Execute(cmdModInput);
+            Assert(inputHealth.Name == "maxHealth" && inputHealth.InitialValue == 200.0 && inputHealth.Value == 200.0,
+                "ModifyInputCommand executed: name set to maxHealth and value set to 200.0");
+
+            inputHistory.Undo();
+            Assert(inputHealth.Name == "health" && inputHealth.InitialValue == 100.0 && inputHealth.Value == 100.0,
+                "ModifyInputCommand undone: name reverted to health and value reverted to 100.0");
+
+            inputHistory.Redo();
+            Assert(inputHealth.Name == "maxHealth" && inputHealth.InitialValue == 200.0 && inputHealth.Value == 200.0,
+                "ModifyInputCommand redone: modifications reapplied");
+
+            // 6c. ModifyConditionGroupsCommand with Deep Clone Isolation (D-03, D-06)
+            var cgOrig = new ConditionGroup("cg_orig");
+            cgOrig.Conditions.Add(new TransitionCondition("sm_input_health", ConditionOp.Lt, 50.0));
+            transEntryPatrol.ConditionGroups.Clear();
+            transEntryPatrol.ConditionGroups.Add(cgOrig);
+
+            var oldGroupsList = new List<ConditionGroup> { cgOrig };
+            var newGroupA = new ConditionGroup("cg_new_A");
+            newGroupA.Conditions.Add(new TransitionCondition("sm_input_health", ConditionOp.Le, 20.0));
+            var newGroupB = new ConditionGroup("cg_new_B");
+            newGroupB.Conditions.Add(new TransitionCondition("isHover", ConditionOp.Eq, 1.0));
+            var newGroupsList = new List<ConditionGroup> { newGroupA, newGroupB };
+
+            var cmdModCg = new ModifyConditionGroupsCommand(transEntryPatrol, oldGroupsList, newGroupsList);
+            inputHistory.Execute(cmdModCg);
+            Assert(transEntryPatrol.ConditionGroups.Count == 2, "ModifyConditionGroupsCommand executed: 2 condition groups assigned");
+            Assert(transEntryPatrol.ConditionGroups[0].Conditions[0].Op == ConditionOp.Le, "Group A condition op is Le");
+            Assert(transEntryPatrol.ConditionGroups[1].Conditions[0].PropertyName == "isHover", "Group B condition property is isHover");
+
+            // Deep clone isolation check: mutating newGroupA after execute does NOT corrupt transition
+            newGroupA.Conditions[0].Value = 9999.0;
+            Assert(transEntryPatrol.ConditionGroups[0].Conditions[0].Value == 20.0, "Deep clone prevents external mutation from polluting transition state");
+
+            // Mutating transition state does NOT corrupt command's internal snapshots
+            transEntryPatrol.ConditionGroups[0].Conditions[0].Value = 8888.0;
+
+            inputHistory.Undo();
+            Assert(transEntryPatrol.ConditionGroups.Count == 1, "ModifyConditionGroupsCommand undone: reverted to 1 original condition group");
+            Assert(transEntryPatrol.ConditionGroups[0].Conditions[0].Op == ConditionOp.Lt, "Original condition op restored to Lt");
+            Assert(transEntryPatrol.ConditionGroups[0].Conditions[0].Value == 50.0, "Original condition value restored to 50.0");
+
+            inputHistory.Redo();
+            Assert(transEntryPatrol.ConditionGroups.Count == 2, "ModifyConditionGroupsCommand redone: 2 condition groups restored");
+            Assert(transEntryPatrol.ConditionGroups[0].Conditions[0].Value == 20.0, "Original value 20.0 cleanly restored without 8888 corruption");
+
+            // 6d. DeleteInputCommand with Dependent Condition Capture & Restoration (D-06)
+            var inputAmmo = MachineInput.Number("ammo", 30.0, "sm_input_ammo");
+            testDef.AddInput(inputAmmo);
+
+            var cgAmmo = new ConditionGroup("cg_ammo");
+            cgAmmo.Conditions.Add(new TransitionCondition("sm_input_ammo", ConditionOp.Gt, 0.0));
+            transEntryPatrol.ConditionGroups.Add(cgAmmo);
+
+            int totalConditionsBefore = 0;
+            for (int g = 0; g < transEntryPatrol.ConditionGroups.Count; g++)
+                totalConditionsBefore += transEntryPatrol.ConditionGroups[g].Conditions.Count;
+            Assert(totalConditionsBefore == 3, "Transition has 3 conditions total across groups before input deletion");
+
+            var cmdDelInput = new DeleteInputCommand(testDef, inputAmmo);
+            inputHistory.Execute(cmdDelInput);
+
+            Assert(!testDef.Inputs.Contains(inputAmmo), "DeleteInputCommand executed: ammo input removed from definition");
+            Assert(testDef.FindInputById("sm_input_ammo") == null, "Ammo input cannot be found by ID");
+            int totalConditionsAfter = 0;
+            for (int g = 0; g < transEntryPatrol.ConditionGroups.Count; g++)
+                totalConditionsAfter += transEntryPatrol.ConditionGroups[g].Conditions.Count;
+            Assert(totalConditionsAfter == 2, "Dependent condition referencing sm_input_ammo was captured and removed");
+
+            // Undo: Input restored AND dependent condition restored to cg_ammo
+            inputHistory.Undo();
+            Assert(testDef.Inputs.Contains(inputAmmo), "DeleteInputCommand undone: ammo input restored to definition");
+            Assert(testDef.FindInputById("sm_input_ammo") == inputAmmo, "Ammo input resolved by ID after undo");
+            int totalConditionsRestored = 0;
+            for (int g = 0; g < transEntryPatrol.ConditionGroups.Count; g++)
+                totalConditionsRestored += transEntryPatrol.ConditionGroups[g].Conditions.Count;
+            Assert(totalConditionsRestored == 3, "Dependent condition restored into its condition group on undo");
+
+            // Redo: Input and dependent condition removed again
+            inputHistory.Redo();
+            Assert(!testDef.Inputs.Contains(inputAmmo), "DeleteInputCommand redone: ammo input removed");
+
+            // 6e. CompositeCommand Multi-Selection Transaction Batching (D-06)
+            var batchStateA = new MachineState(10, "BatchNodeA", StateKind.Animation, 0, "sm_node_batch_a");
+            var batchStateB = new MachineState(11, "BatchNodeB", StateKind.Animation, 1, "sm_node_batch_b");
+            var batchTrans = new StateTransition("sm_node_batch_a", "sm_node_batch_b", 0.5, "sm_trans_batch");
+
+            var batchCommands = new List<ICommand>
+            {
+                new CreateStateNodeCommand(testLayer, batchStateA),
+                new CreateStateNodeCommand(testLayer, batchStateB),
+                new CreateTransitionCommand(testLayer, batchTrans)
+            };
+            var compositeCmd = new CompositeCommand("Batch Create Selection", batchCommands);
+
+            inputHistory.Execute(compositeCmd);
+            Assert(testLayer.States.Contains(batchStateA) && testLayer.States.Contains(batchStateB), "CompositeCommand executed: both batch states added");
+            Assert(testLayer.Transitions.Contains(batchTrans), "CompositeCommand executed: batch transition added");
+
+            // Single undo steps back entire batch
+            inputHistory.Undo();
+            Assert(!testLayer.States.Contains(batchStateA) && !testLayer.States.Contains(batchStateB), "CompositeCommand undone: both batch states removed in single Ctrl+Z step");
+            Assert(!testLayer.Transitions.Contains(batchTrans), "CompositeCommand undone: batch transition removed in single Ctrl+Z step");
+
+            // Single redo reapplies entire batch
+            inputHistory.Redo();
+            Assert(testLayer.States.Contains(batchStateA) && testLayer.States.Contains(batchStateB), "CompositeCommand redone: both batch states reapplied in single Ctrl+Y step");
+            Assert(testLayer.Transitions.Contains(batchTrans), "CompositeCommand redone: batch transition reapplied in single Ctrl+Y step");
+
+            // Clean up batch items via CompositeCommand deletion batching
+            var batchDelete = new CompositeCommand("Batch Delete Selection", new ICommand[]
+            {
+                new DeleteTransitionsCommand(testLayer, batchTrans),
+                new DeleteStateNodesCommand(testLayer, new MachineState[] { batchStateA, batchStateB })
+            });
+            inputHistory.Execute(batchDelete);
+            Assert(!testLayer.States.Contains(batchStateA) && !testLayer.States.Contains(batchStateB), "Batch delete removed both states");
+            Assert(!testLayer.Transitions.Contains(batchTrans), "Batch delete removed batch transition");
+
+            inputHistory.Undo();
+            Assert(testLayer.States.Contains(batchStateA) && testLayer.States.Contains(batchStateB), "Batch delete undone: both states restored");
+            Assert(testLayer.Transitions.Contains(batchTrans), "Batch delete undone: transition restored");
+
+            inputHistory.Redo();
+            Assert(!testLayer.States.Contains(batchStateA) && !testLayer.Transitions.Contains(batchTrans), "Batch delete redone: clean graph state");
         }
     }
 }

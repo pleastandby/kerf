@@ -2447,4 +2447,295 @@ namespace Kerf.Engine
         }
     }
 
+    public class CreateInputCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Create Input " + (_input != null ? _input.Name : ""); }
+        }
+
+        private readonly StateMachineDefinition _def;
+        private readonly MachineInput _input;
+        private int _index;
+        private readonly Action _onChanged;
+
+        public CreateInputCommand(StateMachineDefinition def, MachineInput input, Action onChanged = null)
+        {
+            _def = def;
+            _input = input;
+            _index = (def != null && input != null && def.Inputs.Contains(input)) ? def.Inputs.IndexOf(input) : -1;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_def != null && _input != null)
+            {
+                if (string.IsNullOrEmpty(_input.InputId))
+                {
+                    _input.InputId = "sm_input_" + Guid.NewGuid().ToString("N");
+                }
+                if (!_def.Inputs.Contains(_input))
+                {
+                    if (_index >= 0 && _index <= _def.Inputs.Count)
+                    {
+                        _def.Inputs.Insert(_index, _input);
+                    }
+                    else
+                    {
+                        _def.AddInput(_input);
+                        _index = _def.Inputs.IndexOf(_input);
+                    }
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_def != null && _input != null)
+            {
+                _def.Inputs.Remove(_input);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class DeleteInputCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Delete Input " + (_input != null ? _input.Name : ""); }
+        }
+
+        private class DependentConditionSlot
+        {
+            public ConditionGroup Group;
+            public TransitionCondition Condition;
+            public int Index;
+        }
+
+        private readonly StateMachineDefinition _def;
+        private readonly MachineInput _input;
+        private readonly int _inputIndex;
+        private readonly List<DependentConditionSlot> _dependentConditions;
+        private readonly Action _onChanged;
+
+        public DeleteInputCommand(StateMachineDefinition def, MachineInput input, Action onChanged = null)
+        {
+            _def = def;
+            _input = input;
+            _inputIndex = (def != null && input != null) ? def.Inputs.IndexOf(input) : -1;
+            _dependentConditions = new List<DependentConditionSlot>();
+            _onChanged = onChanged;
+
+            if (def != null && input != null && def.Layers != null)
+            {
+                string targetInputId = input.InputId;
+                string targetName = input.Name;
+                int targetIdx = _inputIndex;
+
+                HashSet<TransitionCondition> conditionSet = new HashSet<TransitionCondition>();
+
+                for (int l = 0; l < def.Layers.Count; l++)
+                {
+                    var layer = def.Layers[l];
+                    if (layer == null || layer.Transitions == null) continue;
+
+                    for (int t = 0; t < layer.Transitions.Count; t++)
+                    {
+                        var trans = layer.Transitions[t];
+                        if (trans == null || trans.ConditionGroups == null) continue;
+
+                        for (int g = 0; g < trans.ConditionGroups.Count; g++)
+                        {
+                            var grp = trans.ConditionGroups[g];
+                            if (grp == null || grp.Conditions == null) continue;
+
+                            for (int c = 0; c < grp.Conditions.Count; c++)
+                            {
+                                var cond = grp.Conditions[c];
+                                if (cond == null || conditionSet.Contains(cond)) continue;
+
+                                bool matches = false;
+                                if (!string.IsNullOrEmpty(targetInputId) && string.Equals(cond.InputId, targetInputId, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    matches = true;
+                                }
+                                else if (!string.IsNullOrEmpty(cond.PropertyName) &&
+                                         (string.Equals(cond.PropertyName, targetInputId, StringComparison.OrdinalIgnoreCase) ||
+                                          string.Equals(cond.PropertyName, targetName, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    matches = true;
+                                }
+                                else if (string.IsNullOrEmpty(cond.InputId) && string.IsNullOrEmpty(cond.PropertyName) && targetIdx >= 0 && cond.InputIndex == targetIdx)
+                                {
+                                    matches = true;
+                                }
+
+                                if (matches)
+                                {
+                                    conditionSet.Add(cond);
+                                    _dependentConditions.Add(new DependentConditionSlot
+                                    {
+                                        Group = grp,
+                                        Condition = cond,
+                                        Index = c
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                _dependentConditions.Sort((a, b) => a.Index.CompareTo(b.Index));
+            }
+        }
+
+        public void Execute()
+        {
+            if (_def != null && _input != null)
+            {
+                for (int i = 0; i < _dependentConditions.Count; i++)
+                {
+                    var slot = _dependentConditions[i];
+                    if (slot.Group != null && slot.Group.Conditions != null)
+                    {
+                        slot.Group.Conditions.Remove(slot.Condition);
+                    }
+                }
+                _def.Inputs.Remove(_input);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_def != null && _input != null)
+            {
+                if (!_def.Inputs.Contains(_input))
+                {
+                    int targetIdx = Math.Max(0, Math.Min(_inputIndex >= 0 ? _inputIndex : _def.Inputs.Count, _def.Inputs.Count));
+                    _def.Inputs.Insert(targetIdx, _input);
+                }
+
+                for (int i = 0; i < _dependentConditions.Count; i++)
+                {
+                    var slot = _dependentConditions[i];
+                    if (slot.Group != null && slot.Group.Conditions != null && !slot.Group.Conditions.Contains(slot.Condition))
+                    {
+                        int targetIdx = Math.Max(0, Math.Min(slot.Index, slot.Group.Conditions.Count));
+                        slot.Group.Conditions.Insert(targetIdx, slot.Condition);
+                    }
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class ModifyInputCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Modify Input " + _newName; }
+        }
+
+        private readonly MachineInput _input;
+        private readonly string _oldName;
+        private readonly string _newName;
+        private readonly double _oldInitial;
+        private readonly double _newInitial;
+        private readonly Action _onChanged;
+
+        public ModifyInputCommand(MachineInput input, string oldName, string newName, double oldInitial, double newInitial, Action onChanged = null)
+        {
+            _input = input;
+            _oldName = oldName;
+            _newName = newName;
+            _oldInitial = oldInitial;
+            _newInitial = newInitial;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_input != null)
+            {
+                _input.Name = _newName;
+                _input.InitialValue = _newInitial;
+                _input.Value = _newInitial;
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_input != null)
+            {
+                _input.Name = _oldName;
+                _input.InitialValue = _oldInitial;
+                _input.Value = _oldInitial;
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class ModifyConditionGroupsCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Modify Condition Groups"; }
+        }
+
+        private readonly StateTransition _transition;
+        private readonly List<ConditionGroup> _oldGroups;
+        private readonly List<ConditionGroup> _newGroups;
+        private readonly Action _onChanged;
+
+        public ModifyConditionGroupsCommand(
+            StateTransition transition,
+            IEnumerable<ConditionGroup> oldGroups,
+            IEnumerable<ConditionGroup> newGroups,
+            Action onChanged = null)
+        {
+            _transition = transition;
+            _oldGroups = CloneGroups(oldGroups);
+            _newGroups = CloneGroups(newGroups);
+            _onChanged = onChanged;
+        }
+
+        private static List<ConditionGroup> CloneGroups(IEnumerable<ConditionGroup> groups)
+        {
+            var list = new List<ConditionGroup>();
+            if (groups != null)
+            {
+                foreach (var g in groups)
+                {
+                    if (g != null)
+                    {
+                        list.Add(g.Clone());
+                    }
+                }
+            }
+            return list;
+        }
+
+        public void Execute()
+        {
+            if (_transition != null)
+            {
+                _transition.ConditionGroups = CloneGroups(_newGroups);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_transition != null)
+            {
+                _transition.ConditionGroups = CloneGroups(_oldGroups);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
 }
