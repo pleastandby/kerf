@@ -13908,117 +13908,19 @@ namespace Kerf.UI
             };
 
             var mainGrid = new Grid();
-            // 3-Column Split Dock Layout (D-01):
-            // Column 0 (Width: 220px, Left): Inputs List Panel
-            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
-            // Column 1 (1* Star, Center): pan/zoom Graph Canvas & Toolbar
+            // 2-Column Layout:
+            // Column 0 (1* Star, Left): pan/zoom Graph Canvas & Toolbar
             mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            // Column 2 (Width: 280px, Right): State & Transition Inspector Panel
-            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(280) });
+            // Column 1 (Right): Unified Collapsible Inputs & Inspector Panel (Width: 320px)
+            var sideColDef = new ColumnDefinition { Width = new GridLength(320) };
+            mainGrid.ColumnDefinitions.Add(sideColDef);
 
             // ==========================================
-            // COLUMN 0: LEFT INPUTS PANEL (220px)
-            // ==========================================
-            var leftBorder = new Border
-            {
-                Background = KerfBrand.FigmaPanelBrush,
-                BorderBrush = KerfBrand.FigmaBorderBrush,
-                BorderThickness = new Thickness(0, 0, 1, 0)
-            };
-            var leftGrid = new Grid();
-            leftGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) }); // Header
-            leftGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // Search
-            leftGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Scrollable list
-
-            // Left Header: Title + "+ Add Input" menu button
-            var leftHeader = new DockPanel { Margin = new Thickness(10, 0, 8, 0), LastChildFill = false };
-            var inputsTitle = new TextBlock
-            {
-                Text = "Inputs",
-                FontSize = 11,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = Brushes.White,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            DockPanel.SetDock(inputsTitle, Dock.Left);
-            leftHeader.Children.Add(inputsTitle);
-
-            var addInputBtn = KerfBrand.CreatePrimaryButton("+ Add", null, 4);
-            addInputBtn.Height = 22;
-            addInputBtn.Padding = new Thickness(8, 2, 8, 2);
-            addInputBtn.FontSize = 10;
-            addInputBtn.VerticalAlignment = VerticalAlignment.Center;
-            addInputBtn.MouseLeftButtonUp += (s, e) => ShowAddInputMenu(addInputBtn);
-            DockPanel.SetDock(addInputBtn, Dock.Right);
-            leftHeader.Children.Add(addInputBtn);
-
-            Grid.SetRow(leftHeader, 0);
-            leftGrid.Children.Add(leftHeader);
-
-            // Left Search Box
-            _stateMachineInputSearch = new TextBox
-            {
-                Text = "Search Inputs",
-                Height = 23,
-                Padding = new Thickness(6, 3, 6, 3),
-                Margin = new Thickness(8, 0, 8, 4),
-                Background = KerfBrand.FigmaCanvasBrush,
-                Foreground = KerfBrand.TextMutedBrush,
-                BorderBrush = KerfBrand.FigmaBorderBrush,
-                FontSize = 10
-            };
-            var inputSearch = _stateMachineInputSearch;
-            inputSearch.GotKeyboardFocus += (s, e) =>
-            {
-                if (string.Equals(inputSearch.Text, "Search Inputs", StringComparison.Ordinal))
-                {
-                    inputSearch.Text = string.Empty;
-                    inputSearch.Foreground = new SolidColorBrush(Color.FromRgb(205, 213, 224));
-                }
-            };
-            inputSearch.LostKeyboardFocus += (s, e) =>
-            {
-                if (string.IsNullOrWhiteSpace(inputSearch.Text))
-                {
-                    inputSearch.Text = "Search Inputs";
-                    inputSearch.Foreground = new SolidColorBrush(Color.FromRgb(118, 130, 149));
-                }
-            };
-            inputSearch.TextChanged += (s, e) => FilterStateMachineItems(_stateMachineInputsStack, inputSearch.Text);
-            Grid.SetRow(inputSearch, 1);
-            leftGrid.Children.Add(inputSearch);
-
-            // Left ScrollViewer
-            var leftStack = new StackPanel { Margin = new Thickness(8, 0, 8, 8) };
-            _stateMachineInputsStack = new StackPanel();
-            leftStack.Children.Add(_stateMachineInputsStack);
-
-            // Preserved Listeners Collapsible Section
-            _stateMachineListenersStack = new StackPanel();
-            var listenersSection = CreateStateMachineCollapsibleSection("Listeners", _stateMachineListenersStack, ShowAddStateMachineListenerDialog, out _stateMachineListenerSearch);
-            listenersSection.Margin = new Thickness(0, 8, 0, 0);
-            leftStack.Children.Add(listenersSection);
-
-            var leftScroll = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Content = leftStack
-            };
-            Grid.SetRow(leftScroll, 2);
-            leftGrid.Children.Add(leftScroll);
-
-            leftBorder.Child = leftGrid;
-            Grid.SetColumn(leftBorder, 0);
-            mainGrid.Children.Add(leftBorder);
-
-            // ==========================================
-            // COLUMN 1: CENTER GRAPH CANVAS (1* Star)
+            // COLUMN 0: CENTER GRAPH CANVAS (1* Star)
             // ==========================================
             var centerGrid = new Grid();
             centerGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) }); // Toolbar
-            centerGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Canvas
-            centerGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(80) }); // Curve Panel
+            centerGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Canvas (full height, no blue graph under)
 
             // Center Toolbar
             var centerToolbar = new DockPanel { LastChildFill = false, Margin = new Thickness(8, 0, 8, 0) };
@@ -14099,8 +14001,8 @@ namespace Kerf.UI
             Grid.SetRow(centerToolbar, 0);
             centerGrid.Children.Add(centerToolbar);
 
-            // Center Canvas
-            _stateMachineGraphCanvas = new Canvas { Width = 780, Height = 230, Background = KerfBrand.FigmaCanvasBrush, LayoutTransform = _stateMachineGraphScale };
+            // Center Canvas (No blue graph under, full height)
+            _stateMachineGraphCanvas = new Canvas { Width = 1000, Height = 400, Background = KerfBrand.FigmaCanvasBrush, LayoutTransform = _stateMachineGraphScale };
             _stateMachineGraphCanvas.PreviewMouseDown += HandleStateGraphPanStart;
             _stateMachineGraphCanvas.PreviewMouseUp += HandleStateGraphPanEnd;
             _stateMachineGraphCanvas.MouseMove += HandleStateGraphMouseMove;
@@ -14108,60 +14010,249 @@ namespace Kerf.UI
             _stateMachineGraphCanvas.MouseLeftButtonUp += HandleStateGraphMouseUp;
             _stateMachineGraphScrollViewer = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _stateMachineGraphCanvas };
             _stateMachineGraphScrollViewer.PreviewMouseWheel += HandleStateGraphMouseWheel;
-            var graphBorder = new Border { Background = KerfBrand.FigmaCanvasBrush, BorderBrush = KerfBrand.FigmaBorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Margin = new Thickness(4, 0, 4, 0), Child = _stateMachineGraphScrollViewer };
+            var graphBorder = new Border { Background = KerfBrand.FigmaCanvasBrush, BorderBrush = KerfBrand.FigmaBorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Margin = new Thickness(4, 0, 4, 4), Child = _stateMachineGraphScrollViewer };
             Grid.SetRow(graphBorder, 1);
             centerGrid.Children.Add(graphBorder);
 
-            var curvePanel = CreateInterpolationGraphPanel(true);
-            curvePanel.Margin = new Thickness(4, 0, 4, 0);
-            Grid.SetRow(curvePanel, 2);
-            centerGrid.Children.Add(curvePanel);
-
-            Grid.SetColumn(centerGrid, 1);
+            Grid.SetColumn(centerGrid, 0);
             mainGrid.Children.Add(centerGrid);
 
-            // ==========================================
-            // COLUMN 2: RIGHT INSPECTOR PANEL (280px)
-            // ==========================================
-            var rightBorder = new Border
+            // ========================================================
+            // COLUMN 1: UNIFIED INPUTS & INSPECTOR PANEL (Collapsible)
+            // ========================================================
+            var sideBorder = new Border
             {
                 Background = KerfBrand.FigmaPanelBrush,
                 BorderBrush = KerfBrand.FigmaBorderBrush,
                 BorderThickness = new Thickness(1, 0, 0, 0)
             };
-            _stateMachineInspectorPanel = rightBorder;
+            _stateMachineInspectorPanel = sideBorder;
 
-            var rightGrid = new Grid();
-            rightGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) }); // Header
-            rightGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Content
+            var sideGrid = new Grid();
 
-            var rightHeader = new DockPanel { Margin = new Thickness(10, 0, 10, 0), LastChildFill = false };
-            var inspectorTitle = new TextBlock
+            // Expanded view container
+            var expandedContainer = new Grid();
+            expandedContainer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) }); // Header
+            expandedContainer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Content
+
+            // Collapsed view strip (32px)
+            var collapsedStrip = new Border
             {
-                Text = "Inspector",
+                Background = KerfBrand.FigmaPanelBrush,
+                Visibility = Visibility.Collapsed,
+                Cursor = Cursors.Hand,
+                ToolTip = "Expand Inputs & Inspector Panel"
+            };
+            var expandBtn = new Border
+            {
+                Width = 24,
+                Height = 24,
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(4, 4, 4, 0)
+            };
+            var expandArrow = new TextBlock
+            {
+                Text = "◨",
+                FontSize = 11,
+                Foreground = KerfBrand.MintBrush,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            expandBtn.Child = expandArrow;
+            collapsedStrip.Child = expandBtn;
+
+            Action toggleSidePanel = () =>
+            {
+                bool isCollapsed = collapsedStrip.Visibility == Visibility.Visible;
+                if (isCollapsed)
+                {
+                    sideColDef.Width = new GridLength(320);
+                    collapsedStrip.Visibility = Visibility.Collapsed;
+                    expandedContainer.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    sideColDef.Width = new GridLength(32);
+                    expandedContainer.Visibility = Visibility.Collapsed;
+                    collapsedStrip.Visibility = Visibility.Visible;
+                }
+            };
+            collapsedStrip.MouseLeftButtonUp += (s, e) => toggleSidePanel();
+
+            // Header for expanded panel
+            var sideHeader = new DockPanel { Margin = new Thickness(10, 0, 8, 0), LastChildFill = false };
+            var sideTitle = new TextBlock
+            {
+                Text = "Inputs & Inspector",
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.White,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            DockPanel.SetDock(inspectorTitle, Dock.Left);
-            rightHeader.Children.Add(inspectorTitle);
-            Grid.SetRow(rightHeader, 0);
-            rightGrid.Children.Add(rightHeader);
+            DockPanel.SetDock(sideTitle, Dock.Left);
+            sideHeader.Children.Add(sideTitle);
 
-            _stateMachineInspectorContent = new StackPanel { Margin = new Thickness(10, 4, 10, 10) };
-            var rightScroll = new ScrollViewer
+            var collapseBtn = CreateSmallTimelineButton("◧", toggleSidePanel);
+            collapseBtn.ToolTip = "Collapse Panel";
+            DockPanel.SetDock(collapseBtn, Dock.Right);
+            sideHeader.Children.Add(collapseBtn);
+            Grid.SetRow(sideHeader, 0);
+            expandedContainer.Children.Add(sideHeader);
+
+            // Stack of Collapsible Cards inside ScrollViewer
+            var sideStack = new StackPanel { Margin = new Thickness(8, 2, 8, 10) };
+
+            // ----------------------------------------------------
+            // SECTION 1: COLLAPSIBLE INPUTS CARD
+            // ----------------------------------------------------
+            var inputsCard = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            var inputsStack = new StackPanel();
+
+            var inputsHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 6), LastChildFill = false };
+            var inputsToggle = new TextBlock
+            {
+                Text = "⌄  Inputs",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor = Cursors.Hand
+            };
+            DockPanel.SetDock(inputsToggle, Dock.Left);
+            inputsHeader.Children.Add(inputsToggle);
+
+            var addInputBtn = KerfBrand.CreatePrimaryButton("+ Add", null, 4);
+            addInputBtn.Height = 22;
+            addInputBtn.Padding = new Thickness(8, 2, 8, 2);
+            addInputBtn.FontSize = 10;
+            addInputBtn.VerticalAlignment = VerticalAlignment.Center;
+            addInputBtn.MouseLeftButtonUp += (s, e) => ShowAddInputMenu(addInputBtn);
+            DockPanel.SetDock(addInputBtn, Dock.Right);
+            inputsHeader.Children.Add(addInputBtn);
+            inputsStack.Children.Add(inputsHeader);
+
+            var inputsBody = new StackPanel();
+
+            _stateMachineInputSearch = new TextBox
+            {
+                Text = "Search Inputs",
+                Height = 23,
+                Padding = new Thickness(6, 3, 6, 3),
+                Margin = new Thickness(0, 0, 0, 6),
+                Background = KerfBrand.FigmaCanvasBrush,
+                Foreground = KerfBrand.TextMutedBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                FontSize = 10
+            };
+            var inputSearch = _stateMachineInputSearch;
+            inputSearch.GotKeyboardFocus += (s, e) =>
+            {
+                if (string.Equals(inputSearch.Text, "Search Inputs", StringComparison.Ordinal))
+                {
+                    inputSearch.Text = string.Empty;
+                    inputSearch.Foreground = new SolidColorBrush(Color.FromRgb(205, 213, 224));
+                }
+            };
+            inputSearch.LostKeyboardFocus += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(inputSearch.Text))
+                {
+                    inputSearch.Text = "Search Inputs";
+                    inputSearch.Foreground = new SolidColorBrush(Color.FromRgb(118, 130, 149));
+                }
+            };
+            inputSearch.TextChanged += (s, e) => FilterStateMachineItems(_stateMachineInputsStack, inputSearch.Text);
+            inputsBody.Children.Add(inputSearch);
+
+            _stateMachineInputsStack = new StackPanel();
+            inputsBody.Children.Add(_stateMachineInputsStack);
+            inputsStack.Children.Add(inputsBody);
+
+            inputsToggle.MouseLeftButtonUp += (s, e) =>
+            {
+                bool open = inputsBody.Visibility == Visibility.Visible;
+                inputsBody.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+                inputsToggle.Text = (open ? "›  " : "⌄  ") + "Inputs";
+            };
+            inputsCard.Child = inputsStack;
+            sideStack.Children.Add(inputsCard);
+
+            // ----------------------------------------------------
+            // SECTION 2: COLLAPSIBLE INSPECTOR CARD
+            // ----------------------------------------------------
+            var inspectorCard = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            var inspectorStack = new StackPanel();
+
+            var inspectorHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 6), LastChildFill = false };
+            var inspectorToggle = new TextBlock
+            {
+                Text = "⌄  Inspector",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor = Cursors.Hand
+            };
+            DockPanel.SetDock(inspectorToggle, Dock.Left);
+            inspectorHeader.Children.Add(inspectorToggle);
+            inspectorStack.Children.Add(inspectorHeader);
+
+            _stateMachineInspectorContent = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+            inspectorStack.Children.Add(_stateMachineInspectorContent);
+
+            inspectorToggle.MouseLeftButtonUp += (s, e) =>
+            {
+                bool open = _stateMachineInspectorContent.Visibility == Visibility.Visible;
+                _stateMachineInspectorContent.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+                inspectorToggle.Text = (open ? "›  " : "⌄  ") + "Inspector";
+            };
+            inspectorCard.Child = inspectorStack;
+            sideStack.Children.Add(inspectorCard);
+
+            // ----------------------------------------------------
+            // SECTION 3: COLLAPSIBLE LISTENERS CARD
+            // ----------------------------------------------------
+            _stateMachineListenersStack = new StackPanel();
+            var listenersSection = CreateStateMachineCollapsibleSection("Listeners", _stateMachineListenersStack, ShowAddStateMachineListenerDialog, out _stateMachineListenerSearch);
+            listenersSection.Margin = new Thickness(0, 0, 0, 8);
+            sideStack.Children.Add(listenersSection);
+
+            var sideScroll = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Content = _stateMachineInspectorContent
+                Content = sideStack
             };
-            Grid.SetRow(rightScroll, 1);
-            rightGrid.Children.Add(rightScroll);
+            Grid.SetRow(sideScroll, 1);
+            expandedContainer.Children.Add(sideScroll);
 
-            rightBorder.Child = rightGrid;
-            Grid.SetColumn(rightBorder, 2);
-            mainGrid.Children.Add(rightBorder);
+            sideGrid.Children.Add(expandedContainer);
+            sideGrid.Children.Add(collapsedStrip);
+            sideBorder.Child = sideGrid;
+
+            Grid.SetColumn(sideBorder, 1);
+            mainGrid.Children.Add(sideBorder);
 
             border.Child = mainGrid;
             BuildStateMachineInputsControls();
