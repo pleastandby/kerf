@@ -123,7 +123,7 @@ Plans:
 
 Plans:
 - [x] 06-01-PLAN.md — Core state machine graph model, compound condition groups, validation engine, and Test #60 automated scaffold
-- [ ] 06-02-PLAN.md — Reversible transactional commands in CommandHistory and undo/redo engine
+- [x] 06-02-PLAN.md — Reversible transactional commands in CommandHistory and undo/redo engine
 - [ ] 06-03-PLAN.md — Interactive 3-column visual graph editor, port drag-to-connect, canvas marquee, and inspector panels
 
 ---
