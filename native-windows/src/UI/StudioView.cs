@@ -14104,6 +14104,7 @@ namespace Kerf.UI
             _stateMachineGraphCanvas.PreviewMouseDown += HandleStateGraphPanStart;
             _stateMachineGraphCanvas.PreviewMouseUp += HandleStateGraphPanEnd;
             _stateMachineGraphCanvas.MouseMove += HandleStateGraphMouseMove;
+            _stateMachineGraphCanvas.MouseLeftButtonDown += HandleStateGraphCanvasMouseDown;
             _stateMachineGraphCanvas.MouseLeftButtonUp += HandleStateGraphMouseUp;
             _stateMachineGraphScrollViewer = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _stateMachineGraphCanvas };
             _stateMachineGraphScrollViewer.PreviewMouseWheel += HandleStateGraphMouseWheel;
@@ -15724,6 +15725,19 @@ namespace Kerf.UI
             e.Handled = true;
         }
 
+        private void HandleStateGraphCanvasMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            bool spacePan = Keyboard.IsKeyDown(Key.Space);
+            if (!spacePan && e.ChangedButton == MouseButton.Left && _stateGraphPointerMode == 0)
+            {
+                _stateGraphPointerMode = 3; // Marquee selection
+                _stateGraphMarqueeStartPoint = e.GetPosition(_stateMachineGraphCanvas);
+                _stateGraphMarqueeRect = new Rect(_stateGraphMarqueeStartPoint, _stateGraphMarqueeStartPoint);
+                _stateMachineGraphCanvas.CaptureMouse();
+                e.Handled = true;
+            }
+        }
+
         private void BuildStateMachineStatesGraph()
         {
             if (_stateMachineGraphCanvas == null) return;
@@ -15751,7 +15765,7 @@ namespace Kerf.UI
                 double width = state.Kind == StateKind.Entry ? 88 : state.Kind == StateKind.Any ? 116 : state.Kind == StateKind.Exit ? 78 : 132;
                 double height = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit ? 40 : 48;
                 bool active = stateIndex == currentState || stateIndex == targetState;
-                bool selected = stateIndex == _selectedGraphStateIndex;
+                bool selected = stateIndex == _selectedGraphStateIndex || _selectedGraphStateIndices.Contains(stateIndex);
                 var node = new Border
                 {
                     Width = width,
@@ -15791,8 +15805,28 @@ namespace Kerf.UI
                         e.Handled = true;
                         return;
                     }
-                    _selectedGraphStateIndex = stateIndex;
+                    bool isShiftOrCtrl = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 || (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+                    if (isShiftOrCtrl)
+                    {
+                        if (_selectedGraphStateIndices.Contains(stateIndex))
+                            _selectedGraphStateIndices.Remove(stateIndex);
+                        else
+                            _selectedGraphStateIndices.Add(stateIndex);
+                        _selectedGraphStateIndex = _selectedGraphStateIndices.Count > 0 ? _selectedGraphStateIndices[_selectedGraphStateIndices.Count - 1] : -1;
+                    }
+                    else
+                    {
+                        if (!_selectedGraphStateIndices.Contains(stateIndex))
+                        {
+                            _selectedGraphStateIndices.Clear();
+                            _selectedGraphStateIndices.Add(stateIndex);
+                        }
+                        _selectedGraphStateIndex = stateIndex;
+                    }
+                    _selectedGraphTransition = null;
+                    RefreshStateMachineInspector();
                     if (state.Kind != StateKind.Exit) StartStateGraphNodeDrag(stateIndex, e.GetPosition(_stateMachineGraphCanvas));
+                    BuildStateMachineStatesGraph();
                     e.Handled = true;
                 };
                 node.MouseRightButtonUp += (s, e) => ShowStateNodeContextMenu(node, layer, state, stateIndex);
@@ -15838,29 +15872,57 @@ namespace Kerf.UI
                 var geometry = new PathGeometry();
                 geometry.Figures.Add(figure);
                 bool selected = ReferenceEquals(_selectedGraphTransition, transition);
-                var line = new System.Windows.Shapes.Path { Data = geometry, Stroke = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)), StrokeThickness = selected ? 2 : 1.35, Fill = Brushes.Transparent, Cursor = Cursors.Hand, Tag = transition, ToolTip = from.Name + " → " + to.Name + " · " + TransitionConditionSummary(transition) };
+                var line = new System.Windows.Shapes.Path
+                {
+                    Data = geometry,
+                    Stroke = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)),
+                    StrokeThickness = selected ? 2.0 : 1.35,
+                    Fill = Brushes.Transparent,
+                    Cursor = Cursors.Hand,
+                    Tag = transition,
+                    ToolTip = from.Name + " → " + to.Name + " · " + TransitionConditionSummary(transition)
+                };
                 line.MouseLeftButtonDown += (s, e) => { SelectGraphTransition(transition, layer); e.Handled = true; };
                 line.MouseRightButtonUp += (s, e) => ShowTransitionContextMenu(line, layer, transition);
                 Panel.SetZIndex(line, 0);
                 _stateMachineGraphCanvas.Children.Add(line);
-                Vector direction = end - c2;
-                if (direction.Length < 0.001) direction = new Vector(1, 0);
-                direction.Normalize();
-                Vector perpendicular = new Vector(-direction.Y, direction.X);
-                Point arrowBase = end - direction * 8.0;
+
+                // Mid-wire directional polygon arrow aligned with tangent vector at t = 0.5 (D-04)
+                Point mid = new Point((start.X + 3.0 * c1.X + 3.0 * c2.X + end.X) / 8.0, (start.Y + 3.0 * c1.Y + 3.0 * c2.Y + end.Y) / 8.0);
+                Vector tangent = new Vector((end.X + c2.X) - (c1.X + start.X), (end.Y + c2.Y) - (c1.Y + start.Y));
+                if (tangent.Length < 0.001) tangent = new Vector(1, 0);
+                tangent.Normalize();
+                Vector perp = new Vector(-tangent.Y, tangent.X);
                 var arrow = new Polygon
                 {
-                    Points = new PointCollection { end, arrowBase + perpendicular * 4.0, arrowBase - perpendicular * 4.0 },
+                    Points = new PointCollection
+                    {
+                        mid + tangent * 6.0,
+                        mid - tangent * 4.0 + perp * 4.5,
+                        mid - tangent * 4.0 - perp * 4.5
+                    },
                     Fill = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)),
                     Tag = transition,
                     IsHitTestVisible = false
                 };
                 Panel.SetZIndex(arrow, 11);
                 _stateMachineGraphCanvas.Children.Add(arrow);
-                Point middle = new Point((start.X + 3 * c1.X + 3 * c2.X + end.X) / 8.0, (start.Y + 3 * c1.Y + 3 * c2.Y + end.Y) / 8.0);
-                var label = new Border { Background = KerfBrand.FigmaCardBrush, BorderBrush = selected ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(5, 2, 5, 2), Tag = transition, Cursor = Cursors.Hand, Child = new TextBlock { Text = string.Format("{0:0.##}s", transition.Duration), FontSize = 8, Foreground = Brushes.White }, ToolTip = TransitionConditionSummary(transition) + " · " + transition.Interpolation };
-                Canvas.SetLeft(label, middle.X - 17);
-                Canvas.SetTop(label, middle.Y - 8);
+
+                // Centered duration pill (D-04)
+                var label = new Border
+                {
+                    Background = KerfBrand.FigmaCardBrush,
+                    BorderBrush = selected ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    Tag = transition,
+                    Cursor = Cursors.Hand,
+                    Child = new TextBlock { Text = string.Format("{0:0.##}s", transition.Duration), FontSize = 8.5, Foreground = Brushes.White },
+                    ToolTip = TransitionConditionSummary(transition) + " · " + transition.Interpolation
+                };
+                Canvas.SetLeft(label, mid.X - 16.0);
+                Canvas.SetTop(label, mid.Y - 20.0);
                 label.MouseLeftButtonDown += (s, e) =>
                 {
                     if (e.ClickCount >= 2) ShowEditTransitionDialog(transition, layer);
@@ -15890,7 +15952,10 @@ namespace Kerf.UI
         {
             _selectedGraphTransition = transition;
             _selectedGraphTransitionLayer = layer;
+            _selectedGraphStateIndex = -1;
+            _selectedGraphStateIndices.Clear();
             BuildStateMachineStatesGraph();
+            RefreshStateMachineInspector();
         }
 
         private void StartStateGraphNodeDrag(int stateIndex, Point point)
@@ -15898,9 +15963,33 @@ namespace Kerf.UI
             _stateGraphPointerMode = 1;
             _stateGraphPointerStateIndex = stateIndex;
             _stateGraphPointerOrigin = point;
-            var state = _timelineController.ActiveStateMachine.Definition.Layers[0].States[stateIndex];
-            _stateGraphNodeOrigin = new Point(state.GraphX, state.GraphY);
             _stateGraphMoved = false;
+
+            var layer = (_timelineController != null && _timelineController.ActiveStateMachine != null && _timelineController.ActiveStateMachine.Definition.Layers.Count > 0)
+                ? _timelineController.ActiveStateMachine.Definition.Layers[0]
+                : null;
+            if (layer == null) return;
+
+            if (!_selectedGraphStateIndices.Contains(stateIndex))
+            {
+                _selectedGraphStateIndices.Clear();
+                _selectedGraphStateIndices.Add(stateIndex);
+                _selectedGraphStateIndex = stateIndex;
+            }
+
+            _stateGraphNodeOrigins.Clear();
+            for (int i = 0; i < _selectedGraphStateIndices.Count; i++)
+            {
+                int idx = _selectedGraphStateIndices[i];
+                if (idx >= 0 && idx < layer.States.Count && layer.States[idx] != null)
+                {
+                    var s = layer.States[idx];
+                    _stateGraphNodeOrigins[idx] = new Point(s.GraphX, s.GraphY);
+                }
+            }
+
+            var state = layer.States[stateIndex];
+            _stateGraphNodeOrigin = new Point(state.GraphX, state.GraphY);
             _stateMachineGraphCanvas.CaptureMouse();
         }
 
@@ -15943,23 +16032,69 @@ namespace Kerf.UI
             }
             if (_stateGraphPointerMode == 0 || _stateMachineGraphCanvas == null || !_stateMachineGraphCanvas.IsMouseCaptured) return;
             Point point = e.GetPosition(_stateMachineGraphCanvas);
-            if (_stateGraphPointerMode == 1)
+
+            if (_stateGraphPointerMode == 1) // Node dragging
             {
                 Vector delta = point - _stateGraphPointerOrigin;
                 if (delta.Length > 3.0) _stateGraphMoved = true;
                 if (!_stateGraphMoved) return;
-                var layer = _timelineController.ActiveStateMachine.Definition.Layers[0];
-                var state = layer.States[_stateGraphPointerStateIndex];
-                state.GraphX = Math.Max(4.0, _stateGraphNodeOrigin.X + delta.X);
-                state.GraphY = Math.Max(4.0, Math.Min(174.0, _stateGraphNodeOrigin.Y + delta.Y));
-                var node = _stateGraphNodes[_stateGraphPointerStateIndex];
-                Canvas.SetLeft(node, state.GraphX);
-                Canvas.SetTop(node, state.GraphY);
+
+                var layer = (_timelineController != null && _timelineController.ActiveStateMachine != null && _timelineController.ActiveStateMachine.Definition.Layers.Count > 0)
+                    ? _timelineController.ActiveStateMachine.Definition.Layers[0]
+                    : null;
+                if (layer == null) return;
+
+                foreach (var kvp in _stateGraphNodeOrigins)
+                {
+                    int idx = kvp.Key;
+                    Point orig = kvp.Value;
+                    if (idx >= 0 && idx < layer.States.Count && layer.States[idx] != null)
+                    {
+                        var s = layer.States[idx];
+                        s.GraphX = Math.Max(4.0, orig.X + delta.X);
+                        s.GraphY = Math.Max(4.0, orig.Y + delta.Y);
+                        FrameworkElement nodeElem;
+                        if (_stateGraphNodes.TryGetValue(idx, out nodeElem) && nodeElem != null)
+                        {
+                            Canvas.SetLeft(nodeElem, s.GraphX);
+                            Canvas.SetTop(nodeElem, s.GraphY);
+                        }
+                    }
+                }
                 RefreshStateGraphConnectionVisuals(layer);
             }
-            else if (_stateGraphPointerMode == 2)
+            else if (_stateGraphPointerMode == 2) // Port drag to target
             {
                 DrawStateGraphConnectionPreview(point);
+            }
+            else if (_stateGraphPointerMode == 3) // Marquee selection
+            {
+                double mx = Math.Min(_stateGraphMarqueeStartPoint.X, point.X);
+                double my = Math.Min(_stateGraphMarqueeStartPoint.Y, point.Y);
+                double mw = Math.Abs(point.X - _stateGraphMarqueeStartPoint.X);
+                double mh = Math.Abs(point.Y - _stateGraphMarqueeStartPoint.Y);
+                _stateGraphMarqueeRect = new Rect(mx, my, mw, mh);
+
+                if (_stateGraphMarqueeVisual == null)
+                {
+                    _stateGraphMarqueeVisual = new System.Windows.Shapes.Rectangle
+                    {
+                        Stroke = KerfBrand.MintBrush,
+                        StrokeThickness = 1.0,
+                        StrokeDashArray = new DoubleCollection { 3, 2 },
+                        Fill = new SolidColorBrush(Color.FromArgb(30, 0, 245, 160)),
+                        IsHitTestVisible = false
+                    };
+                    Panel.SetZIndex(_stateGraphMarqueeVisual, 50);
+                }
+                if (!_stateMachineGraphCanvas.Children.Contains(_stateGraphMarqueeVisual))
+                {
+                    _stateMachineGraphCanvas.Children.Add(_stateGraphMarqueeVisual);
+                }
+                Canvas.SetLeft(_stateGraphMarqueeVisual, mx);
+                Canvas.SetTop(_stateGraphMarqueeVisual, my);
+                _stateGraphMarqueeVisual.Width = mw;
+                _stateGraphMarqueeVisual.Height = mh;
             }
         }
 
@@ -15981,21 +16116,88 @@ namespace Kerf.UI
             if (_stateMachineGraphCanvas.IsMouseCaptured) _stateMachineGraphCanvas.ReleaseMouseCapture();
             _stateGraphPointerMode = 0;
             _stateGraphPointerStateIndex = -1;
-            if (mode == 1)
+
+            var layer = (_timelineController != null && _timelineController.ActiveStateMachine != null && _timelineController.ActiveStateMachine.Definition.Layers.Count > 0)
+                ? _timelineController.ActiveStateMachine.Definition.Layers[0]
+                : null;
+
+            if (mode == 1) // Node dragging finished (batch commit via MoveStateNodesCommand)
             {
-                if (_stateGraphMoved)
+                if (_stateGraphMoved && layer != null)
                 {
-                    if (History != null) History.MarkDirty();
-                    RefreshStateGraphConnectionVisuals(_timelineController.ActiveStateMachine.Definition.Layers[0]);
+                    var records = new List<NodeMoveRecord>();
+                    foreach (var kvp in _stateGraphNodeOrigins)
+                    {
+                        int idx = kvp.Key;
+                        Point orig = kvp.Value;
+                        if (idx >= 0 && idx < layer.States.Count && layer.States[idx] != null)
+                        {
+                            var s = layer.States[idx];
+                            if (Math.Abs(s.GraphX - orig.X) > 0.001 || Math.Abs(s.GraphY - orig.Y) > 0.001)
+                            {
+                                records.Add(new NodeMoveRecord(s, orig, new Point(s.GraphX, s.GraphY)));
+                            }
+                        }
+                    }
+                    if (records.Count > 0)
+                    {
+                        var cmd = new MoveStateNodesCommand(records, () =>
+                        {
+                            BuildStateMachineStatesGraph();
+                            RefreshStateMachineInspector();
+                        });
+                        if (History != null) History.Execute(cmd);
+                        else cmd.Execute();
+                    }
+                    RefreshStateGraphConnectionVisuals(layer);
                 }
-                else PreviewStateMachineNode(stateIndex);
+                else if (stateIndex >= 0)
+                {
+                    PreviewStateMachineNode(stateIndex);
+                }
             }
-            else if (mode == 2)
+            else if (mode == 2) // Port connection released
             {
                 foreach (var child in _stateMachineGraphCanvas.Children.OfType<FrameworkElement>().Where(element => string.Equals(element.Tag as string, "__connectionPreview", StringComparison.Ordinal)).ToList())
                     _stateMachineGraphCanvas.Children.Remove(child);
                 int target = HitTestStateGraphNode(point);
                 if (target >= 0 && target != stateIndex) CreateStateGraphTransition(stateIndex, target);
+            }
+            else if (mode == 3) // Marquee selection released
+            {
+                if (_stateGraphMarqueeVisual != null && _stateMachineGraphCanvas.Children.Contains(_stateGraphMarqueeVisual))
+                {
+                    _stateMachineGraphCanvas.Children.Remove(_stateGraphMarqueeVisual);
+                }
+                if (_stateGraphMarqueeRect.Width > 4.0 || _stateGraphMarqueeRect.Height > 4.0)
+                {
+                    _selectedGraphStateIndices.Clear();
+                    if (layer != null && layer.States != null)
+                    {
+                        for (int i = 0; i < layer.States.Count; i++)
+                        {
+                            var st = layer.States[i];
+                            if (st == null) continue;
+                            double width = st.Kind == StateKind.Entry ? 88 : st.Kind == StateKind.Any ? 116 : st.Kind == StateKind.Exit ? 78 : 132;
+                            double height = st.Kind == StateKind.Entry || st.Kind == StateKind.Exit ? 40 : 48;
+                            var stRect = new Rect(st.GraphX, st.GraphY, width, height);
+                            if (stRect.IntersectsWith(_stateGraphMarqueeRect))
+                            {
+                                _selectedGraphStateIndices.Add(i);
+                            }
+                        }
+                    }
+                    _selectedGraphStateIndex = _selectedGraphStateIndices.Count > 0 ? _selectedGraphStateIndices[0] : -1;
+                    _selectedGraphTransition = null;
+                }
+                else
+                {
+                    // Empty canvas clicked: clear selection
+                    _selectedGraphStateIndices.Clear();
+                    _selectedGraphStateIndex = -1;
+                    _selectedGraphTransition = null;
+                }
+                RefreshStateMachineInspector();
             }
             BuildStateMachineStatesGraph();
             e.Handled = true;
@@ -16059,17 +16261,33 @@ namespace Kerf.UI
         {
             if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
             var sm = _timelineController.ActiveStateMachine;
+            if (sm.Definition == null || sm.Definition.Layers == null || sm.Definition.Layers.Count == 0) return;
             var layer = sm.Definition.Layers[0];
+            if (fromIndex < 0 || fromIndex >= layer.States.Count || toIndex < 0 || toIndex >= layer.States.Count) return;
+
+            // Reject transitions to Entry/Any as destination, or from Exit as source (D-04, T-06-06)
             if (layer.States[toIndex].Kind == StateKind.Entry || layer.States[toIndex].Kind == StateKind.Any) return;
+            if (layer.States[fromIndex].Kind == StateKind.Exit) return;
+
+            // Prevent duplicate transitions
             var existing = layer.Transitions.FirstOrDefault(candidateTransition => candidateTransition != null && candidateTransition.FromState == fromIndex && candidateTransition.ToState == toIndex);
-            if (existing != null) { SelectGraphTransition(existing, layer); ShowEditTransitionDialog(existing, layer); return; }
+            if (existing != null)
+            {
+                SelectGraphTransition(existing, layer);
+                return;
+            }
+
             var transition = new StateTransition(fromIndex, toIndex, 0.25);
-            layer.AddTransition(transition);
-            _selectedGraphTransition = transition;
-            _selectedGraphTransitionLayer = layer;
-            History.MarkDirty();
-            BuildStateMachineStatesGraph();
-            ShowEditTransitionDialog(transition, layer);
+            var cmd = new CreateTransitionCommand(layer, transition, () =>
+            {
+                BuildStateMachineStatesGraph();
+                RefreshStateMachineInspector();
+                RefreshStateMachineValidationBadge();
+            });
+            if (History != null) History.Execute(cmd);
+            else cmd.Execute();
+
+            SelectGraphTransition(transition, layer);
         }
 
         private void ShowTransitionContextMenu(FrameworkElement target, MachineLayer layer, StateTransition transition)
