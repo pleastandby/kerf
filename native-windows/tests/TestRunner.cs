@@ -6121,6 +6121,151 @@ namespace Kerf.Tests
             Assert(badDef.Layers[0].States.Count == 3, "StateMachineValidator is strictly read-only: state count unchanged");
             Assert(badDef.Layers[0].Transitions.Count == 1, "StateMachineValidator is strictly read-only: transition count unchanged");
             Assert(badDef.Inputs.Count == 1, "StateMachineValidator is strictly read-only: input count unchanged");
+
+            // 5. Reversible State Node & Transition Commands in CommandHistory (D-02, D-06)
+            var history = new CommandHistory(100);
+            Assert(history.IsDirty == false, "CommandHistory starts clean");
+
+            var testDef = new StateMachineDefinition("UndoRedoSM");
+            var testLayer = new MachineLayer("InteractiveLayer");
+            testDef.AddLayer(testLayer);
+
+            int entryIdx = testLayer.AddState(new MachineState(0, "Entry", StateKind.Entry, -1, "sm_node_entry"));
+            var entryState = testLayer.States[entryIdx];
+
+            // 5a. CreateStateNodeCommand Execution, Undo, and Redo
+            var patrolState = new MachineState(1, "Patrol", StateKind.Animation, 0, "sm_node_patrol");
+            bool changedFired = false;
+            var cmdCreateState = new CreateStateNodeCommand(testLayer, patrolState, () => { changedFired = true; });
+
+            history.Execute(cmdCreateState);
+            Assert(testLayer.States.Contains(patrolState), "CreateStateNodeCommand executed: patrol state added to layer");
+            Assert(testLayer.FindStateById("sm_node_patrol") == patrolState, "Patrol state resolved by stable GUID");
+            Assert(history.CanUndo == true && history.CanRedo == false, "CanUndo is true and CanRedo is false after execution");
+            Assert(history.IsDirty == true, "CommandHistory is marked dirty after execution");
+            Assert(changedFired == true, "onChanged callback fired during command execution");
+
+            changedFired = false;
+            history.Undo();
+            Assert(!testLayer.States.Contains(patrolState), "CreateStateNodeCommand undone: patrol state removed from layer");
+            Assert(testLayer.FindStateById("sm_node_patrol") == null, "Patrol state cannot be found after undo");
+            Assert(history.CanRedo == true, "CanRedo is true after undo");
+            Assert(changedFired == true, "onChanged callback fired during undo");
+
+            history.Redo();
+            Assert(testLayer.States.Contains(patrolState), "CreateStateNodeCommand redone: patrol state restored");
+            Assert(testLayer.FindStateById("sm_node_patrol") == patrolState, "Patrol state resolved again after redo");
+
+            // 5b. RenameStateNodeCommand Execution, Undo, and Redo
+            var cmdRename = new RenameStateNodeCommand(patrolState, "Patrol", "CombatPatrol");
+            history.Execute(cmdRename);
+            Assert(patrolState.Name == "CombatPatrol", "RenameStateNodeCommand executed: state renamed to CombatPatrol");
+
+            history.Undo();
+            Assert(patrolState.Name == "Patrol", "RenameStateNodeCommand undone: state name reverted to Patrol");
+
+            history.Redo();
+            Assert(patrolState.Name == "CombatPatrol", "RenameStateNodeCommand redone: state name restored to CombatPatrol");
+
+            // 5c. MoveStateNodesCommand Execution, Undo, and Redo (Continuous drag batched on pointer release)
+            patrolState.GraphX = 100.0;
+            patrolState.GraphY = 150.0;
+            var moveRecord = new NodeMoveRecord(patrolState, new Point(100.0, 150.0), new Point(320.0, 480.0));
+            var cmdMove = new MoveStateNodesCommand(new NodeMoveRecord[] { moveRecord });
+
+            history.Execute(cmdMove);
+            Assert(patrolState.GraphX == 320.0 && patrolState.GraphY == 480.0, "MoveStateNodesCommand executed: new position (320, 480) applied");
+
+            history.Undo();
+            Assert(patrolState.GraphX == 100.0 && patrolState.GraphY == 150.0, "MoveStateNodesCommand undone: original position (100, 150) restored");
+
+            history.Redo();
+            Assert(patrolState.GraphX == 320.0 && patrolState.GraphY == 480.0, "MoveStateNodesCommand redone: new position (320, 480) reapplied");
+
+            // 5d. CreateTransitionCommand Execution, Undo, and Redo
+            var transEntryPatrol = new StateTransition("sm_node_entry", "sm_node_patrol", 0.3, "sm_trans_entry_to_patrol");
+            var cmdCreateTrans = new CreateTransitionCommand(testLayer, transEntryPatrol);
+
+            history.Execute(cmdCreateTrans);
+            Assert(testLayer.Transitions.Contains(transEntryPatrol), "CreateTransitionCommand executed: transition added");
+            Assert(transEntryPatrol.FromStateId == "sm_node_entry" && transEntryPatrol.ToStateId == "sm_node_patrol", "Transition maintains stable GUID endpoints");
+
+            history.Undo();
+            Assert(!testLayer.Transitions.Contains(transEntryPatrol), "CreateTransitionCommand undone: transition removed");
+
+            history.Redo();
+            Assert(testLayer.Transitions.Contains(transEntryPatrol), "CreateTransitionCommand redone: transition restored");
+
+            // 5e. ModifyTransitionCommand Execution, Undo, and Redo
+            var oldSnapshot = new TransitionSnapshot(transEntryPatrol);
+            var newSnapshot = new TransitionSnapshot(0.85, 0.9, false, InterpMode.Linear, 0.4, 0.2, 0.6, 0.8);
+            var cmdModTrans = new ModifyTransitionCommand(transEntryPatrol, oldSnapshot, newSnapshot);
+
+            history.Execute(cmdModTrans);
+            Assert(transEntryPatrol.Duration == 0.85, "ModifyTransitionCommand executed: Duration updated to 0.85s");
+            Assert(transEntryPatrol.ExitTime.HasValue && transEntryPatrol.ExitTime.Value == 0.9, "ModifyTransitionCommand executed: ExitTime updated to 0.9");
+            Assert(transEntryPatrol.Interrupt == false, "ModifyTransitionCommand executed: Interrupt set to false");
+            Assert(transEntryPatrol.Interpolation == InterpMode.Linear, "ModifyTransitionCommand executed: Interpolation updated to Linear");
+            Assert(transEntryPatrol.X1 == 0.4 && transEntryPatrol.Y1 == 0.2 && transEntryPatrol.X2 == 0.6 && transEntryPatrol.Y2 == 0.8, "ModifyTransitionCommand executed: Cubic bezier params updated");
+
+            history.Undo();
+            Assert(transEntryPatrol.Duration == 0.3, "ModifyTransitionCommand undone: Duration reverted to 0.3s");
+            Assert(!transEntryPatrol.ExitTime.HasValue, "ModifyTransitionCommand undone: ExitTime reverted to null");
+            Assert(transEntryPatrol.Interrupt == true, "ModifyTransitionCommand undone: Interrupt reverted to true");
+            Assert(transEntryPatrol.Interpolation == InterpMode.Cubic, "ModifyTransitionCommand undone: Interpolation reverted to Cubic");
+
+            history.Redo();
+            Assert(transEntryPatrol.Duration == 0.85 && transEntryPatrol.Interrupt == false, "ModifyTransitionCommand redone: modifications reapplied");
+
+            // 5f. Cascading Transition Restoration during State Deletion (D-06)
+            // Add a third state 'Alert' and create bidirectional transitions with CombatPatrol
+            var alertState = new MachineState(2, "Alert", StateKind.Animation, 1, "sm_node_alert");
+            testLayer.AddState(alertState);
+
+            var transPatrolToAlert = new StateTransition("sm_node_patrol", "sm_node_alert", 0.2, "sm_trans_patrol_to_alert");
+            var transAlertToPatrol = new StateTransition("sm_node_alert", "sm_node_patrol", 0.4, "sm_trans_alert_to_patrol");
+            testLayer.AddTransition(transPatrolToAlert);
+            testLayer.AddTransition(transAlertToPatrol);
+
+            Assert(testLayer.States.Count == 3, "Layer has 3 states (Entry, CombatPatrol, Alert)");
+            Assert(testLayer.Transitions.Count == 3, "Layer has 3 transitions (Entry->Patrol, Patrol->Alert, Alert->Patrol)");
+
+            // Delete CombatPatrol: all 3 transitions are incident to CombatPatrol and must cascade delete
+            var cmdDeleteState = new DeleteStateNodesCommand(testLayer, patrolState);
+            history.Execute(cmdDeleteState);
+
+            Assert(!testLayer.States.Contains(patrolState), "DeleteStateNodesCommand executed: CombatPatrol state removed");
+            Assert(testLayer.Transitions.Count == 0, "DeleteStateNodesCommand executed: all 3 incident transitions cascade-removed");
+
+            // Undo deletion: both state and ALL incident transitions restored with exact stable GUIDs
+            history.Undo();
+            Assert(testLayer.States.Contains(patrolState), "DeleteStateNodesCommand undone: CombatPatrol state restored");
+            Assert(testLayer.Transitions.Count == 3, "DeleteStateNodesCommand undone: all 3 incident transitions restored");
+            Assert(testLayer.Transitions.Contains(transEntryPatrol), "Restored incoming transition transEntryPatrol");
+            Assert(testLayer.Transitions.Contains(transPatrolToAlert), "Restored outgoing transition transPatrolToAlert");
+            Assert(testLayer.Transitions.Contains(transAlertToPatrol), "Restored incoming transition transAlertToPatrol");
+            Assert(transPatrolToAlert.FromStateId == "sm_node_patrol" && transPatrolToAlert.ToStateId == "sm_node_alert", "Restored transition preserves stable GUID bindings");
+
+            // Redo deletion: state and transitions removed again cleanly
+            history.Redo();
+            Assert(!testLayer.States.Contains(patrolState) && testLayer.Transitions.Count == 0, "DeleteStateNodesCommand redone: state and transitions removed cleanly");
+
+            // Undo again to keep CombatPatrol present for transition deletion test
+            history.Undo();
+            Assert(testLayer.States.Contains(patrolState) && testLayer.Transitions.Count == 3, "Restored state and transitions for subsequent tests");
+
+            // 5g. DeleteTransitionsCommand Execution, Undo, and Redo
+            var cmdDelTrans = new DeleteTransitionsCommand(testLayer, new StateTransition[] { transPatrolToAlert, transAlertToPatrol });
+            history.Execute(cmdDelTrans);
+            Assert(testLayer.Transitions.Count == 1, "DeleteTransitionsCommand executed: 2 transitions removed, 1 remaining");
+            Assert(!testLayer.Transitions.Contains(transPatrolToAlert) && !testLayer.Transitions.Contains(transAlertToPatrol), "Target transitions removed from layer");
+
+            history.Undo();
+            Assert(testLayer.Transitions.Count == 3, "DeleteTransitionsCommand undone: 2 transitions restored");
+            Assert(testLayer.Transitions.Contains(transPatrolToAlert) && testLayer.Transitions.Contains(transAlertToPatrol), "Transitions present at restored indices");
+
+            history.Redo();
+            Assert(testLayer.Transitions.Count == 1 && !testLayer.Transitions.Contains(transPatrolToAlert), "DeleteTransitionsCommand redone");
         }
     }
 }

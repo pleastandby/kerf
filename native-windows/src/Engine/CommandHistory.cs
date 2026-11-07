@@ -1916,4 +1916,535 @@ namespace Kerf.Engine
         }
     }
 
+    // =========================================================================
+    // State Machine Engine Reversible Commands (Phase 6 - D-06)
+    // =========================================================================
+
+    public class NodeMoveRecord
+    {
+        public MachineState State { get; set; }
+        public Point OldPos { get; set; }
+        public Point NewPos { get; set; }
+
+        public NodeMoveRecord() { }
+
+        public NodeMoveRecord(MachineState state, Point oldPos, Point newPos)
+        {
+            State = state;
+            OldPos = oldPos;
+            NewPos = newPos;
+        }
+
+        public NodeMoveRecord(MachineState state, double oldX, double oldY, double newX, double newY)
+            : this(state, new Point(oldX, oldY), new Point(newX, newY))
+        {
+        }
+    }
+
+    public class TransitionSnapshot
+    {
+        public double Duration { get; set; }
+        public double? ExitTime { get; set; }
+        public bool Interrupt { get; set; }
+        public InterpMode Interpolation { get; set; }
+        public double X1 { get; set; }
+        public double Y1 { get; set; }
+        public double X2 { get; set; }
+        public double Y2 { get; set; }
+
+        public TransitionSnapshot()
+        {
+            Duration = 0.0;
+            ExitTime = null;
+            Interrupt = true;
+            Interpolation = InterpMode.Cubic;
+            X1 = 0.25;
+            Y1 = 0.1;
+            X2 = 0.25;
+            Y2 = 1.0;
+        }
+
+        public TransitionSnapshot(StateTransition trans) : this()
+        {
+            if (trans != null)
+            {
+                Duration = trans.Duration;
+                ExitTime = trans.ExitTime;
+                Interrupt = trans.Interrupt;
+                Interpolation = trans.Interpolation;
+                X1 = trans.X1;
+                Y1 = trans.Y1;
+                X2 = trans.X2;
+                Y2 = trans.Y2;
+            }
+        }
+
+        public TransitionSnapshot(double duration, double? exitTime, bool interrupt, InterpMode interp, double x1, double y1, double x2, double y2)
+        {
+            Duration = duration;
+            ExitTime = exitTime;
+            Interrupt = interrupt;
+            Interpolation = interp;
+            X1 = x1;
+            Y1 = y1;
+            X2 = x2;
+            Y2 = y2;
+        }
+
+        public TransitionSnapshot Clone()
+        {
+            TransitionSnapshot snap = new TransitionSnapshot();
+            snap.Duration = Duration;
+            snap.ExitTime = ExitTime;
+            snap.Interrupt = Interrupt;
+            snap.Interpolation = Interpolation;
+            snap.X1 = X1;
+            snap.Y1 = Y1;
+            snap.X2 = X2;
+            snap.Y2 = Y2;
+            return snap;
+        }
+    }
+
+    public class CreateStateNodeCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Create State " + (_state != null ? _state.Name : ""); }
+        }
+
+        private readonly MachineLayer _layer;
+        private readonly MachineState _state;
+        private int _index;
+        private readonly Action _onChanged;
+
+        public CreateStateNodeCommand(MachineLayer layer, MachineState state, Action onChanged = null)
+        {
+            _layer = layer;
+            _state = state;
+            _index = (layer != null && state != null && layer.States.Contains(state)) ? layer.States.IndexOf(state) : -1;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_layer != null && _state != null)
+            {
+                if (string.IsNullOrEmpty(_state.NodeId))
+                {
+                    _state.NodeId = "sm_node_" + Guid.NewGuid().ToString("N");
+                }
+                if (!_layer.States.Contains(_state))
+                {
+                    if (_index >= 0 && _index <= _layer.States.Count)
+                    {
+                        _layer.States.Insert(_index, _state);
+                    }
+                    else
+                    {
+                        _layer.AddState(_state);
+                        _index = _layer.States.IndexOf(_state);
+                    }
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_layer != null && _state != null)
+            {
+                _layer.States.Remove(_state);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class DeleteStateNodesCommand : ICommand
+    {
+        public string Description
+        {
+            get { return string.Format("Delete {0} State(s)", _deletedStates.Count); }
+        }
+
+        private struct StateSlot
+        {
+            public MachineState State;
+            public int Index;
+        }
+
+        private struct TransitionSlot
+        {
+            public StateTransition Transition;
+            public int Index;
+        }
+
+        private readonly MachineLayer _layer;
+        private readonly List<StateSlot> _deletedStates;
+        private readonly List<TransitionSlot> _incidentTransitions;
+        private readonly Action _onChanged;
+
+        public DeleteStateNodesCommand(MachineLayer layer, MachineState state, Action onChanged = null)
+            : this(layer, state != null ? new MachineState[] { state } : null, onChanged)
+        {
+        }
+
+        public DeleteStateNodesCommand(MachineLayer layer, IEnumerable<MachineState> states, Action onChanged = null)
+        {
+            _layer = layer;
+            _deletedStates = new List<StateSlot>();
+            _incidentTransitions = new List<TransitionSlot>();
+            _onChanged = onChanged;
+
+            if (layer != null && states != null)
+            {
+                HashSet<string> deletedNodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                HashSet<int> deletedStateIds = new HashSet<int>();
+                HashSet<int> deletedIndices = new HashSet<int>();
+                HashSet<MachineState> stateSet = new HashSet<MachineState>();
+
+                foreach (var s in states)
+                {
+                    if (s == null || stateSet.Contains(s)) continue;
+                    stateSet.Add(s);
+                    if (!string.IsNullOrEmpty(s.NodeId)) deletedNodeIds.Add(s.NodeId);
+                    deletedStateIds.Add(s.Id);
+                    int idx = layer.States.IndexOf(s);
+                    if (idx >= 0) deletedIndices.Add(idx);
+                    _deletedStates.Add(new StateSlot { State = s, Index = idx });
+                }
+                _deletedStates.Sort((a, b) => a.Index.CompareTo(b.Index));
+
+                if (layer.Transitions != null)
+                {
+                    HashSet<StateTransition> transSet = new HashSet<StateTransition>();
+                    for (int i = 0; i < layer.Transitions.Count; i++)
+                    {
+                        var t = layer.Transitions[i];
+                        if (t == null || transSet.Contains(t)) continue;
+
+                        bool fromMatches = (!string.IsNullOrEmpty(t.FromStateId) && deletedNodeIds.Contains(t.FromStateId))
+                                        || (string.IsNullOrEmpty(t.FromStateId) && (deletedStateIds.Contains(t.FromState) || deletedIndices.Contains(t.FromState)));
+                        bool toMatches = (!string.IsNullOrEmpty(t.ToStateId) && deletedNodeIds.Contains(t.ToStateId))
+                                      || (string.IsNullOrEmpty(t.ToStateId) && (deletedStateIds.Contains(t.ToState) || deletedIndices.Contains(t.ToState)));
+
+                        if (fromMatches || toMatches)
+                        {
+                            transSet.Add(t);
+                            _incidentTransitions.Add(new TransitionSlot { Transition = t, Index = i });
+                        }
+                    }
+                    _incidentTransitions.Sort((a, b) => a.Index.CompareTo(b.Index));
+                }
+            }
+        }
+
+        public void Execute()
+        {
+            if (_layer != null)
+            {
+                for (int i = 0; i < _incidentTransitions.Count; i++)
+                {
+                    _layer.Transitions.Remove(_incidentTransitions[i].Transition);
+                }
+                for (int i = 0; i < _deletedStates.Count; i++)
+                {
+                    _layer.States.Remove(_deletedStates[i].State);
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_layer != null)
+            {
+                for (int i = 0; i < _deletedStates.Count; i++)
+                {
+                    var slot = _deletedStates[i];
+                    if (!_layer.States.Contains(slot.State))
+                    {
+                        int targetIdx = Math.Max(0, Math.Min(slot.Index, _layer.States.Count));
+                        _layer.States.Insert(targetIdx, slot.State);
+                    }
+                }
+                for (int i = 0; i < _incidentTransitions.Count; i++)
+                {
+                    var slot = _incidentTransitions[i];
+                    if (!_layer.Transitions.Contains(slot.Transition))
+                    {
+                        int targetIdx = Math.Max(0, Math.Min(slot.Index, _layer.Transitions.Count));
+                        _layer.Transitions.Insert(targetIdx, slot.Transition);
+                    }
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class MoveStateNodesCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Move State Node(s)"; }
+        }
+
+        private readonly List<NodeMoveRecord> _records;
+        private readonly Action _onChanged;
+
+        public MoveStateNodesCommand(IEnumerable<NodeMoveRecord> records, Action onChanged = null)
+        {
+            _records = records != null ? new List<NodeMoveRecord>(records) : new List<NodeMoveRecord>();
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            for (int i = 0; i < _records.Count; i++)
+            {
+                var r = _records[i];
+                if (r != null && r.State != null)
+                {
+                    r.State.GraphX = r.NewPos.X;
+                    r.State.GraphY = r.NewPos.Y;
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            for (int i = 0; i < _records.Count; i++)
+            {
+                var r = _records[i];
+                if (r != null && r.State != null)
+                {
+                    r.State.GraphX = r.OldPos.X;
+                    r.State.GraphY = r.OldPos.Y;
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class RenameStateNodeCommand : ICommand
+    {
+        public string Description
+        {
+            get { return string.Format("Rename State to '{0}'", _newName); }
+        }
+
+        private readonly MachineState _state;
+        private readonly string _oldName;
+        private readonly string _newName;
+        private readonly Action _onChanged;
+
+        public RenameStateNodeCommand(MachineState state, string oldName, string newName, Action onChanged = null)
+        {
+            _state = state;
+            _oldName = oldName;
+            _newName = newName;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_state != null)
+            {
+                _state.Name = _newName;
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_state != null)
+            {
+                _state.Name = _oldName;
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class CreateTransitionCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Create Transition"; }
+        }
+
+        private readonly MachineLayer _layer;
+        private readonly StateTransition _transition;
+        private int _index;
+        private readonly Action _onChanged;
+
+        public CreateTransitionCommand(MachineLayer layer, StateTransition transition, Action onChanged = null)
+        {
+            _layer = layer;
+            _transition = transition;
+            _index = (layer != null && transition != null && layer.Transitions.Contains(transition)) ? layer.Transitions.IndexOf(transition) : -1;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_layer != null && _transition != null)
+            {
+                if (string.IsNullOrEmpty(_transition.TransitionId))
+                {
+                    _transition.TransitionId = "sm_trans_" + Guid.NewGuid().ToString("N");
+                }
+                if (string.IsNullOrEmpty(_transition.FromStateId) && _transition.FromState >= 0 && _transition.FromState < _layer.States.Count && _layer.States[_transition.FromState] != null)
+                {
+                    _transition.FromStateId = _layer.States[_transition.FromState].NodeId;
+                }
+                if (string.IsNullOrEmpty(_transition.ToStateId) && _transition.ToState >= 0 && _transition.ToState < _layer.States.Count && _layer.States[_transition.ToState] != null)
+                {
+                    _transition.ToStateId = _layer.States[_transition.ToState].NodeId;
+                }
+
+                if (!_layer.Transitions.Contains(_transition))
+                {
+                    if (_index >= 0 && _index <= _layer.Transitions.Count)
+                    {
+                        _layer.Transitions.Insert(_index, _transition);
+                    }
+                    else
+                    {
+                        _layer.AddTransition(_transition);
+                        _index = _layer.Transitions.IndexOf(_transition);
+                    }
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_layer != null && _transition != null)
+            {
+                _layer.Transitions.Remove(_transition);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class DeleteTransitionsCommand : ICommand
+    {
+        public string Description
+        {
+            get { return string.Format("Delete {0} Transition(s)", _slots.Count); }
+        }
+
+        private struct TransitionSlot
+        {
+            public StateTransition Transition;
+            public int Index;
+        }
+
+        private readonly MachineLayer _layer;
+        private readonly List<TransitionSlot> _slots;
+        private readonly Action _onChanged;
+
+        public DeleteTransitionsCommand(MachineLayer layer, StateTransition transition, Action onChanged = null)
+            : this(layer, transition != null ? new StateTransition[] { transition } : null, onChanged)
+        {
+        }
+
+        public DeleteTransitionsCommand(MachineLayer layer, IEnumerable<StateTransition> transitions, Action onChanged = null)
+        {
+            _layer = layer;
+            _slots = new List<TransitionSlot>();
+            _onChanged = onChanged;
+
+            if (layer != null && transitions != null)
+            {
+                HashSet<StateTransition> set = new HashSet<StateTransition>();
+                foreach (var t in transitions)
+                {
+                    if (t == null || set.Contains(t)) continue;
+                    set.Add(t);
+                    int idx = layer.Transitions.IndexOf(t);
+                    _slots.Add(new TransitionSlot { Transition = t, Index = idx });
+                }
+                _slots.Sort((a, b) => a.Index.CompareTo(b.Index));
+            }
+        }
+
+        public void Execute()
+        {
+            if (_layer != null)
+            {
+                for (int i = 0; i < _slots.Count; i++)
+                {
+                    _layer.Transitions.Remove(_slots[i].Transition);
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_layer != null)
+            {
+                for (int i = 0; i < _slots.Count; i++)
+                {
+                    var slot = _slots[i];
+                    if (!_layer.Transitions.Contains(slot.Transition))
+                    {
+                        int targetIdx = Math.Max(0, Math.Min(slot.Index, _layer.Transitions.Count));
+                        _layer.Transitions.Insert(targetIdx, slot.Transition);
+                    }
+                }
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class ModifyTransitionCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Modify Transition"; }
+        }
+
+        private readonly StateTransition _transition;
+        private readonly TransitionSnapshot _oldSnapshot;
+        private readonly TransitionSnapshot _newSnapshot;
+        private readonly Action _onChanged;
+
+        public ModifyTransitionCommand(StateTransition transition, TransitionSnapshot oldSnapshot, TransitionSnapshot newSnapshot, Action onChanged = null)
+        {
+            _transition = transition;
+            _oldSnapshot = oldSnapshot != null ? oldSnapshot.Clone() : null;
+            _newSnapshot = newSnapshot != null ? newSnapshot.Clone() : null;
+            _onChanged = onChanged;
+        }
+
+        private void Apply(TransitionSnapshot s)
+        {
+            if (_transition == null || s == null) return;
+            _transition.Duration = s.Duration;
+            _transition.ExitTime = s.ExitTime;
+            _transition.Interrupt = s.Interrupt;
+            _transition.Interpolation = s.Interpolation;
+            _transition.X1 = s.X1;
+            _transition.Y1 = s.Y1;
+            _transition.X2 = s.X2;
+            _transition.Y2 = s.Y2;
+        }
+
+        public void Execute()
+        {
+            Apply(_newSnapshot);
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            Apply(_oldSnapshot);
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
 }
