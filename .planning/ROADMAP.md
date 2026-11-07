@@ -122,7 +122,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Core state machine graph model, compound condition groups, validation engine, and Test #60 automated scaffold
+- [x] 06-01-PLAN.md — Core state machine graph model, compound condition groups, validation engine, and Test #60 automated scaffold
 - [ ] 06-02-PLAN.md — Reversible transactional commands in CommandHistory and undo/redo engine
 - [ ] 06-03-PLAN.md — Interactive 3-column visual graph editor, port drag-to-connect, canvas marquee, and inspector panels
 
@@ -156,11 +156,11 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Independent Transform Architecture and Animation Evaluator | 2/2 | Complete | 2026-11-05 |
 | 3. Timeline and Keyframe Engine Reconstruction | 3/3 | Complete | 2026-11-06 |
 | 4. Easing Engine & Interactive Graph Curve Editor | 2/2 | Complete | 2026-11-06 |
-| 5. Animation Command History & Full Undo/Redo | 0/2 | Ready for planning | - |
-| 6. Interactive State Machine Engine | 0/3 | Not started | - |
+| 5. Animation Command History & Full Undo/Redo | 2/2 | Complete | 2026-11-06 |
+| 6. Interactive State Machine Engine | 1/3 | In progress | - |
 | 7. Verification, Legacy Migration & Safe Deprecation | 0/2 | Not started | - |
 
 ---
 *Roadmap defined: 2026-11-05*
-*Last updated: 2026-11-05 after initialization*
+*Last updated: 2026-11-07 after 06-01-PLAN.md*
 
