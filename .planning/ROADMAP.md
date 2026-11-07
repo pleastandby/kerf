@@ -11,7 +11,7 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 - [x] **Phase 3: Timeline and Keyframe Engine Reconstruction** - Build a structured, multi-track animation timeline with expandable object lanes, time ruler, stable keyframes, scrubbing, and inspector integration.
 - [x] **Phase 4: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
 - [x] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
-- [ ] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
+- [x] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
 - [ ] **Phase 7: Verification, Legacy Migration & Safe Deprecation** - End-to-end integration tests, legacy project file migration, and deprecation of old property binders with 0 regressions.
 
 ## Phase Details
@@ -124,7 +124,7 @@ Plans:
 Plans:
 - [x] 06-01-PLAN.md — Core state machine graph model, compound condition groups, validation engine, and Test #60 automated scaffold
 - [x] 06-02-PLAN.md — Reversible transactional commands in CommandHistory and undo/redo engine
-- [ ] 06-03-PLAN.md — Interactive 3-column visual graph editor, port drag-to-connect, canvas marquee, and inspector panels
+- [x] 06-03-PLAN.md — Interactive 3-column visual graph editor, port drag-to-connect, canvas marquee, and inspector panels
 
 ---
 
