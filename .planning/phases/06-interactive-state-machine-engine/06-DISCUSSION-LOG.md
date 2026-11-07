@@ -66,3 +66,4 @@
 
 - Canvas interaction event listeners (Hover Enter/Exit, Pointer Down/Up, Click) and full multi-clip cross-fade evaluation deferred to Phase 7.
 - Advanced 1D/2D blend trees deferred to subsequent v2 milestones.
+

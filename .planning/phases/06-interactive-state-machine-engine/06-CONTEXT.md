@@ -132,3 +132,4 @@ It delivers:
 
 *Phase: 06-interactive-state-machine-engine*
 *Context gathered: 2026-11-07*
+

@@ -568,12 +568,13 @@ namespace Kerf.Engine
 | A1 | Bottom dock split layout (Left Inputs 220px, Center Canvas 1* Star, Right Inspector 280px) fits standard 1080p and 1440p displays without clipping. [ASSUMED] | Architecture Patterns | Low. Widths can be adjusted or made resizable via `GridSplitter`. |
 | A2 | Existing documents contain `Animation.StateMachine` with null or default values rather than serialized JSON files requiring binary migration. [ASSUMED] | Runtime State Inventory | Low. In-repo schema handles backward compatibility automatically via fallback loaders. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **GridSplitter Support for Bottom Dock Columns:**
    - *What we know:* Fixed column widths (220px, 1* Star, 280px) provide clean separation.
    - *What's unclear:* Whether users prefer resizable sidebars via `GridSplitter`.
    - *Recommendation:* Start with fixed default widths with min-width constraints, adding `GridSplitter` if space allows.
+   - *RESOLVED:* Start with fixed default widths (220px left, 280px right) with min-width constraints per D-01; GridSplitter can be added in a future enhancement if needed.
 
 ## Environment Availability
 
