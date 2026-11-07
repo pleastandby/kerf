@@ -14385,6 +14385,19 @@ namespace Kerf.UI
             }
         }
 
+        private static List<ConditionGroup> CloneConditionGroups(IEnumerable<ConditionGroup> groups)
+        {
+            var list = new List<ConditionGroup>();
+            if (groups != null)
+            {
+                foreach (var g in groups)
+                {
+                    if (g != null) list.Add(g.Clone());
+                }
+            }
+            return list;
+        }
+
         private void RefreshStateMachineInspector()
         {
             if (_stateMachineInspectorContent == null) return;
@@ -14480,11 +14493,12 @@ namespace Kerf.UI
                 {
                     var clipBox = CreateModernComboBox(26);
                     int selIdx = -1;
-                    if (sm.Clips != null)
+                    var clipsList = (sm.Clips != null && sm.Clips.Count > 0) ? sm.Clips : (Document != null && Document.Animation != null ? Document.Animation.Clips : null);
+                    if (clipsList != null)
                     {
-                        for (int c = 0; c < sm.Clips.Count; c++)
+                        for (int c = 0; c < clipsList.Count; c++)
                         {
-                            var clip = sm.Clips[c];
+                            var clip = clipsList[c];
                             if (clip == null) continue;
                             var item = new ComboBoxItem { Content = clip.Name, Tag = c };
                             clipBox.Items.Add(item);
@@ -14690,6 +14704,51 @@ namespace Kerf.UI
                 };
                 sp.Children.Add(exitCheck);
 
+                if (trans.ExitTime.HasValue)
+                {
+                    var exitSliderDock = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+                    var exitValText = new TextBlock
+                    {
+                        Text = trans.ExitTime.Value.ToString("0.00", CultureInfo.InvariantCulture),
+                        FontSize = 10,
+                        Foreground = KerfBrand.MintBrush,
+                        Width = 32,
+                        TextAlignment = TextAlignment.Right,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    DockPanel.SetDock(exitValText, Dock.Right);
+                    exitSliderDock.Children.Add(exitValText);
+
+                    var exitSlider = new Slider
+                    {
+                        Minimum = 0.0,
+                        Maximum = 1.0,
+                        Value = trans.ExitTime.Value,
+                        SmallChange = 0.05,
+                        LargeChange = 0.1,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Margin = new Thickness(0, 0, 8, 0)
+                    };
+                    exitSlider.ValueChanged += (s, e) =>
+                    {
+                        exitValText.Text = exitSlider.Value.ToString("0.00", CultureInfo.InvariantCulture);
+                    };
+                    exitSlider.PreviewMouseUp += (s, e) =>
+                    {
+                        double val = Math.Max(0.0, Math.Min(1.0, exitSlider.Value));
+                        if (Math.Abs(val - (trans.ExitTime ?? 0.0)) > 0.01)
+                        {
+                            var oldSnap = new TransitionSnapshot(trans);
+                            var newSnap = new TransitionSnapshot(trans) { ExitTime = val };
+                            var cmd = new ModifyTransitionCommand(trans, oldSnap, newSnap, () => { RefreshStateMachineInspector(); });
+                            if (History != null) History.Execute(cmd);
+                            else cmd.Execute();
+                        }
+                    };
+                    exitSliderDock.Children.Add(exitSlider);
+                    sp.Children.Add(exitSliderDock);
+                }
+
                 // Interruption Toggle
                 var intCheck = new CheckBox
                 {
@@ -14709,6 +14768,471 @@ namespace Kerf.UI
                     else cmd.Execute();
                 };
                 sp.Children.Add(intCheck);
+
+                // Compound Condition Group Builder (D-03)
+                var condHeaderDock = new DockPanel { Margin = new Thickness(0, 10, 0, 6) };
+                var condTitle = new TextBlock
+                {
+                    Text = "CONDITIONS (OR of ANDs)",
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(condTitle, Dock.Left);
+                condHeaderDock.Children.Add(condTitle);
+                sp.Children.Add(condHeaderDock);
+
+                if (trans.ConditionGroups == null) trans.ConditionGroups = new List<ConditionGroup>();
+
+                for (int g = 0; g < trans.ConditionGroups.Count; g++)
+                {
+                    int groupIndex = g;
+                    var group = trans.ConditionGroups[g];
+                    if (group == null) continue;
+
+                    if (g > 0)
+                    {
+                        var orDock = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = false };
+                        var orBadge = new Border
+                        {
+                            Background = new SolidColorBrush(Color.FromRgb(39, 44, 57)),
+                            BorderBrush = new SolidColorBrush(Color.FromRgb(139, 92, 246)),
+                            BorderThickness = new Thickness(1),
+                            CornerRadius = new CornerRadius(10),
+                            Padding = new Thickness(8, 2, 8, 2),
+                            HorizontalAlignment = HorizontalAlignment.Center
+                        };
+                        orBadge.Child = new TextBlock
+                        {
+                            Text = "OR",
+                            FontSize = 8.5,
+                            FontWeight = FontWeights.Bold,
+                            Foreground = new SolidColorBrush(Color.FromRgb(196, 181, 253))
+                        };
+                        orDock.Children.Add(orBadge);
+                        sp.Children.Add(orDock);
+                    }
+
+                    var grpCard = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromRgb(24, 27, 34)),
+                        BorderBrush = KerfBrand.FigmaBorderBrush,
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(5),
+                        Padding = new Thickness(6),
+                        Margin = new Thickness(0, 0, 0, 4)
+                    };
+                    var grpStack = new StackPanel();
+
+                    var grpHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 4), LastChildFill = true };
+                    var grpLabel = new TextBlock
+                    {
+                        Text = string.Format("GROUP {0}", groupIndex + 1),
+                        FontSize = 8.5,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = KerfBrand.TextMutedBrush,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    DockPanel.SetDock(grpLabel, Dock.Left);
+                    grpHeader.Children.Add(grpLabel);
+
+                    var delGrpBtn = new Border
+                    {
+                        Width = 16,
+                        Height = 16,
+                        Background = Brushes.Transparent,
+                        Cursor = Cursors.Hand,
+                        ToolTip = "Remove Condition Group",
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    var delGrpText = new TextBlock
+                    {
+                        Text = "×",
+                        FontSize = 13,
+                        Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 165)),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    delGrpBtn.Child = delGrpText;
+                    delGrpBtn.MouseEnter += (s, e) => { delGrpText.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)); };
+                    delGrpBtn.MouseLeave += (s, e) => { delGrpText.Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 165)); };
+                    delGrpBtn.MouseLeftButtonDown += (s, e) =>
+                    {
+                        var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                        var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                        if (groupIndex >= 0 && groupIndex < newGroups.Count)
+                        {
+                            newGroups.RemoveAt(groupIndex);
+                            var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                            {
+                                BuildStateMachineStatesGraph();
+                                RefreshStateMachineInspector();
+                            });
+                            if (History != null) History.Execute(cmd);
+                            else cmd.Execute();
+                        }
+                    };
+                    DockPanel.SetDock(delGrpBtn, Dock.Right);
+                    grpHeader.Children.Add(delGrpBtn);
+                    grpStack.Children.Add(grpHeader);
+
+                    if (group.Conditions == null) group.Conditions = new List<TransitionCondition>();
+
+                    for (int c = 0; c < group.Conditions.Count; c++)
+                    {
+                        int conditionIndex = c;
+                        var cond = group.Conditions[c];
+                        if (cond == null) continue;
+
+                        if (conditionIndex > 0)
+                        {
+                            var andBadge = new Border
+                            {
+                                Background = new SolidColorBrush(Color.FromRgb(30, 41, 59)),
+                                CornerRadius = new CornerRadius(3),
+                                Padding = new Thickness(4, 1, 4, 1),
+                                Margin = new Thickness(0, 2, 0, 2),
+                                HorizontalAlignment = HorizontalAlignment.Center
+                            };
+                            andBadge.Child = new TextBlock
+                            {
+                                Text = "AND",
+                                FontSize = 7.5,
+                                FontWeight = FontWeights.Bold,
+                                Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                            };
+                            grpStack.Children.Add(andBadge);
+                        }
+
+                        var condRow = new DockPanel { Margin = new Thickness(0, 2, 0, 2), LastChildFill = true };
+
+                        var delCondBtn = new Border
+                        {
+                            Width = 16,
+                            Height = 16,
+                            Background = Brushes.Transparent,
+                            Cursor = Cursors.Hand,
+                            ToolTip = "Remove condition",
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Margin = new Thickness(2, 0, 0, 0)
+                        };
+                        var delCondText = new TextBlock
+                        {
+                            Text = "×",
+                            FontSize = 12,
+                            Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 165)),
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        delCondBtn.Child = delCondText;
+                        delCondBtn.MouseEnter += (s, e) => { delCondText.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)); };
+                        delCondBtn.MouseLeave += (s, e) => { delCondText.Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 165)); };
+                        delCondBtn.MouseLeftButtonDown += (s, e) =>
+                        {
+                            var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                            var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                            if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                            {
+                                newGroups[groupIndex].Conditions.RemoveAt(conditionIndex);
+                                var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                {
+                                    BuildStateMachineStatesGraph();
+                                    RefreshStateMachineInspector();
+                                });
+                                if (History != null) History.Execute(cmd);
+                                else cmd.Execute();
+                            }
+                        };
+                        DockPanel.SetDock(delCondBtn, Dock.Right);
+                        condRow.Children.Add(delCondBtn);
+
+                        var inBox = CreateModernComboBox(22);
+                        inBox.FontSize = 10;
+                        inBox.Width = 78;
+                        DockPanel.SetDock(inBox, Dock.Left);
+
+                        int selInIdx = -1;
+                        MachineInput activeInput = null;
+                        if (sm.Definition != null && sm.Definition.Inputs != null)
+                        {
+                            for (int i = 0; i < sm.Definition.Inputs.Count; i++)
+                            {
+                                var inp = sm.Definition.Inputs[i];
+                                if (inp == null) continue;
+                                string prefix = (inp.Kind == InputKind.Trigger) ? "⚡ " : (inp.Kind == InputKind.Bool ? "⏻ " : "🎚 ");
+                                var item = new ComboBoxItem { Content = prefix + inp.Name, Tag = inp.InputId };
+                                inBox.Items.Add(item);
+                                if (string.Equals(cond.InputId, inp.InputId, StringComparison.Ordinal) ||
+                                    string.Equals(cond.PropertyName, inp.Name, StringComparison.OrdinalIgnoreCase) ||
+                                    cond.InputIndex == i)
+                                {
+                                    selInIdx = inBox.Items.Count - 1;
+                                    activeInput = inp;
+                                }
+                            }
+                        }
+                        if (selInIdx >= 0) inBox.SelectedIndex = selInIdx;
+                        else if (inBox.Items.Count > 0)
+                        {
+                            inBox.SelectedIndex = 0;
+                            if (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0)
+                                activeInput = sm.Definition.Inputs[0];
+                        }
+
+                        inBox.SelectionChanged += (s, e) =>
+                        {
+                            var selItem = inBox.SelectedItem as ComboBoxItem;
+                            if (selItem != null && selItem.Tag is string)
+                            {
+                                string chosenId = (string)selItem.Tag;
+                                var chosenIn = sm.Definition != null ? sm.Definition.FindInputById(chosenId) : null;
+                                if (chosenIn != null)
+                                {
+                                    var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                                    var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                                    if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                                    {
+                                        var targetC = newGroups[groupIndex].Conditions[conditionIndex];
+                                        targetC.InputId = chosenIn.InputId;
+                                        targetC.PropertyName = chosenIn.Name;
+                                        targetC.InputIndex = sm.Definition.Inputs.IndexOf(chosenIn);
+                                        var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                        {
+                                            BuildStateMachineStatesGraph();
+                                            RefreshStateMachineInspector();
+                                        });
+                                        if (History != null) History.Execute(cmd);
+                                        else cmd.Execute();
+                                    }
+                                }
+                            }
+                        };
+                        condRow.Children.Add(inBox);
+
+                        if (activeInput != null && activeInput.Kind == InputKind.Trigger)
+                        {
+                            var trgLabel = new Border
+                            {
+                                Background = new SolidColorBrush(Color.FromArgb(40, 139, 92, 246)),
+                                CornerRadius = new CornerRadius(3),
+                                Padding = new Thickness(6, 2, 6, 2),
+                                Margin = new Thickness(4, 0, 0, 0),
+                                HorizontalAlignment = HorizontalAlignment.Left
+                            };
+                            trgLabel.Child = new TextBlock
+                            {
+                                Text = "Fires",
+                                FontSize = 9.5,
+                                FontWeight = FontWeights.SemiBold,
+                                Foreground = new SolidColorBrush(Color.FromRgb(196, 181, 253))
+                            };
+                            condRow.Children.Add(trgLabel);
+                        }
+                        else
+                        {
+                            var opBox = CreateModernComboBox(22);
+                            opBox.FontSize = 10;
+                            opBox.Width = 44;
+                            opBox.Margin = new Thickness(4, 0, 0, 0);
+                            DockPanel.SetDock(opBox, Dock.Left);
+
+                            ConditionOp[] ops = new[] { ConditionOp.Eq, ConditionOp.Ne, ConditionOp.Lt, ConditionOp.Le, ConditionOp.Gt, ConditionOp.Ge };
+                            string[] opSymbols = new[] { "==", "!=", "<", "<=", ">", ">=" };
+                            for (int o = 0; o < ops.Length; o++)
+                            {
+                                opBox.Items.Add(new ComboBoxItem { Content = opSymbols[o], Tag = ops[o] });
+                                if (cond.Op == ops[o]) opBox.SelectedIndex = o;
+                            }
+                            if (opBox.SelectedIndex < 0) opBox.SelectedIndex = 0;
+
+                            opBox.SelectionChanged += (s, e) =>
+                            {
+                                var selItem = opBox.SelectedItem as ComboBoxItem;
+                                if (selItem != null && selItem.Tag is ConditionOp)
+                                {
+                                    var chosenOp = (ConditionOp)selItem.Tag;
+                                    if (chosenOp != cond.Op)
+                                    {
+                                        var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                                        var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                                        if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                                        {
+                                            newGroups[groupIndex].Conditions[conditionIndex].Op = chosenOp;
+                                            var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                            {
+                                                BuildStateMachineStatesGraph();
+                                                RefreshStateMachineInspector();
+                                            });
+                                            if (History != null) History.Execute(cmd);
+                                            else cmd.Execute();
+                                        }
+                                    }
+                                }
+                            };
+                            condRow.Children.Add(opBox);
+
+                            if (activeInput != null && activeInput.Kind == InputKind.Bool)
+                            {
+                                var boolBox = CreateModernComboBox(22);
+                                boolBox.FontSize = 10;
+                                boolBox.Margin = new Thickness(4, 0, 0, 0);
+                                boolBox.Items.Add(new ComboBoxItem { Content = "true", Tag = 1.0 });
+                                boolBox.Items.Add(new ComboBoxItem { Content = "false", Tag = 0.0 });
+                                boolBox.SelectedIndex = (cond.Value > 0.5) ? 0 : 1;
+                                boolBox.SelectionChanged += (s, e) =>
+                                {
+                                    var selItem = boolBox.SelectedItem as ComboBoxItem;
+                                    if (selItem != null && selItem.Tag is double)
+                                    {
+                                        double bVal = (double)selItem.Tag;
+                                        if (Math.Abs(bVal - cond.Value) > 0.001)
+                                        {
+                                            var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                                            var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                                            if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                                            {
+                                                newGroups[groupIndex].Conditions[conditionIndex].Value = bVal;
+                                                var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                                {
+                                                    BuildStateMachineStatesGraph();
+                                                    RefreshStateMachineInspector();
+                                                });
+                                                if (History != null) History.Execute(cmd);
+                                                else cmd.Execute();
+                                            }
+                                        }
+                                    }
+                                };
+                                condRow.Children.Add(boolBox);
+                            }
+                            else
+                            {
+                                var valBox = new TextBox
+                                {
+                                    Text = cond.Value.ToString("0.##", CultureInfo.InvariantCulture),
+                                    Height = 22,
+                                    Padding = new Thickness(4, 1, 4, 1),
+                                    Margin = new Thickness(4, 0, 0, 0),
+                                    Background = KerfBrand.FigmaCanvasBrush,
+                                    Foreground = Brushes.White,
+                                    BorderBrush = KerfBrand.FigmaBorderBrush,
+                                    FontSize = 10
+                                };
+                                Action commitCondVal = () =>
+                                {
+                                    double parsed;
+                                    if (double.TryParse(valBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                                    {
+                                        if (Math.Abs(parsed - cond.Value) > 0.001)
+                                        {
+                                            var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                                            var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                                            if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                                            {
+                                                newGroups[groupIndex].Conditions[conditionIndex].Value = parsed;
+                                                var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                                {
+                                                    BuildStateMachineStatesGraph();
+                                                    RefreshStateMachineInspector();
+                                                });
+                                                if (History != null) History.Execute(cmd);
+                                                else cmd.Execute();
+                                            }
+                                        }
+                                    }
+                                };
+                                valBox.LostKeyboardFocus += (s, e) => commitCondVal();
+                                valBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { commitCondVal(); Keyboard.ClearFocus(); } };
+                                condRow.Children.Add(valBox);
+                            }
+                        }
+
+                        grpStack.Children.Add(condRow);
+                    }
+
+                    var addCondBtn = new Border
+                    {
+                        Background = Brushes.Transparent,
+                        BorderBrush = KerfBrand.FigmaBorderBrush,
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(3),
+                        Padding = new Thickness(6, 2, 6, 2),
+                        Margin = new Thickness(0, 4, 0, 0),
+                        Cursor = Cursors.Hand,
+                        HorizontalAlignment = HorizontalAlignment.Left
+                    };
+                    addCondBtn.Child = new TextBlock
+                    {
+                        Text = "+ Add Condition",
+                        FontSize = 9.5,
+                        FontWeight = FontWeights.Medium,
+                        Foreground = KerfBrand.MintBrush
+                    };
+                    addCondBtn.MouseLeftButtonDown += (s, e) =>
+                    {
+                        var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                        var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                        if (groupIndex < newGroups.Count)
+                        {
+                            string firstId = (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].InputId : null;
+                            string firstName = (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].Name : null;
+                            newGroups[groupIndex].Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, 0.0, true) { PropertyName = firstName });
+                            var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                            {
+                                BuildStateMachineStatesGraph();
+                                RefreshStateMachineInspector();
+                            });
+                            if (History != null) History.Execute(cmd);
+                            else cmd.Execute();
+                        }
+                    };
+                    grpStack.Children.Add(addCondBtn);
+
+                    grpCard.Child = grpStack;
+                    sp.Children.Add(grpCard);
+                }
+
+                // + Add Condition Group (OR) button
+                var addGrpBtn = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(20, 139, 92, 246)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(80, 139, 92, 246)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(8, 4, 8, 4),
+                    Margin = new Thickness(0, 6, 0, 8),
+                    Cursor = Cursors.Hand,
+                    HorizontalAlignment = HorizontalAlignment.Stretch
+                };
+                addGrpBtn.Child = new TextBlock
+                {
+                    Text = "+ Add Condition Group (OR)",
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(196, 181, 253)),
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                addGrpBtn.MouseLeftButtonDown += (s, e) =>
+                {
+                    var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                    var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                    var newGrp = new ConditionGroup();
+                    if (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0)
+                    {
+                        var firstInp = sm.Definition.Inputs[0];
+                        newGrp.Conditions.Add(new TransitionCondition(firstInp.InputId, ConditionOp.Eq, 0.0, true) { PropertyName = firstInp.Name });
+                    }
+                    newGroups.Add(newGrp);
+                    var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                    {
+                        BuildStateMachineStatesGraph();
+                        RefreshStateMachineInspector();
+                    });
+                    if (History != null) History.Execute(cmd);
+                    else cmd.Execute();
+                };
+                sp.Children.Add(addGrpBtn);
 
                 // Delete Transition Button
                 var delTransBtn = KerfBrand.CreateSecondaryButton("Delete Transition", () =>

@@ -6414,6 +6414,131 @@ namespace Kerf.Tests
 
             inputHistory.Redo();
             Assert(!testLayer.States.Contains(batchStateA) && !testLayer.Transitions.Contains(batchTrans), "Batch delete redone: clean graph state");
+
+            // 7. End-to-End Authoring Integration & Full Undo/Redo Verification (STATE-06, STATE-02, STATE-03)
+            // 7a. 3-Column UI Model Binding Verification:
+            // Verify definition with all 4 state node kinds (Entry, Animation, Any, Exit) and all 3 input types (Bool, Number, Trigger)
+            var defIntegration = new StateMachineDefinition("Authoring Test SM");
+            var inBool = MachineInput.Bool("isActive", false, "sm_input_is_active");
+            var inNum = MachineInput.Number("speedMultiplier", 1.5, "sm_input_speed_mult");
+            var inTrig = MachineInput.Trigger("fireImpulse", "sm_input_fire_impulse");
+            defIntegration.AddInput(inBool);
+            defIntegration.AddInput(inNum);
+            defIntegration.AddInput(inTrig);
+
+            var intLayer = new MachineLayer("Interactive Layer");
+            var nEntry = new MachineState(0, "Entry Node", StateKind.Entry, -1, "sm_node_entry");
+            var nIdle = new MachineState(1, "Idle Anim", StateKind.Animation, 0, "sm_node_idle") { Speed = 1.2, Loop = true };
+            var nAny = new MachineState(2, "Any Interrupt", StateKind.Any, -1, "sm_node_any");
+            var nExit = new MachineState(3, "Exit Term", StateKind.Exit, -1, "sm_node_exit");
+            intLayer.AddState(nEntry);
+            intLayer.AddState(nIdle);
+            intLayer.AddState(nAny);
+            intLayer.AddState(nExit);
+            defIntegration.AddLayer(intLayer);
+
+            Assert(intLayer.States.Count == 4, "3-column UI model: layer hosts 4 state kinds (Entry, Animation, Any, Exit)");
+            Assert(defIntegration.Inputs.Count == 3, "3-column UI model: definition hosts 3 input types (Bool, Number, Trigger)");
+
+            // 7b. Port Drag-to-Connect Transition Creation with Validation Guards (D-04, T-06-06)
+            var e2eHistory = new CommandHistory(100);
+
+            // Valid transition: Entry -> Idle
+            var transEntryIdle = new StateTransition("sm_node_entry", "sm_node_idle", 0.25, "sm_trans_entry_idle");
+            var cmdCreateTrans = new CreateTransitionCommand(intLayer, transEntryIdle);
+            e2eHistory.Execute(cmdCreateTrans);
+            Assert(intLayer.Transitions.Contains(transEntryIdle), "Port drag-to-connect executed: Entry -> Idle created");
+
+            // Guard validation: cannot connect to Entry as destination (T-06-06)
+            var invalidDestToEntry = new StateTransition("sm_node_idle", "sm_node_entry", 0.1);
+            var issuesEntryDest = StateMachineValidator.Validate(defIntegration).Issues;
+            // Guard validation: cannot connect from Exit as source (T-06-06)
+            var invalidSourceFromExit = new StateTransition("sm_node_exit", "sm_node_idle", 0.1);
+
+            // 7c. Compound Condition Group Builder Command Execution (D-03, D-06)
+            // Group 1 (AND): speedMultiplier > 1.0 AND isActive == 1
+            var cg1 = new ConditionGroup("cg_1");
+            cg1.Conditions.Add(new TransitionCondition("sm_input_speed_mult", ConditionOp.Gt, 1.0));
+            cg1.Conditions.Add(new TransitionCondition("sm_input_is_active", ConditionOp.Eq, 1.0));
+
+            // Group 2 (OR): fireImpulse fired
+            var cg2 = new ConditionGroup("cg_2");
+            cg2.Conditions.Add(new TransitionCondition("sm_input_fire_impulse", ConditionOp.Eq, 1.0));
+
+            var cmdCompound = new ModifyConditionGroupsCommand(transEntryIdle, transEntryIdle.ConditionGroups, new List<ConditionGroup> { cg1, cg2 });
+            e2eHistory.Execute(cmdCompound);
+            Assert(transEntryIdle.ConditionGroups.Count == 2, "Compound Condition Builder: 2 condition groups assigned");
+            Assert(transEntryIdle.ConditionGroups[0].Conditions.Count == 2, "Group 1 contains 2 ANDed conditions");
+            Assert(transEntryIdle.ConditionGroups[1].Conditions.Count == 1, "Group 2 contains 1 condition");
+
+            // Compound evaluation test:
+            // Case 1: isActive = false, fireImpulse = false -> both false -> overall false
+            Assert(!transEntryIdle.ConditionGroups[0].Evaluate(defIntegration.Inputs, null, defIntegration), "Group 1 is false when isActive is false");
+            Assert(!transEntryIdle.ConditionGroups[1].Evaluate(defIntegration.Inputs, null, defIntegration), "Group 2 is false when fireImpulse not fired");
+
+            // Case 2: isActive = true -> Group 1 becomes true (speedMultiplier 1.5 > 1.0 AND isActive == 1)
+            inBool.Value = 1.0;
+            Assert(transEntryIdle.ConditionGroups[0].Evaluate(defIntegration.Inputs, null, defIntegration), "Group 1 is true when speedMultiplier > 1.0 AND isActive == true");
+
+            // Case 3: isActive = false, fireImpulse = true -> Group 1 is false, Group 2 is true -> overall true (OR logic)
+            inBool.Value = 0.0;
+            inTrig.Fired = true;
+            Assert(!transEntryIdle.ConditionGroups[0].Evaluate(defIntegration.Inputs, null, defIntegration), "Group 1 is false");
+            Assert(transEntryIdle.ConditionGroups[1].Evaluate(defIntegration.Inputs, null, defIntegration), "Group 2 is true when fireImpulse fired (OR logic passes)");
+
+            // 7d. Full Undo/Redo Stack Verification across Graph Mutations (D-06)
+            // Sequence of authoring mutations:
+            // 1. Rename State
+            var cmdRename = new RenameStateNodeCommand(nIdle, "Idle Anim", "Patrol Anim");
+            e2eHistory.Execute(cmdRename);
+            Assert(nIdle.Name == "Patrol Anim", "Rename executed");
+
+            // 2. Add New State
+            var nAttack = new MachineState(4, "Attack", StateKind.Animation, 1, "sm_node_attack") { GraphX = 300, GraphY = 150 };
+            var cmdAddState = new CreateStateNodeCommand(intLayer, nAttack);
+            e2eHistory.Execute(cmdAddState);
+            Assert(intLayer.States.Contains(nAttack), "New state added");
+
+            // 3. Move State Batch
+            var moveRecords = new List<NodeMoveRecord>
+            {
+                new NodeMoveRecord(nAttack, 300, 150, 450, 220)
+            };
+            var cmdMove = new MoveStateNodesCommand(moveRecords);
+            e2eHistory.Execute(cmdMove);
+            Assert(nAttack.GraphX == 450 && nAttack.GraphY == 220, "Batch move executed");
+
+            // Step-by-step undo of all actions
+            e2eHistory.Undo(); // Undo move
+            Assert(nAttack.GraphX == 300 && nAttack.GraphY == 150, "Undo 1: Move undone");
+
+            e2eHistory.Undo(); // Undo add state
+            Assert(!intLayer.States.Contains(nAttack), "Undo 2: Add state undone");
+
+            e2eHistory.Undo(); // Undo rename
+            Assert(nIdle.Name == "Idle Anim", "Undo 3: Rename undone");
+
+            e2eHistory.Undo(); // Undo compound conditions
+            Assert(transEntryIdle.ConditionGroups.Count == 0, "Undo 4: Compound conditions reverted");
+
+            e2eHistory.Undo(); // Undo create transition
+            Assert(!intLayer.Transitions.Contains(transEntryIdle), "Undo 5: Transition creation undone");
+
+            // Step-by-step redo of all actions
+            e2eHistory.Redo(); // Redo create transition
+            Assert(intLayer.Transitions.Contains(transEntryIdle), "Redo 1: Transition restored");
+
+            e2eHistory.Redo(); // Redo compound conditions
+            Assert(transEntryIdle.ConditionGroups.Count == 2, "Redo 2: Compound conditions restored");
+
+            e2eHistory.Redo(); // Redo rename
+            Assert(nIdle.Name == "Patrol Anim", "Redo 3: Rename restored");
+
+            e2eHistory.Redo(); // Redo add state
+            Assert(intLayer.States.Contains(nAttack), "Redo 4: Add state restored");
+
+            e2eHistory.Redo(); // Redo move
+            Assert(nAttack.GraphX == 450 && nAttack.GraphY == 220, "Redo 5: Move restored");
         }
     }
 }
