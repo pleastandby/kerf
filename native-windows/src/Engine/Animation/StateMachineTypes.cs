@@ -263,6 +263,13 @@ namespace Kerf.Engine.Animation
         BlendDirect = 5
     }
 
+    public enum StateType
+    {
+        Single = 0,
+        Blend1D = 1,
+        Additive = 2
+    }
+
     public class Blend1DItem
     {
         public double Threshold { get; set; }
@@ -296,6 +303,8 @@ namespace Kerf.Engine.Animation
         public string NodeId { get; set; }
         public int Id { get; set; }
         public string Name { get; set; }
+        public string Caption { get; set; }
+        public StateType StateType { get; set; }
         public StateKind Kind { get; set; }
         public int ClipIndex { get; set; }
         public string ClipName { get; set; }
@@ -317,6 +326,8 @@ namespace Kerf.Engine.Animation
             NodeId = !string.IsNullOrEmpty(nodeId) ? nodeId : "sm_node_" + Guid.NewGuid().ToString("N");
             Id = id;
             Name = name ?? "State";
+            Caption = string.Empty;
+            StateType = StateType.Single;
             Kind = kind;
             ClipIndex = clipIndex;
             ClipName = null;
@@ -327,6 +338,26 @@ namespace Kerf.Engine.Animation
             Loop = true;
             Blend1DItems = new List<Blend1DItem>();
             BlendDirectItems = new List<BlendDirectItem>();
+        }
+
+        public bool HasInputPort()
+        {
+            return Kind != StateKind.Entry;
+        }
+
+        public bool HasOutputPort()
+        {
+            return Kind != StateKind.Exit;
+        }
+
+        public static bool HasInputPort(MachineState s)
+        {
+            return s != null && s.HasInputPort();
+        }
+
+        public static bool HasOutputPort(MachineState s)
+        {
+            return s != null && s.HasOutputPort();
         }
     }
 
@@ -368,8 +399,15 @@ namespace Kerf.Engine.Animation
         }
 
         public double Duration { get; set; } // seconds, 0 = instant
+        public double DurationMs
+        {
+            get { return Duration * 1000.0; }
+            set { Duration = Math.Max(0.0, value / 1000.0); }
+        }
         public double? ExitTime { get; set; } // normalized [0, 1] of from-state duration
         public bool Interrupt { get; set; }
+        public bool PauseSourceWhenExiting { get; set; }
+        public bool AllowExitDuringTransition { get; set; }
         public InterpMode Interpolation { get; set; }
         public double X1 { get; set; }
         public double Y1 { get; set; }
@@ -392,6 +430,8 @@ namespace Kerf.Engine.Animation
             ConditionGroups = new List<ConditionGroup>();
             ExitTime = null;
             Interrupt = true;
+            PauseSourceWhenExiting = false;
+            AllowExitDuringTransition = false;
             Interpolation = InterpMode.Cubic;
             X1 = 0.25;
             Y1 = 0.1;
@@ -431,6 +471,18 @@ namespace Kerf.Engine.Animation
         public StateTransition WithInterrupt(bool interrupt)
         {
             Interrupt = interrupt;
+            return this;
+        }
+
+        public StateTransition WithPauseSourceWhenExiting(bool pause)
+        {
+            PauseSourceWhenExiting = pause;
+            return this;
+        }
+
+        public StateTransition WithAllowExitDuringTransition(bool allow)
+        {
+            AllowExitDuringTransition = allow;
             return this;
         }
 

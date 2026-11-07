@@ -67,6 +67,13 @@ It delivers:
 - Visual styling of nodes and ports to conform with `KerfBrand` dark theme (mint accents for active/selected states, dark card backgrounds).
 - Exact zoom step thresholds and pan clamping logic for graph navigation.
 
+### User Requirements (Refinement & Precision)
+- **D-08:** Clean Slate Architecture (Zero Presets). All state machines, states, inputs, listeners, and focus objects are created by the user from an empty slate. No preset dummy data (like "Idle", "interrupt", or preset inputs) are generated; mockups are strictly visual references.
+- **D-09:** Context-Aware Right Panel Switching. When in Animate mode and State Machine mode is active (no state timeline open), the primary right panel replaces layer transform/effects with the dedicated State / Transition Inspector. Double-clicking a state to elaborate its timeline restores the original keyframe/layer property inspector.
+- **D-10:** Specialized Port Sockets. Entry state possesses an output port on its right edge only (no input port). Exit state possesses an input port on its left edge only (no output port). Any State and Custom (Animation) states possess an input port on the left edge and an output port on the right edge.
+- **D-11:** Single-Wire Bidirectional Transition & Direction Badges. Transitions between pairs of states are rendered as a single connection line with two center circular badges showing `>` and `<` direction markers. Clicking a badge opens the Transition Inspector on the right panel with Duration (ms), Exit time (checkbox), Pause source when exiting (checkbox), Allow exit during transition (checkbox), collapsible Events dropdown, and collapsible Animations window.
+- **D-12:** Canvas Delete Shortcut & Animation List Reordering. Pressing `Delete` or `Backspace` in the graph canvas deletes selected state nodes and transitions via transactional commands. The Animations menu provides delete options and order rearrangement for states.
+
 </decisions>
 
 <canonical_refs>

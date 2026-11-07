@@ -2132,6 +2132,8 @@ namespace Kerf.Engine
         public double Duration { get; set; }
         public double? ExitTime { get; set; }
         public bool Interrupt { get; set; }
+        public bool PauseSourceWhenExiting { get; set; }
+        public bool AllowExitDuringTransition { get; set; }
         public InterpMode Interpolation { get; set; }
         public double X1 { get; set; }
         public double Y1 { get; set; }
@@ -2143,6 +2145,8 @@ namespace Kerf.Engine
             Duration = 0.0;
             ExitTime = null;
             Interrupt = true;
+            PauseSourceWhenExiting = false;
+            AllowExitDuringTransition = false;
             Interpolation = InterpMode.Cubic;
             X1 = 0.25;
             Y1 = 0.1;
@@ -2157,6 +2161,8 @@ namespace Kerf.Engine
                 Duration = trans.Duration;
                 ExitTime = trans.ExitTime;
                 Interrupt = trans.Interrupt;
+                PauseSourceWhenExiting = trans.PauseSourceWhenExiting;
+                AllowExitDuringTransition = trans.AllowExitDuringTransition;
                 Interpolation = trans.Interpolation;
                 X1 = trans.X1;
                 Y1 = trans.Y1;
@@ -2165,11 +2171,13 @@ namespace Kerf.Engine
             }
         }
 
-        public TransitionSnapshot(double duration, double? exitTime, bool interrupt, InterpMode interp, double x1, double y1, double x2, double y2)
+        public TransitionSnapshot(double duration, double? exitTime, bool interrupt, InterpMode interp, double x1, double y1, double x2, double y2, bool pauseSource = false, bool allowExit = false)
         {
             Duration = duration;
             ExitTime = exitTime;
             Interrupt = interrupt;
+            PauseSourceWhenExiting = pauseSource;
+            AllowExitDuringTransition = allowExit;
             Interpolation = interp;
             X1 = x1;
             Y1 = y1;
@@ -2183,12 +2191,108 @@ namespace Kerf.Engine
             snap.Duration = Duration;
             snap.ExitTime = ExitTime;
             snap.Interrupt = Interrupt;
+            snap.PauseSourceWhenExiting = PauseSourceWhenExiting;
+            snap.AllowExitDuringTransition = AllowExitDuringTransition;
             snap.Interpolation = Interpolation;
             snap.X1 = X1;
             snap.Y1 = Y1;
             snap.X2 = X2;
             snap.Y2 = Y2;
             return snap;
+        }
+    }
+
+    public class StateSnapshot
+    {
+        public string Name { get; set; }
+        public string Caption { get; set; }
+        public StateType StateType { get; set; }
+        public int ClipIndex { get; set; }
+        public string ClipName { get; set; }
+        public double Speed { get; set; }
+        public bool Loop { get; set; }
+
+        public StateSnapshot()
+        {
+            Name = "State";
+            Caption = string.Empty;
+            StateType = StateType.Single;
+            ClipIndex = -1;
+            ClipName = null;
+            Speed = 1.0;
+            Loop = true;
+        }
+
+        public StateSnapshot(MachineState s) : this()
+        {
+            if (s != null)
+            {
+                Name = s.Name;
+                Caption = s.Caption ?? string.Empty;
+                StateType = s.StateType;
+                ClipIndex = s.ClipIndex;
+                ClipName = s.ClipName;
+                Speed = s.Speed;
+                Loop = s.Loop;
+            }
+        }
+
+        public StateSnapshot Clone()
+        {
+            StateSnapshot snap = new StateSnapshot();
+            snap.Name = Name;
+            snap.Caption = Caption;
+            snap.StateType = StateType;
+            snap.ClipIndex = ClipIndex;
+            snap.ClipName = ClipName;
+            snap.Speed = Speed;
+            snap.Loop = Loop;
+            return snap;
+        }
+    }
+
+    public class ModifyStateNodeCommand : ICommand
+    {
+        public string Description
+        {
+            get { return "Modify State Node"; }
+        }
+
+        private readonly MachineState _state;
+        private readonly StateSnapshot _oldSnapshot;
+        private readonly StateSnapshot _newSnapshot;
+        private readonly Action _onChanged;
+
+        public ModifyStateNodeCommand(MachineState state, StateSnapshot oldSnapshot, StateSnapshot newSnapshot, Action onChanged = null)
+        {
+            _state = state;
+            _oldSnapshot = oldSnapshot != null ? oldSnapshot.Clone() : null;
+            _newSnapshot = newSnapshot != null ? newSnapshot.Clone() : null;
+            _onChanged = onChanged;
+        }
+
+        private void Apply(StateSnapshot s)
+        {
+            if (_state == null || s == null) return;
+            _state.Name = s.Name;
+            _state.Caption = s.Caption;
+            _state.StateType = s.StateType;
+            _state.ClipIndex = s.ClipIndex;
+            _state.ClipName = s.ClipName;
+            _state.Speed = s.Speed;
+            _state.Loop = s.Loop;
+        }
+
+        public void Execute()
+        {
+            Apply(_newSnapshot);
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            Apply(_oldSnapshot);
+            if (_onChanged != null) _onChanged();
         }
     }
 
@@ -2613,6 +2717,8 @@ namespace Kerf.Engine
             _transition.Duration = s.Duration;
             _transition.ExitTime = s.ExitTime;
             _transition.Interrupt = s.Interrupt;
+            _transition.PauseSourceWhenExiting = s.PauseSourceWhenExiting;
+            _transition.AllowExitDuringTransition = s.AllowExitDuringTransition;
             _transition.Interpolation = s.Interpolation;
             _transition.X1 = s.X1;
             _transition.Y1 = s.Y1;

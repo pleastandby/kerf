@@ -90,6 +90,7 @@ namespace Kerf.Tests
             RunTest("Interactive State Machine Engine: Graph Model, Condition Groups, Inputs, Validation & Undo/Redo", TestInteractiveStateMachineEngine);
             RunTest("FigCraft Optical Liquid Glass Model & Effects Panel Parity", TestFigCraftLiquidGlassAndEffectsPanel);
             RunTest("Group Bounds Lockstep, Zero Fill Default, HitTest & Undo/Redo", TestGroupingBoundingBoxAndNoFillDefault);
+            RunTest("Interactive State Machine Refinement: Clean Slate, Ports, Single-Wire Badges & Canvas Deletion", TestInteractiveStateMachineEngineRefinement);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -6772,6 +6773,155 @@ namespace Kerf.Tests
             history.Redo();
             Assert(!page.Layers.Contains(group), "Redo Ungroup: Group removed again");
             Assert(page.Layers.Contains(rect1), "Redo Ungroup: rect1 unpacked");
+        }
+
+        private static void TestInteractiveStateMachineEngineRefinement()
+        {
+            // 1. Clean Slate Initializer Verification (D-08)
+            var def = new StateMachineDefinition("CleanStateMachine");
+            var baseLayer = new MachineLayer("Base");
+            def.AddLayer(baseLayer);
+            var entryState = new MachineState(0, "Entry", StateKind.Entry);
+            var anyState = new MachineState(1, "Any State", StateKind.Any);
+            var exitState = new MachineState(2, "Exit", StateKind.Exit);
+            baseLayer.AddState(entryState);
+            baseLayer.AddState(anyState);
+            baseLayer.AddState(exitState);
+
+            Assert(def.Inputs.Count == 0, "Clean Slate: StateMachineDefinition starts with 0 preset inputs");
+            Assert(def.Layers.Count == 1, "Clean Slate: 1 base layer");
+            Assert(baseLayer.Transitions.Count == 0, "Clean Slate: 0 preset transitions");
+            Assert(baseLayer.States.Count == 3, "Clean Slate: Only Entry, Any State, and Exit exist");
+            Assert(baseLayer.States[0].Kind == StateKind.Entry, "First state is Entry");
+            Assert(baseLayer.States[1].Kind == StateKind.Any, "Second state is Any State");
+            Assert(baseLayer.States[2].Kind == StateKind.Exit, "Third state is Exit");
+
+            // 2. Specialized Port Sockets Verification (D-10 & Image 5)
+            // Entry has Output port only, no Input port
+            Assert(!entryState.HasInputPort(), "Entry state has NO input port (HasInputPort == false)");
+            Assert(entryState.HasOutputPort(), "Entry state has output port (HasOutputPort == true)");
+
+            // Exit has Input port only, no Output port
+            Assert(exitState.HasInputPort(), "Exit state has input port (HasInputPort == true)");
+            Assert(!exitState.HasOutputPort(), "Exit state has NO output port (HasOutputPort == false)");
+
+            // Any State has both Input and Output ports
+            Assert(anyState.HasInputPort(), "Any State has input port (HasInputPort == true)");
+            Assert(anyState.HasOutputPort(), "Any State has output port (HasOutputPort == true)");
+
+            // Animation / Custom State has both Input and Output ports
+            var animState = new MachineState(3, "WalkCycle", StateKind.Animation, 0, "sm_node_walk");
+            Assert(animState.HasInputPort(), "Animation/Custom state has input port (HasInputPort == true)");
+            Assert(animState.HasOutputPort(), "Animation/Custom state has output port (HasOutputPort == true)");
+
+            // 3. State Node Properties & StateSnapshot / ModifyStateNodeCommand (D-09)
+            Assert(string.IsNullOrEmpty(animState.Caption), "Default Caption is empty");
+            Assert(animState.StateType == StateType.Single, "Default StateType is Single");
+
+            var history = new CommandHistory(50);
+            var oldStateSnap = new StateSnapshot(animState);
+            var newStateSnap = new StateSnapshot(animState)
+            {
+                Caption = "Walk cycle forward loop animation",
+                StateType = StateType.Blend1D,
+                Speed = 1.25,
+                Loop = true
+            };
+            var cmdModState = new ModifyStateNodeCommand(animState, oldStateSnap, newStateSnap);
+            history.Execute(cmdModState);
+
+            Assert(animState.Caption == "Walk cycle forward loop animation", "ModifyStateNodeCommand: Caption updated");
+            Assert(animState.StateType == StateType.Blend1D, "ModifyStateNodeCommand: StateType updated to Blend1D");
+            Assert(animState.Speed == 1.25, "ModifyStateNodeCommand: Speed updated to 1.25");
+            Assert(animState.Loop == true, "ModifyStateNodeCommand: Loop updated to true");
+
+            // Undo state modifications
+            history.Undo();
+            Assert(string.IsNullOrEmpty(animState.Caption), "Undo ModifyStateNodeCommand: Caption reverted");
+            Assert(animState.StateType == StateType.Single, "Undo ModifyStateNodeCommand: StateType reverted to Single");
+            Assert(animState.Speed == 1.0, "Undo ModifyStateNodeCommand: Speed reverted to 1.0");
+
+            // Redo state modifications
+            history.Redo();
+            Assert(animState.Caption == "Walk cycle forward loop animation", "Redo ModifyStateNodeCommand: Caption restored");
+            Assert(animState.StateType == StateType.Blend1D, "Redo ModifyStateNodeCommand: StateType restored to Blend1D");
+
+            // 4. StateTransition Properties, DurationMs, and TransitionSnapshot (D-11)
+            var trans = new StateTransition(entryState.NodeId, animState.NodeId, 0.35, "sm_trans_entry_walk");
+            Assert(Math.Abs(trans.DurationMs - 350.0) < 0.01, "DurationMs returns milliseconds (0.35s == 350ms)");
+            trans.DurationMs = 500.0;
+            Assert(Math.Abs(trans.Duration - 0.5) < 0.001, "Setting DurationMs converts to seconds (500ms == 0.5s)");
+
+            Assert(trans.PauseSourceWhenExiting == false, "Default PauseSourceWhenExiting is false");
+            Assert(trans.AllowExitDuringTransition == false, "Default AllowExitDuringTransition is false");
+
+            var oldTransSnap = new TransitionSnapshot(trans);
+            var newTransSnap = oldTransSnap.Clone();
+            newTransSnap.Duration = 0.75;
+            newTransSnap.PauseSourceWhenExiting = true;
+            newTransSnap.AllowExitDuringTransition = true;
+            newTransSnap.ExitTime = 0.9;
+
+            var cmdModTrans = new ModifyTransitionCommand(trans, oldTransSnap, newTransSnap);
+            history.Execute(cmdModTrans);
+
+            Assert(trans.Duration == 0.75, "ModifyTransitionCommand: Duration updated to 0.75s");
+            Assert(Math.Abs(trans.DurationMs - 750.0) < 0.01, "DurationMs reflects 750ms");
+            Assert(trans.PauseSourceWhenExiting == true, "ModifyTransitionCommand: PauseSourceWhenExiting updated to true");
+            Assert(trans.AllowExitDuringTransition == true, "ModifyTransitionCommand: AllowExitDuringTransition updated to true");
+            Assert(trans.ExitTime.HasValue && trans.ExitTime.Value == 0.9, "ModifyTransitionCommand: ExitTime updated to 0.9");
+
+            // Undo transition modifications
+            history.Undo();
+            Assert(trans.Duration == 0.5, "Undo ModifyTransitionCommand: Duration reverted to 0.5s");
+            Assert(trans.PauseSourceWhenExiting == false, "Undo ModifyTransitionCommand: PauseSourceWhenExiting reverted to false");
+            Assert(trans.AllowExitDuringTransition == false, "Undo ModifyTransitionCommand: AllowExitDuringTransition reverted to false");
+            Assert(!trans.ExitTime.HasValue, "Undo ModifyTransitionCommand: ExitTime reverted to null");
+
+            // Redo transition modifications
+            history.Redo();
+            Assert(trans.Duration == 0.75, "Redo ModifyTransitionCommand: Duration restored");
+            Assert(trans.PauseSourceWhenExiting == true, "Redo ModifyTransitionCommand: PauseSourceWhenExiting restored");
+            Assert(trans.AllowExitDuringTransition == true, "Redo ModifyTransitionCommand: AllowExitDuringTransition restored");
+
+            // 5. Canvas Selection Deletion via DeleteStateNodesCommand and DeleteTransitionsCommand (D-12)
+            baseLayer.AddState(animState);
+            baseLayer.AddTransition(trans);
+
+            var reverseTrans = new StateTransition(animState.NodeId, entryState.NodeId, 0.4, "sm_trans_walk_entry");
+            baseLayer.AddTransition(reverseTrans);
+
+            Assert(baseLayer.States.Count == 4, "Layer contains 4 states");
+            Assert(baseLayer.Transitions.Count == 2, "Layer contains 2 transitions (bidirectional pair)");
+
+            // Delete transition command
+            var cmdDelTrans = new DeleteTransitionsCommand(baseLayer, reverseTrans);
+            history.Execute(cmdDelTrans);
+            Assert(baseLayer.Transitions.Count == 1, "DeleteTransitionsCommand: 1 transition removed, 1 remains");
+            Assert(!baseLayer.Transitions.Contains(reverseTrans), "Reverse transition removed");
+
+            // Undo transition deletion
+            history.Undo();
+            Assert(baseLayer.Transitions.Count == 2, "Undo DeleteTransitionsCommand: transition restored");
+            Assert(baseLayer.Transitions.Contains(reverseTrans), "Reverse transition restored");
+
+            // Delete state command with cascade transition deletion
+            var cmdDelState = new DeleteStateNodesCommand(baseLayer, animState);
+            history.Execute(cmdDelState);
+            Assert(!baseLayer.States.Contains(animState), "DeleteStateNodesCommand: WalkCycle state removed");
+            Assert(baseLayer.Transitions.Count == 0, "DeleteStateNodesCommand: both incident transitions cascade-deleted");
+
+            // Undo state deletion
+            history.Undo();
+            Assert(baseLayer.States.Contains(animState), "Undo DeleteStateNodesCommand: WalkCycle state restored");
+            Assert(baseLayer.Transitions.Count == 2, "Undo DeleteStateNodesCommand: both incident transitions restored");
+            Assert(baseLayer.Transitions.Contains(trans), "trans restored");
+            Assert(baseLayer.Transitions.Contains(reverseTrans), "reverseTrans restored");
+
+            // Redo state deletion
+            history.Redo();
+            Assert(!baseLayer.States.Contains(animState), "Redo DeleteStateNodesCommand: state removed again");
+            Assert(baseLayer.Transitions.Count == 0, "Redo DeleteStateNodesCommand: transitions removed again");
         }
     }
 }

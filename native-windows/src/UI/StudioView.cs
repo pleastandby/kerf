@@ -3448,6 +3448,14 @@ namespace Kerf.UI
         {
             if (_propertyInspectorStack == null) return;
             _propertyInspectorStack.Children.Clear();
+
+            // When in Animate mode and State Machine is active (no state timeline open), show dedicated State Machine Inspector (D-09)
+            if (_currentStudioMode == StudioMode.Animate && _isStateMachineMode)
+            {
+                BuildStateMachineRightPanelInspector();
+                return;
+            }
+
             if (Document == null) return;
             var page = Document.GetActivePage();
             if (page == null) return;
@@ -4346,6 +4354,1158 @@ namespace Kerf.UI
             {
                 _propertyInspectorStack.Children.Add(BuildKeyframeMotionInspectorSection());
             }
+        }
+
+        private void BuildStateMachineRightPanelInspector()
+        {
+            if (_propertyInspectorStack == null) return;
+            _propertyInspectorStack.Children.Clear();
+
+            var sm = _timelineController != null ? _timelineController.ActiveStateMachine : null;
+            var layer = (sm != null && sm.Definition != null && sm.Definition.Layers != null && sm.Definition.Layers.Count > 0)
+                ? sm.Definition.Layers[0]
+                : null;
+
+            if (_selectedGraphTransition != null && layer != null)
+            {
+                _propertyInspectorStack.Children.Add(BuildTransitionRightPanelInspector(_selectedGraphTransition, layer));
+            }
+            else if (_selectedGraphStateIndex >= 0 && layer != null && _selectedGraphStateIndex < layer.States.Count && layer.States[_selectedGraphStateIndex] != null)
+            {
+                _propertyInspectorStack.Children.Add(BuildStateRightPanelInspector(layer.States[_selectedGraphStateIndex], layer));
+            }
+            else
+            {
+                _propertyInspectorStack.Children.Add(BuildStateMachineOverviewRightPanelInspector(layer));
+            }
+        }
+
+        private FrameworkElement BuildStateRightPanelInspector(MachineState state, MachineLayer layer)
+        {
+            var stack = new StackPanel();
+
+            // 1. Header: State
+            var title = new TextBlock
+            {
+                Text = "State",
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            stack.Children.Add(title);
+
+            // 2. Name Row
+            var nameBox = new TextBox
+            {
+                Text = state.Name,
+                Height = 26,
+                Padding = new Thickness(6, 3, 6, 3),
+                Background = KerfBrand.FigmaCanvasBrush,
+                Foreground = Brushes.White,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                FontSize = 11
+            };
+            Action commitName = () =>
+            {
+                if (!string.Equals(nameBox.Text, state.Name, StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(nameBox.Text))
+                {
+                    var cmd = new RenameStateNodeCommand(state, state.Name, nameBox.Text.Trim(), () =>
+                    {
+                        BuildStateMachineStatesGraph();
+                        BuildStateMachineAnimationsList();
+                        RefreshPropertyInspector();
+                    });
+                    if (History != null) History.Execute(cmd);
+                    else cmd.Execute();
+                }
+            };
+            nameBox.LostKeyboardFocus += (s, e) => commitName();
+            nameBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { commitName(); Keyboard.ClearFocus(); } };
+            stack.Children.Add(CreateTransitionFormRow("Name", nameBox));
+
+            // 3. Caption Row (Image 4: multi-line dark box)
+            var captionBox = new TextBox
+            {
+                Text = state.Caption ?? string.Empty,
+                Height = 64,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Padding = new Thickness(6, 4, 6, 4),
+                Background = KerfBrand.FigmaCanvasBrush,
+                Foreground = Brushes.White,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                FontSize = 11
+            };
+            Action commitCaption = () =>
+            {
+                if (!string.Equals(captionBox.Text, state.Caption ?? string.Empty, StringComparison.Ordinal))
+                {
+                    var oldSnap = new StateSnapshot(state);
+                    var newSnap = oldSnap.Clone();
+                    newSnap.Caption = captionBox.Text;
+                    var cmd = new ModifyStateNodeCommand(state, oldSnap, newSnap, () =>
+                    {
+                        RefreshPropertyInspector();
+                    });
+                    if (History != null) History.Execute(cmd);
+                    else cmd.Execute();
+                }
+            };
+            captionBox.LostKeyboardFocus += (s, e) => commitCaption();
+            stack.Children.Add(CreateTransitionFormRow("Caption", captionBox));
+
+            // 4. Type Row: Segmented buttons [ Single | 1D | Additive ]
+            var typeGrid = new System.Windows.Controls.Primitives.UniformGrid { Columns = 3, Height = 26, Margin = new Thickness(0, 4, 0, 8) };
+            var types = new[] { StateType.Single, StateType.Blend1D, StateType.Additive };
+            var typeNames = new[] { "Single", "1D", "Additive" };
+            for (int t = 0; t < types.Length; t++)
+            {
+                StateType stType = types[t];
+                string stLabel = typeNames[t];
+                bool isSel = (state.StateType == stType);
+                var btn = new Border
+                {
+                    Background = isSel ? new SolidColorBrush(Color.FromRgb(58, 64, 76)) : KerfBrand.FigmaCanvasBrush,
+                    BorderBrush = isSel ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(t == 0 ? 4 : 0, t == 2 ? 4 : 0, t == 2 ? 4 : 0, t == 0 ? 4 : 0),
+                    Cursor = Cursors.Hand,
+                    Child = new TextBlock
+                    {
+                        Text = stLabel,
+                        FontSize = 10.5,
+                        FontWeight = isSel ? FontWeights.Bold : FontWeights.Normal,
+                        Foreground = isSel ? KerfBrand.MintBrush : Brushes.White,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                };
+                btn.MouseLeftButtonDown += (s, e) =>
+                {
+                    if (state.StateType != stType)
+                    {
+                        var oldSnap = new StateSnapshot(state);
+                        var newSnap = oldSnap.Clone();
+                        newSnap.StateType = stType;
+                        var cmd = new ModifyStateNodeCommand(state, oldSnap, newSnap, () =>
+                        {
+                            BuildStateMachineStatesGraph();
+                            RefreshPropertyInspector();
+                        });
+                        if (History != null) History.Execute(cmd);
+                        else cmd.Execute();
+                    }
+                };
+                typeGrid.Children.Add(btn);
+            }
+            stack.Children.Add(CreateTransitionFormRow("Type", typeGrid));
+
+            // 5. Timeline selector (ComboBox)
+            var clipCombo = CreateModernComboBox(26);
+            if (Document != null && Document.Animation != null && Document.Animation.Clips != null)
+            {
+                for (int c = 0; c < Document.Animation.Clips.Count; c++)
+                {
+                    var clip = Document.Animation.Clips[c];
+                    clipCombo.Items.Add(new ComboBoxItem { Content = "→ " + (clip != null ? clip.Name : "Clip " + c), Tag = c });
+                }
+            }
+            clipCombo.SelectedIndex = (state.ClipIndex >= 0 && state.ClipIndex < clipCombo.Items.Count) ? state.ClipIndex : 0;
+            clipCombo.SelectionChanged += (s, e) =>
+            {
+                var item = clipCombo.SelectedItem as ComboBoxItem;
+                if (item != null && item.Tag is int)
+                {
+                    int chosenIdx = (int)item.Tag;
+                    if (chosenIdx != state.ClipIndex)
+                    {
+                        var oldSnap = new StateSnapshot(state);
+                        var newSnap = oldSnap.Clone();
+                        newSnap.ClipIndex = chosenIdx;
+                        newSnap.ClipName = (Document != null && Document.Animation != null && chosenIdx < Document.Animation.Clips.Count && Document.Animation.Clips[chosenIdx] != null) ? Document.Animation.Clips[chosenIdx].Name : null;
+                        var cmd = new ModifyStateNodeCommand(state, oldSnap, newSnap, () =>
+                        {
+                            BuildStateMachineStatesGraph();
+                            RefreshPropertyInspector();
+                        });
+                        if (History != null) History.Execute(cmd);
+                        else cmd.Execute();
+                    }
+                }
+            };
+            stack.Children.Add(CreateTransitionFormRow("Timeline", clipCombo));
+
+            // 6. Speed scrub / text
+            var speedBox = new TextBox
+            {
+                Text = state.Speed.ToString("0.##") + "x",
+                Height = 26,
+                Padding = new Thickness(6, 3, 6, 3),
+                Background = KerfBrand.FigmaCanvasBrush,
+                Foreground = Brushes.White,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                FontSize = 11
+            };
+            Action commitSpeed = () =>
+            {
+                string raw = speedBox.Text.Replace("x", "").Trim();
+                double spd;
+                if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out spd) ||
+                    double.TryParse(raw, NumberStyles.Float, CultureInfo.CurrentCulture, out spd))
+                {
+                    spd = Math.Max(0.01, spd);
+                    if (Math.Abs(spd - state.Speed) > 0.001)
+                    {
+                        var oldSnap = new StateSnapshot(state);
+                        var newSnap = oldSnap.Clone();
+                        newSnap.Speed = spd;
+                        var cmd = new ModifyStateNodeCommand(state, oldSnap, newSnap, () =>
+                        {
+                            RefreshPropertyInspector();
+                        });
+                        if (History != null) History.Execute(cmd);
+                        else cmd.Execute();
+                    }
+                }
+            };
+            speedBox.LostKeyboardFocus += (s, e) => commitSpeed();
+            speedBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { commitSpeed(); Keyboard.ClearFocus(); } };
+            stack.Children.Add(CreateTransitionFormRow("Speed", speedBox));
+
+            // 7. Animations Window collapsible section
+            stack.Children.Add(BuildAnimationsWindowSection());
+
+            return stack;
+        }
+
+        private FrameworkElement BuildTransitionRightPanelInspector(StateTransition transition, MachineLayer layer)
+        {
+            var stack = new StackPanel();
+
+            // Header
+            var fromState = (transition.FromState >= 0 && transition.FromState < layer.States.Count) ? layer.States[transition.FromState] : null;
+            var toState = (transition.ToState >= 0 && transition.ToState < layer.States.Count) ? layer.States[transition.ToState] : null;
+            string fromName = fromState != null ? fromState.Name : "From";
+            string toName = toState != null ? toState.Name : "To";
+
+            var title = new TextBlock
+            {
+                Text = "Transition: " + fromName + " → " + toName,
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = KerfBrand.MintBrush,
+                Margin = new Thickness(0, 0, 0, 10),
+                TextWrapping = TextWrapping.Wrap
+            };
+            stack.Children.Add(title);
+
+            // Duration in ms
+            var durBox = new TextBox
+            {
+                Text = transition.DurationMs.ToString("0", CultureInfo.InvariantCulture),
+                Height = 26,
+                Padding = new Thickness(6, 3, 6, 3),
+                Background = KerfBrand.FigmaCanvasBrush,
+                Foreground = Brushes.White,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                FontSize = 11
+            };
+            Action commitDuration = () =>
+            {
+                double ms;
+                if (double.TryParse(durBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out ms) ||
+                    double.TryParse(durBox.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out ms))
+                {
+                    ms = Math.Max(0.0, ms);
+                    if (Math.Abs(ms - transition.DurationMs) > 0.1)
+                    {
+                        var oldSnap = new TransitionSnapshot(transition);
+                        var newSnap = oldSnap.Clone();
+                        newSnap.Duration = ms / 1000.0;
+                        var cmd = new ModifyTransitionCommand(transition, oldSnap, newSnap, () =>
+                        {
+                            BuildStateMachineStatesGraph();
+                            RefreshPropertyInspector();
+                        });
+                        if (History != null) History.Execute(cmd);
+                        else cmd.Execute();
+                    }
+                }
+            };
+            durBox.LostKeyboardFocus += (s, e) => commitDuration();
+            durBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { commitDuration(); Keyboard.ClearFocus(); } };
+            stack.Children.Add(CreateTransitionFormRow("Duration (ms)", durBox));
+
+            // Exit time checkbox (only toggled per user request)
+            var exitTimeCheck = new CheckBox
+            {
+                Content = "Exit time",
+                IsChecked = transition.ExitTime.HasValue,
+                Foreground = Brushes.White,
+                FontSize = 11,
+                Margin = new Thickness(0, 6, 0, 4),
+                Cursor = Cursors.Hand
+            };
+            exitTimeCheck.Click += (s, e) =>
+            {
+                var oldSnap = new TransitionSnapshot(transition);
+                var newSnap = oldSnap.Clone();
+                newSnap.ExitTime = (exitTimeCheck.IsChecked == true) ? (double?)1.0 : null;
+                var cmd = new ModifyTransitionCommand(transition, oldSnap, newSnap, () =>
+                {
+                    RefreshPropertyInspector();
+                });
+                if (History != null) History.Execute(cmd);
+                else cmd.Execute();
+            };
+            stack.Children.Add(exitTimeCheck);
+
+            // Pause source when exiting checkbox
+            var pauseCheck = new CheckBox
+            {
+                Content = "Pause source when exiting",
+                IsChecked = transition.PauseSourceWhenExiting,
+                Foreground = Brushes.White,
+                FontSize = 11,
+                Margin = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand
+            };
+            pauseCheck.Click += (s, e) =>
+            {
+                var oldSnap = new TransitionSnapshot(transition);
+                var newSnap = oldSnap.Clone();
+                newSnap.PauseSourceWhenExiting = (pauseCheck.IsChecked == true);
+                var cmd = new ModifyTransitionCommand(transition, oldSnap, newSnap, () =>
+                {
+                    RefreshPropertyInspector();
+                });
+                if (History != null) History.Execute(cmd);
+                else cmd.Execute();
+            };
+            stack.Children.Add(pauseCheck);
+
+            // Allow exit during transition checkbox
+            var allowExitCheck = new CheckBox
+            {
+                Content = "Allow exit during transition",
+                IsChecked = transition.AllowExitDuringTransition,
+                Foreground = Brushes.White,
+                FontSize = 11,
+                Margin = new Thickness(0, 4, 0, 10),
+                Cursor = Cursors.Hand
+            };
+            allowExitCheck.Click += (s, e) =>
+            {
+                var oldSnap = new TransitionSnapshot(transition);
+                var newSnap = oldSnap.Clone();
+                newSnap.AllowExitDuringTransition = (allowExitCheck.IsChecked == true);
+                var cmd = new ModifyTransitionCommand(transition, oldSnap, newSnap, () =>
+                {
+                    RefreshPropertyInspector();
+                });
+                if (History != null) History.Execute(cmd);
+                else cmd.Execute();
+            };
+            stack.Children.Add(allowExitCheck);
+
+            // Conditions (OR of ANDs) dropdown/section
+            var conditionsSection = BuildTransitionConditionsSection(transition, layer);
+            stack.Children.Add(conditionsSection);
+
+            // Collapsible dropdown called Events
+            var eventsSection = BuildTransitionEventsSection();
+            stack.Children.Add(eventsSection);
+
+            // Animations Window
+            var animSection = BuildAnimationsWindowSection();
+            stack.Children.Add(animSection);
+
+            return stack;
+        }
+
+        private FrameworkElement BuildStateMachineOverviewRightPanelInspector(MachineLayer layer)
+        {
+            var stack = new StackPanel();
+
+            var title = new TextBlock
+            {
+                Text = "State Machine",
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            stack.Children.Add(title);
+
+            var hint = new TextBlock
+            {
+                Text = "Select a state or transition to inspect properties, or drag from an output port to connect states.",
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 12)
+            };
+            stack.Children.Add(hint);
+
+            // Collapsible dropdown called Events
+            stack.Children.Add(BuildTransitionEventsSection());
+
+            // Animations Window
+            stack.Children.Add(BuildAnimationsWindowSection());
+
+            return stack;
+        }
+
+        private FrameworkElement BuildTransitionConditionsSection(StateTransition trans, MachineLayer layer)
+        {
+            var container = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            var sp = new StackPanel();
+
+            var condHeaderDock = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+            var condTitle = new TextBlock
+            {
+                Text = "CONDITIONS (OR of ANDs)",
+                FontSize = 9.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(condTitle, Dock.Left);
+            condHeaderDock.Children.Add(condTitle);
+            sp.Children.Add(condHeaderDock);
+
+            if (trans == null)
+            {
+                container.Child = sp;
+                return container;
+            }
+
+            var sm = _timelineController != null ? _timelineController.ActiveStateMachine : null;
+
+            if (trans.ConditionGroups == null) trans.ConditionGroups = new List<ConditionGroup>();
+
+            for (int g = 0; g < trans.ConditionGroups.Count; g++)
+            {
+                int groupIndex = g;
+                var group = trans.ConditionGroups[g];
+                if (group == null) continue;
+
+                if (g > 0)
+                {
+                    var orDock = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = false };
+                    var orBadge = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromRgb(39, 44, 57)),
+                        BorderBrush = new SolidColorBrush(Color.FromRgb(139, 92, 246)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(10),
+                        Padding = new Thickness(8, 2, 8, 2),
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    };
+                    orBadge.Child = new TextBlock
+                    {
+                        Text = "OR",
+                        FontSize = 8.5,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = new SolidColorBrush(Color.FromRgb(196, 181, 253))
+                    };
+                    orDock.Children.Add(orBadge);
+                    sp.Children.Add(orDock);
+                }
+
+                var grpCard = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(24, 27, 34)),
+                    BorderBrush = KerfBrand.FigmaBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6),
+                    Margin = new Thickness(0, 0, 0, 4)
+                };
+                var grpStack = new StackPanel();
+
+                var grpHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 4), LastChildFill = true };
+                var grpLabel = new TextBlock
+                {
+                    Text = string.Format("GROUP {0}", groupIndex + 1),
+                    FontSize = 8.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(grpLabel, Dock.Left);
+                grpHeader.Children.Add(grpLabel);
+
+                var delGrpBtn = new Border
+                {
+                    Width = 16,
+                    Height = 16,
+                    Background = Brushes.Transparent,
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Remove Condition Group",
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                var delGrpText = new TextBlock
+                {
+                    Text = "×",
+                    FontSize = 13,
+                    Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 165)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                delGrpBtn.Child = delGrpText;
+                delGrpBtn.MouseEnter += (s, e) => { delGrpText.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)); };
+                delGrpBtn.MouseLeave += (s, e) => { delGrpText.Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 165)); };
+                delGrpBtn.MouseLeftButtonDown += (s, e) =>
+                {
+                    var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                    var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                    if (groupIndex >= 0 && groupIndex < newGroups.Count)
+                    {
+                        newGroups.RemoveAt(groupIndex);
+                        var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                        {
+                            BuildStateMachineStatesGraph();
+                            RefreshStateMachineInspector();
+                            RefreshPropertyInspector();
+                        });
+                        if (History != null) History.Execute(cmd);
+                        else cmd.Execute();
+                    }
+                };
+                DockPanel.SetDock(delGrpBtn, Dock.Right);
+                grpHeader.Children.Add(delGrpBtn);
+                grpStack.Children.Add(grpHeader);
+
+                if (group.Conditions == null) group.Conditions = new List<TransitionCondition>();
+
+                for (int c = 0; c < group.Conditions.Count; c++)
+                {
+                    int conditionIndex = c;
+                    var cond = group.Conditions[c];
+                    if (cond == null) continue;
+
+                    if (conditionIndex > 0)
+                    {
+                        var andBadge = new Border
+                        {
+                            Background = new SolidColorBrush(Color.FromRgb(30, 41, 59)),
+                            CornerRadius = new CornerRadius(3),
+                            Padding = new Thickness(4, 1, 4, 1),
+                            Margin = new Thickness(0, 2, 0, 2),
+                            HorizontalAlignment = HorizontalAlignment.Center
+                        };
+                        andBadge.Child = new TextBlock
+                        {
+                            Text = "AND",
+                            FontSize = 8.0,
+                            FontWeight = FontWeights.Bold,
+                            Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                        };
+                        grpStack.Children.Add(andBadge);
+                    }
+
+                    var condRow = new DockPanel { Margin = new Thickness(0, 2, 0, 2), LastChildFill = true };
+
+                    var delCondBtn = new Border
+                    {
+                        Width = 14,
+                        Height = 14,
+                        Background = Brushes.Transparent,
+                        Cursor = Cursors.Hand,
+                        ToolTip = "Remove Condition",
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Margin = new Thickness(4, 0, 0, 0)
+                    };
+                    var delCondText = new TextBlock
+                    {
+                        Text = "×",
+                        FontSize = 11,
+                        Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 165)),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    delCondBtn.Child = delCondText;
+                    delCondBtn.MouseEnter += (s, e) => { delCondText.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)); };
+                    delCondBtn.MouseLeave += (s, e) => { delCondText.Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 165)); };
+                    delCondBtn.MouseLeftButtonDown += (s, e) =>
+                    {
+                        var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                        var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                        if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                        {
+                            newGroups[groupIndex].Conditions.RemoveAt(conditionIndex);
+                            var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                            {
+                                BuildStateMachineStatesGraph();
+                                RefreshStateMachineInspector();
+                                RefreshPropertyInspector();
+                            });
+                            if (History != null) History.Execute(cmd);
+                            else cmd.Execute();
+                        }
+                    };
+                    DockPanel.SetDock(delCondBtn, Dock.Right);
+                    condRow.Children.Add(delCondBtn);
+
+                    MachineInput activeInput = null;
+                    if (sm != null && sm.Definition != null && sm.Definition.Inputs != null)
+                    {
+                        if (!string.IsNullOrEmpty(cond.InputId))
+                            activeInput = sm.Definition.Inputs.FirstOrDefault(inp => inp.InputId == cond.InputId);
+                        if (activeInput == null && cond.InputIndex >= 0 && cond.InputIndex < sm.Definition.Inputs.Count)
+                            activeInput = sm.Definition.Inputs[cond.InputIndex];
+                    }
+
+                    var inBox = CreateModernComboBox(22);
+                    inBox.FontSize = 10;
+                    inBox.Width = 80;
+                    DockPanel.SetDock(inBox, Dock.Left);
+
+                    if (sm != null && sm.Definition != null && sm.Definition.Inputs != null)
+                    {
+                        for (int inpI = 0; inpI < sm.Definition.Inputs.Count; inpI++)
+                        {
+                            var inputDef = sm.Definition.Inputs[inpI];
+                            var item = new ComboBoxItem { Content = inputDef.Name, Tag = inputDef };
+                            inBox.Items.Add(item);
+                            if (activeInput != null && activeInput.InputId == inputDef.InputId)
+                            {
+                                inBox.SelectedItem = item;
+                            }
+                        }
+                    }
+                    if (inBox.SelectedIndex < 0 && inBox.Items.Count > 0) inBox.SelectedIndex = 0;
+
+                    inBox.SelectionChanged += (s, e) =>
+                    {
+                        var selItem = inBox.SelectedItem as ComboBoxItem;
+                        if (selItem != null && selItem.Tag is MachineInput)
+                        {
+                            var chosenIn = (MachineInput)selItem.Tag;
+                            if (activeInput == null || chosenIn.InputId != activeInput.InputId)
+                            {
+                                var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                                var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                                if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                                {
+                                    var targetC = newGroups[groupIndex].Conditions[conditionIndex];
+                                    targetC.InputId = chosenIn.InputId;
+                                    targetC.PropertyName = chosenIn.Name;
+                                    targetC.InputIndex = sm.Definition.Inputs.IndexOf(chosenIn);
+                                    var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                    {
+                                        BuildStateMachineStatesGraph();
+                                        RefreshStateMachineInspector();
+                                        RefreshPropertyInspector();
+                                    });
+                                    if (History != null) History.Execute(cmd);
+                                    else cmd.Execute();
+                                }
+                            }
+                        }
+                    };
+                    condRow.Children.Add(inBox);
+
+                    if (activeInput != null && activeInput.Kind == InputKind.Trigger)
+                    {
+                        var trgLabel = new Border
+                        {
+                            Background = new SolidColorBrush(Color.FromArgb(40, 139, 92, 246)),
+                            CornerRadius = new CornerRadius(3),
+                            Padding = new Thickness(6, 2, 6, 2),
+                            Margin = new Thickness(4, 0, 0, 0),
+                            HorizontalAlignment = HorizontalAlignment.Left
+                        };
+                        trgLabel.Child = new TextBlock
+                        {
+                            Text = "Fires",
+                            FontSize = 9.5,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = new SolidColorBrush(Color.FromRgb(196, 181, 253))
+                        };
+                        condRow.Children.Add(trgLabel);
+                    }
+                    else
+                    {
+                        var opBox = CreateModernComboBox(22);
+                        opBox.FontSize = 10;
+                        opBox.Width = 44;
+                        opBox.Margin = new Thickness(4, 0, 0, 0);
+                        DockPanel.SetDock(opBox, Dock.Left);
+
+                        ConditionOp[] ops = new[] { ConditionOp.Eq, ConditionOp.Ne, ConditionOp.Lt, ConditionOp.Le, ConditionOp.Gt, ConditionOp.Ge };
+                        string[] opSymbols = new[] { "==", "!=", "<", "<=", ">", ">=" };
+                        for (int o = 0; o < ops.Length; o++)
+                        {
+                            opBox.Items.Add(new ComboBoxItem { Content = opSymbols[o], Tag = ops[o] });
+                            if (cond.Op == ops[o]) opBox.SelectedIndex = o;
+                        }
+                        if (opBox.SelectedIndex < 0) opBox.SelectedIndex = 0;
+
+                        opBox.SelectionChanged += (s, e) =>
+                        {
+                            var selItem = opBox.SelectedItem as ComboBoxItem;
+                            if (selItem != null && selItem.Tag is ConditionOp)
+                            {
+                                var chosenOp = (ConditionOp)selItem.Tag;
+                                if (chosenOp != cond.Op)
+                                {
+                                    var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                                    var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                                    if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                                    {
+                                        newGroups[groupIndex].Conditions[conditionIndex].Op = chosenOp;
+                                        var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                        {
+                                            BuildStateMachineStatesGraph();
+                                            RefreshStateMachineInspector();
+                                            RefreshPropertyInspector();
+                                        });
+                                        if (History != null) History.Execute(cmd);
+                                        else cmd.Execute();
+                                    }
+                                }
+                            }
+                        };
+                        condRow.Children.Add(opBox);
+
+                        if (activeInput != null && activeInput.Kind == InputKind.Bool)
+                        {
+                            var boolBox = CreateModernComboBox(22);
+                            boolBox.FontSize = 10;
+                            boolBox.Margin = new Thickness(4, 0, 0, 0);
+                            boolBox.Items.Add(new ComboBoxItem { Content = "true", Tag = 1.0 });
+                            boolBox.Items.Add(new ComboBoxItem { Content = "false", Tag = 0.0 });
+                            boolBox.SelectedIndex = (cond.Value > 0.5) ? 0 : 1;
+                            boolBox.SelectionChanged += (s, e) =>
+                            {
+                                var selItem = boolBox.SelectedItem as ComboBoxItem;
+                                if (selItem != null && selItem.Tag is double)
+                                {
+                                    double bVal = (double)selItem.Tag;
+                                    if (Math.Abs(bVal - cond.Value) > 0.001)
+                                    {
+                                        var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                                        var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                                        if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                                        {
+                                            newGroups[groupIndex].Conditions[conditionIndex].Value = bVal;
+                                            var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                            {
+                                                BuildStateMachineStatesGraph();
+                                                RefreshStateMachineInspector();
+                                                RefreshPropertyInspector();
+                                            });
+                                            if (History != null) History.Execute(cmd);
+                                            else cmd.Execute();
+                                        }
+                                    }
+                                }
+                            };
+                            condRow.Children.Add(boolBox);
+                        }
+                        else
+                        {
+                            var valBox = new TextBox
+                            {
+                                Text = cond.Value.ToString("0.##", CultureInfo.InvariantCulture),
+                                Height = 22,
+                                Padding = new Thickness(4, 1, 4, 1),
+                                Margin = new Thickness(4, 0, 0, 0),
+                                Background = KerfBrand.FigmaCanvasBrush,
+                                Foreground = Brushes.White,
+                                BorderBrush = KerfBrand.FigmaBorderBrush,
+                                FontSize = 10
+                            };
+                            Action commitCondVal = () =>
+                            {
+                                double parsed;
+                                if (double.TryParse(valBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                                {
+                                    if (Math.Abs(parsed - cond.Value) > 0.001)
+                                    {
+                                        var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                                        var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                                        if (groupIndex < newGroups.Count && conditionIndex < newGroups[groupIndex].Conditions.Count)
+                                        {
+                                            newGroups[groupIndex].Conditions[conditionIndex].Value = parsed;
+                                            var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                                            {
+                                                BuildStateMachineStatesGraph();
+                                                RefreshStateMachineInspector();
+                                                RefreshPropertyInspector();
+                                            });
+                                            if (History != null) History.Execute(cmd);
+                                            else cmd.Execute();
+                                        }
+                                    }
+                                }
+                            };
+                            valBox.LostKeyboardFocus += (s, e) => commitCondVal();
+                            valBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { commitCondVal(); Keyboard.ClearFocus(); } };
+                            condRow.Children.Add(valBox);
+                        }
+                    }
+
+                    grpStack.Children.Add(condRow);
+                }
+
+                var addCondBtn = new Border
+                {
+                    Background = Brushes.Transparent,
+                    BorderBrush = KerfBrand.FigmaBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    Margin = new Thickness(0, 4, 0, 0),
+                    Cursor = Cursors.Hand,
+                    HorizontalAlignment = HorizontalAlignment.Left
+                };
+                addCondBtn.Child = new TextBlock
+                {
+                    Text = "+ Add Condition",
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.Medium,
+                    Foreground = KerfBrand.MintBrush
+                };
+                addCondBtn.MouseLeftButtonDown += (s, e) =>
+                {
+                    var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                    var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                    if (groupIndex < newGroups.Count)
+                    {
+                        string firstId = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].InputId : null;
+                        string firstName = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].Name : null;
+                        newGroups[groupIndex].Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, 0.0, true) { PropertyName = firstName });
+                        var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                        {
+                            BuildStateMachineStatesGraph();
+                            RefreshStateMachineInspector();
+                            RefreshPropertyInspector();
+                        });
+                        if (History != null) History.Execute(cmd);
+                        else cmd.Execute();
+                    }
+                };
+                grpStack.Children.Add(addCondBtn);
+
+                grpCard.Child = grpStack;
+                sp.Children.Add(grpCard);
+            }
+
+            // + Add Condition Group (OR) button
+            var addGrpBtn = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(20, 139, 92, 246)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(80, 139, 92, 246)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 6, 0, 8),
+                Cursor = Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            addGrpBtn.Child = new TextBlock
+            {
+                Text = "+ Add Condition Group (OR)",
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(196, 181, 253)),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            addGrpBtn.MouseLeftButtonDown += (s, e) =>
+            {
+                var oldGroups = CloneConditionGroups(trans.ConditionGroups);
+                var newGroups = CloneConditionGroups(trans.ConditionGroups);
+                var newGroup = new ConditionGroup();
+                string firstId = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].InputId : null;
+                string firstName = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].Name : null;
+                newGroup.Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, 0.0, true) { PropertyName = firstName });
+                newGroups.Add(newGroup);
+                var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
+                {
+                    BuildStateMachineStatesGraph();
+                    RefreshStateMachineInspector();
+                    RefreshPropertyInspector();
+                });
+                if (History != null) History.Execute(cmd);
+                else cmd.Execute();
+            };
+            sp.Children.Add(addGrpBtn);
+
+            container.Child = sp;
+            return container;
+        }
+
+        private FrameworkElement BuildTransitionEventsSection()
+        {
+            var container = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            var stack = new StackPanel();
+            var header = new DockPanel { Cursor = Cursors.Hand };
+            var toggleText = new TextBlock
+            {
+                Text = "⌄  Events",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White
+            };
+            DockPanel.SetDock(toggleText, Dock.Left);
+            header.Children.Add(toggleText);
+
+            var addBtn = new TextBlock
+            {
+                Text = "+",
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Foreground = KerfBrand.MintBrush,
+                Cursor = Cursors.Hand
+            };
+            DockPanel.SetDock(addBtn, Dock.Right);
+            header.Children.Add(addBtn);
+            stack.Children.Add(header);
+
+            var body = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+            var emptyHint = new TextBlock
+            {
+                Text = "No events configured",
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                Margin = new Thickness(0, 2, 0, 2)
+            };
+            body.Children.Add(emptyHint);
+            stack.Children.Add(body);
+
+            header.MouseLeftButtonUp += (s, e) =>
+            {
+                bool visible = body.Visibility == Visibility.Visible;
+                body.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
+                toggleText.Text = (visible ? "›  " : "⌄  ") + "Events";
+            };
+
+            container.Child = stack;
+            return container;
+        }
+
+        private FrameworkElement BuildAnimationsWindowSection()
+        {
+            var container = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            var stack = new StackPanel();
+
+            // Header matching Image 1: "Animations" on left, "... + 🔍 ⤢" on right
+            var header = new DockPanel { Margin = new Thickness(0, 0, 0, 8), LastChildFill = false };
+            var title = new TextBlock
+            {
+                Text = "⌄  Animations",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                Cursor = Cursors.Hand,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(title, Dock.Left);
+            header.Children.Add(title);
+
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var addBtn = new TextBlock
+            {
+                Text = "+",
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Foreground = KerfBrand.MintBrush,
+                Cursor = Cursors.Hand,
+                Margin = new Thickness(6, 0, 4, 0),
+                ToolTip = "Add New Animation Clip"
+            };
+            addBtn.MouseLeftButtonDown += (s, e) =>
+            {
+                AddAnimationClip();
+                RefreshPropertyInspector();
+                BuildStateMachineAnimationsList();
+                e.Handled = true;
+            };
+            actions.Children.Add(addBtn);
+            DockPanel.SetDock(actions, Dock.Right);
+            header.Children.Add(actions);
+            stack.Children.Add(header);
+
+            var body = new StackPanel();
+
+            if (Document != null && Document.Animation != null && Document.Animation.Clips != null)
+            {
+                var clips = Document.Animation.Clips;
+                for (int i = 0; i < clips.Count; i++)
+                {
+                    int clipIdx = i;
+                    var clip = clips[i];
+                    if (clip == null) continue;
+
+                    var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3), LastChildFill = true, Cursor = Cursors.Hand };
+
+                    // Delete button (✕)
+                    var delBtn = new TextBlock
+                    {
+                        Text = "✕",
+                        FontSize = 10,
+                        Foreground = KerfBrand.TextMutedBrush,
+                        Margin = new Thickness(4, 0, 0, 0),
+                        Cursor = Cursors.Hand,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        ToolTip = "Delete Animation Clip"
+                    };
+                    delBtn.MouseEnter += (s, e) => delBtn.Foreground = new SolidColorBrush(Color.FromRgb(255, 107, 107));
+                    delBtn.MouseLeave += (s, e) => delBtn.Foreground = KerfBrand.TextMutedBrush;
+                    delBtn.MouseLeftButtonDown += (s, e) =>
+                    {
+                        clips.RemoveAt(clipIdx);
+                        if (clips.Count == 0)
+                        {
+                            var newClip = new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.Loop);
+                            clips.Add(newClip);
+                        }
+                        if (_timelineController != null && _timelineController.ActiveClip == clip)
+                        {
+                            _timelineController.ActiveClip = clips[0];
+                        }
+                        if (History != null) History.MarkDirty();
+                        BuildStateMachineStatesGraph();
+                        BuildStateMachineAnimationsList();
+                        RefreshPropertyInspector();
+                        e.Handled = true;
+                    };
+                    DockPanel.SetDock(delBtn, Dock.Right);
+                    row.Children.Add(delBtn);
+
+                    // Down button (▼)
+                    if (clipIdx < clips.Count - 1)
+                    {
+                        var downBtn = new TextBlock
+                        {
+                            Text = "▼",
+                            FontSize = 9,
+                            Foreground = KerfBrand.TextMutedBrush,
+                            Margin = new Thickness(3, 0, 0, 0),
+                            Cursor = Cursors.Hand,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            ToolTip = "Move Down"
+                        };
+                        downBtn.MouseEnter += (s, e) => downBtn.Foreground = KerfBrand.MintBrush;
+                        downBtn.MouseLeave += (s, e) => downBtn.Foreground = KerfBrand.TextMutedBrush;
+                        downBtn.MouseLeftButtonDown += (s, e) =>
+                        {
+                            var temp = clips[clipIdx];
+                            clips[clipIdx] = clips[clipIdx + 1];
+                            clips[clipIdx + 1] = temp;
+                            if (History != null) History.MarkDirty();
+                            BuildStateMachineAnimationsList();
+                            RefreshPropertyInspector();
+                            e.Handled = true;
+                        };
+                        DockPanel.SetDock(downBtn, Dock.Right);
+                        row.Children.Add(downBtn);
+                    }
+
+                    // Up button (▲)
+                    if (clipIdx > 0)
+                    {
+                        var upBtn = new TextBlock
+                        {
+                            Text = "▲",
+                            FontSize = 9,
+                            Foreground = KerfBrand.TextMutedBrush,
+                            Margin = new Thickness(3, 0, 0, 0),
+                            Cursor = Cursors.Hand,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            ToolTip = "Move Up"
+                        };
+                        upBtn.MouseEnter += (s, e) => upBtn.Foreground = KerfBrand.MintBrush;
+                        upBtn.MouseLeave += (s, e) => upBtn.Foreground = KerfBrand.TextMutedBrush;
+                        upBtn.MouseLeftButtonDown += (s, e) =>
+                        {
+                            var temp = clips[clipIdx];
+                            clips[clipIdx] = clips[clipIdx - 1];
+                            clips[clipIdx - 1] = temp;
+                            if (History != null) History.MarkDirty();
+                            BuildStateMachineAnimationsList();
+                            RefreshPropertyInspector();
+                            e.Handled = true;
+                        };
+                        DockPanel.SetDock(upBtn, Dock.Right);
+                        row.Children.Add(upBtn);
+                    }
+
+                    // Icon & Name
+                    var labelPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                    var icon = new TextBlock
+                    {
+                        Text = clip.LoopMode == LoopMode.Loop ? "⟳" : "→",
+                        FontSize = 11,
+                        Foreground = KerfBrand.MintBrush,
+                        Margin = new Thickness(0, 0, 6, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    labelPanel.Children.Add(icon);
+                    var name = new TextBlock
+                    {
+                        Text = clip.Name,
+                        FontSize = 10.5,
+                        Foreground = Brushes.White,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        TextTrimming = TextTrimming.CharacterEllipsis
+                    };
+                    labelPanel.Children.Add(name);
+
+                    row.Children.Add(labelPanel);
+
+                    row.MouseLeftButtonDown += (s, e) =>
+                    {
+                        if (e.ClickCount >= 2)
+                        {
+                            SelectAnimationClip(clip);
+                        }
+                    };
+
+                    body.Children.Add(row);
+                }
+            }
+
+            stack.Children.Add(body);
+
+            title.MouseLeftButtonUp += (s, e) =>
+            {
+                bool visible = body.Visibility == Visibility.Visible;
+                body.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
+                title.Text = (visible ? "›  " : "⌄  ") + "Animations";
+            };
+
+            container.Child = stack;
+            return container;
         }
 
         private void BuildVectorNodeInspector()
@@ -12149,6 +13309,21 @@ namespace Kerf.UI
             // 1. Delete / Backspace instant layer deletion
             if (!isCtrl && !isAlt && (e.Key == Key.Delete || e.Key == Key.Back))
             {
+                if (!(e.OriginalSource is TextBox) && _currentStudioMode == StudioMode.Animate && _isStateMachineMode)
+                {
+                    if (_selectedGraphStateIndices.Count > 0 || _selectedGraphStateIndex >= 0)
+                    {
+                        DeleteSelectedStateGraphNodes();
+                        e.Handled = true;
+                        return;
+                    }
+                    if (_selectedGraphTransition != null)
+                    {
+                        DeleteSelectedStateGraphTransition();
+                        e.Handled = true;
+                        return;
+                    }
+                }
                 if (_activeTool == ToolType.Pen && _activePenGeometry != null && _activePenGeometry.Nodes.Count > 0)
                 {
                     UndoLastPenNode();
@@ -14067,8 +15242,9 @@ namespace Kerf.UI
             _stateMachineGraphCanvas.MouseMove += HandleStateGraphMouseMove;
             _stateMachineGraphCanvas.MouseLeftButtonDown += HandleStateGraphCanvasMouseDown;
             _stateMachineGraphCanvas.MouseLeftButtonUp += HandleStateGraphMouseUp;
-            _stateMachineGraphScrollViewer = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _stateMachineGraphCanvas, AllowDrop = true };
+            _stateMachineGraphScrollViewer = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _stateMachineGraphCanvas, AllowDrop = true, Focusable = true };
             _stateMachineGraphScrollViewer.PreviewMouseWheel += HandleStateGraphMouseWheel;
+            _stateMachineGraphScrollViewer.PreviewKeyDown += HandleStateGraphKeyDown;
 
             DragEventHandler handleCanvasDragOver = (s, e) =>
             {
@@ -14624,18 +15800,10 @@ namespace Kerf.UI
             int activeClipIndex = Document.Animation.Clips.IndexOf(_timelineController.ActiveClip);
             if (activeClipIndex < 0) activeClipIndex = 0;
             var definition = new StateMachineDefinition("State Machine 1");
-            definition.AddInput(MachineInput.Bool("Hovering", false));
-            definition.AddInput(MachineInput.Trigger("Clicked"));
-            definition.AddInput(MachineInput.Number("Speed", 1.0));
-            definition.AddViewModelProperty(new ViewModelPropertyDefinition("Hovering", ViewModelPropertyKind.Boolean));
-            definition.AddViewModelProperty(new ViewModelPropertyDefinition("Clicked", ViewModelPropertyKind.Trigger));
-            definition.AddViewModelProperty(new ViewModelPropertyDefinition("Speed", ViewModelPropertyKind.Number));
             var layer = new MachineLayer("Base Layer");
-            int entry = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
-            int idle = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, activeClipIndex));
-            layer.AddState(new MachineState(2, "Any State", StateKind.Any));
-            layer.AddState(new MachineState(3, "Exit", StateKind.Exit));
-            layer.AddTransition(new StateTransition(entry, idle, 0.0));
+            layer.AddState(new MachineState(0, "Entry", StateKind.Entry) { GraphX = 80, GraphY = 80 });
+            layer.AddState(new MachineState(1, "Any State", StateKind.Any) { GraphX = 80, GraphY = 180 });
+            layer.AddState(new MachineState(2, "Exit", StateKind.Exit) { GraphX = 380, GraphY = 80 });
             definition.AddLayer(layer);
             Document.Animation.StateMachine = definition;
             _timelineController.ActiveStateMachine = new StateMachineRuntime(definition, Document.Animation.Clips);
@@ -16776,13 +17944,6 @@ namespace Kerf.UI
             if (!layer.States.Any(state => state != null && state.Kind == StateKind.Any)) { layer.AddState(new MachineState(layer.States.Count, "Any State", StateKind.Any)); changed = true; }
             if (!layer.States.Any(state => state != null && state.Kind == StateKind.Exit)) { layer.AddState(new MachineState(layer.States.Count, "Exit", StateKind.Exit)); changed = true; }
             for (int i = 0; i < layer.States.Count; i++) if (layer.States[i] != null) layer.States[i].Id = i;
-            int entryIndex = layer.States.FindIndex(state => state != null && state.Kind == StateKind.Entry);
-            int initialAnimationIndex = layer.States.FindIndex(state => state != null && (state.Kind == StateKind.Animation || state.Kind == StateKind.Blend1D || state.Kind == StateKind.BlendDirect));
-            if (entryIndex >= 0 && initialAnimationIndex >= 0 && !layer.Transitions.Any(transition => transition != null && transition.FromState == entryIndex))
-            {
-                layer.AddTransition(new StateTransition(entryIndex, initialAnimationIndex, 0.0));
-                changed = true;
-            }
             if (changed && _timelineController != null && _timelineController.ActiveStateMachine != null)
             {
                 _timelineController.ActiveStateMachine = new StateMachineRuntime(definition, _timelineController.ActiveStateMachine.Clips);
@@ -16973,8 +18134,8 @@ namespace Kerf.UI
                 int stateIndex = i;
                 var state = layer.States[i];
                 if (state == null) continue;
-                double width = state.Kind == StateKind.Entry ? 88 : state.Kind == StateKind.Any ? 116 : state.Kind == StateKind.Exit ? 78 : 132;
-                double height = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit ? 40 : 48;
+                double width = state.Kind == StateKind.Entry ? 92 : state.Kind == StateKind.Any ? 120 : state.Kind == StateKind.Exit ? 88 : 130;
+                double height = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit || state.Kind == StateKind.Any ? 44 : 48;
                 bool active = stateIndex == currentState || stateIndex == targetState;
                 bool selected = stateIndex == _selectedGraphStateIndex || _selectedGraphStateIndices.Contains(stateIndex);
                 var node = new Border
@@ -16984,26 +18145,68 @@ namespace Kerf.UI
                     Background = KerfBrand.FigmaCardBrush,
                     BorderBrush = (active || selected) ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
                     BorderThickness = new Thickness(active || selected ? 1.5 : 1),
-                    CornerRadius = new CornerRadius(5),
+                    CornerRadius = new CornerRadius(8),
+                    ClipToBounds = false,
                     Cursor = state.Kind == StateKind.Exit ? Cursors.Arrow : Cursors.SizeAll,
                     ToolTip = state.Kind + (state.Kind == StateKind.Animation ? " · double-click to edit timeline" : string.Empty)
                 };
-                var content = new Grid { Margin = new Thickness(8, 4, state.Kind == StateKind.Exit ? 8 : 18, 4) };
-                var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-                var name = new TextBlock { Text = state.Name, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = (state.Kind == StateKind.Entry || active) ? KerfBrand.MintBrush : Brushes.White, TextTrimming = TextTrimming.CharacterEllipsis };
+                var content = new Grid();
+                var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(14, 4, 14, 4) };
+
+                Brush nameBrush = Brushes.White;
+                if (state.Kind == StateKind.Entry || active) nameBrush = KerfBrand.MintBrush;
+                else if (state.Kind == StateKind.Exit) nameBrush = new SolidColorBrush(Color.FromRgb(255, 107, 107));
+
+                var name = new TextBlock { Text = state.Name, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = nameBrush, TextTrimming = TextTrimming.CharacterEllipsis, HorizontalAlignment = HorizontalAlignment.Center };
                 labels.Children.Add(name);
                 if (state.Kind == StateKind.Animation || state.Kind == StateKind.Blend1D || state.Kind == StateKind.BlendDirect)
                 {
                     string clipName = state.ClipIndex >= 0 && state.ClipIndex < sm.Clips.Count && sm.Clips[state.ClipIndex] != null ? sm.Clips[state.ClipIndex].Name : state.Kind.ToString();
-                    labels.Children.Add(new TextBlock { Text = clipName, FontSize = 8.5, Foreground = new SolidColorBrush(Color.FromRgb(132, 141, 156)), TextTrimming = TextTrimming.CharacterEllipsis });
+                    labels.Children.Add(new TextBlock { Text = clipName, FontSize = 8.5, Foreground = new SolidColorBrush(Color.FromRgb(132, 141, 156)), TextTrimming = TextTrimming.CharacterEllipsis, HorizontalAlignment = HorizontalAlignment.Center });
                 }
                 content.Children.Add(labels);
-                if (state.Kind != StateKind.Exit)
+
+                // Port Sockets per D-10 & Image 5:
+                // Input port on left edge: for all states except Entry
+                if (state.HasInputPort())
                 {
-                    var port = new Ellipse { Width = 9, Height = 9, Fill = new SolidColorBrush(Color.FromRgb(167, 176, 191)), Stroke = new SolidColorBrush(Color.FromRgb(35, 39, 47)), StrokeThickness = 2, Cursor = Cursors.Cross, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Tag = stateIndex };
-                    port.MouseLeftButtonDown += (s, e) => { StartStateGraphConnection(stateIndex, e.GetPosition(_stateMachineGraphCanvas)); e.Handled = true; };
-                    content.Children.Add(port);
+                    var inPort = new Ellipse
+                    {
+                        Width = 10,
+                        Height = 10,
+                        Fill = KerfBrand.MintBrush,
+                        Stroke = new SolidColorBrush(Color.FromRgb(30, 34, 42)),
+                        StrokeThickness = 2,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                        Margin = new Thickness(-5, 0, 0, 0),
+                        ToolTip = "Input Port",
+                        Tag = stateIndex
+                    };
+                    content.Children.Add(inPort);
                 }
+
+                // Output port on right edge: for all states except Exit
+                if (state.HasOutputPort())
+                {
+                    var outPort = new Ellipse
+                    {
+                        Width = 10,
+                        Height = 10,
+                        Fill = KerfBrand.MintBrush,
+                        Stroke = new SolidColorBrush(Color.FromRgb(30, 34, 42)),
+                        StrokeThickness = 2,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Margin = new Thickness(0, 0, -5, 0),
+                        Cursor = Cursors.Cross,
+                        ToolTip = "Output Port (drag to connect)",
+                        Tag = stateIndex
+                    };
+                    outPort.MouseLeftButtonDown += (s, e) => { StartStateGraphConnection(stateIndex, e.GetPosition(_stateMachineGraphCanvas)); e.Handled = true; };
+                    content.Children.Add(outPort);
+                }
+
                 node.Child = content;
                 Canvas.SetLeft(node, state.GraphX);
                 Canvas.SetTop(node, state.GraphY);
@@ -17036,6 +18239,7 @@ namespace Kerf.UI
                     }
                     _selectedGraphTransition = null;
                     RefreshStateMachineInspector();
+                    RefreshPropertyInspector();
                     if (state.Kind != StateKind.Exit) StartStateGraphNodeDrag(stateIndex, e.GetPosition(_stateMachineGraphCanvas));
                     BuildStateMachineStatesGraph();
                     e.Handled = true;
@@ -17057,92 +18261,197 @@ namespace Kerf.UI
             _stateMachineGraphCanvas.Children.Add(hint);
         }
 
+        private class StateTransitionPair
+        {
+            public int StateA;
+            public int StateB;
+            public readonly List<StateTransition> Forward = new List<StateTransition>();
+            public readonly List<StateTransition> Reverse = new List<StateTransition>();
+        }
+
+        private FrameworkElement CreateDirectionBadge(string directionText, bool selected, Action onClick, string tooltip)
+        {
+            var badge = new Border
+            {
+                Width = 22,
+                Height = 22,
+                CornerRadius = new CornerRadius(11),
+                Background = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(36, 40, 48)),
+                BorderBrush = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(80, 90, 105)),
+                BorderThickness = new Thickness(1.5),
+                Cursor = Cursors.Hand,
+                ToolTip = tooltip
+            };
+            var tb = new TextBlock
+            {
+                Text = directionText,
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = selected ? Brushes.Black : Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            badge.Child = tb;
+            badge.MouseLeftButtonDown += (s, e) =>
+            {
+                if (onClick != null) onClick();
+                e.Handled = true;
+            };
+            return badge;
+        }
+
         private void DrawStateMachineConnections(MachineLayer layer)
         {
             if (_stateMachineGraphCanvas == null || layer == null || layer.States == null || layer.Transitions == null) return;
-            foreach (var transition in layer.Transitions)
+
+            // Group transitions by unordered pair of states (D-11)
+            var pairGroups = new Dictionary<long, StateTransitionPair>();
+            for (int t = 0; t < layer.Transitions.Count; t++)
             {
-                if (transition == null || transition.FromState < 0 || transition.FromState >= layer.States.Count || transition.ToState < 0 || transition.ToState >= layer.States.Count) continue;
-                var from = layer.States[transition.FromState];
-                var to = layer.States[transition.ToState];
-                if (from == null || to == null) continue;
-                double fromWidth = from.Kind == StateKind.Entry ? 88 : from.Kind == StateKind.Any ? 116 : from.Kind == StateKind.Exit ? 78 : 132;
-                double fromHeight = from.Kind == StateKind.Entry || from.Kind == StateKind.Exit ? 40 : 48;
-                double toWidth = to.Kind == StateKind.Entry ? 88 : to.Kind == StateKind.Any ? 116 : to.Kind == StateKind.Exit ? 78 : 132;
-                double toHeight = to.Kind == StateKind.Entry || to.Kind == StateKind.Exit ? 40 : 48;
-                Point start = new Point(from.GraphX + fromWidth, from.GraphY + fromHeight / 2.0);
-                Point end = new Point(to.GraphX, to.GraphY + toHeight / 2.0);
-                bool selfTransition = transition.ToState == transition.FromState;
-                bool backwards = !selfTransition && end.X < start.X - 20;
-                if (backwards) end = new Point(to.GraphX + toWidth, to.GraphY + toHeight / 2.0);
-                double reach = Math.Max(32.0, Math.Abs(end.X - start.X) * 0.42);
-                Point c1 = selfTransition ? new Point(start.X + 38.0, start.Y - 38.0) : new Point(start.X + (backwards ? -reach : reach), start.Y);
-                Point c2 = selfTransition ? new Point(end.X - 38.0, end.Y - 38.0) : new Point(end.X + (backwards ? reach : -reach), end.Y);
-                var figure = new PathFigure { StartPoint = start, IsClosed = false };
-                figure.Segments.Add(new BezierSegment(c1, c2, end, true));
-                var geometry = new PathGeometry();
-                geometry.Figures.Add(figure);
-                bool selected = ReferenceEquals(_selectedGraphTransition, transition);
-                var line = new System.Windows.Shapes.Path
+                var trans = layer.Transitions[t];
+                if (trans == null || trans.FromState < 0 || trans.FromState >= layer.States.Count || trans.ToState < 0 || trans.ToState >= layer.States.Count) continue;
+                int a = Math.Min(trans.FromState, trans.ToState);
+                int b = Math.Max(trans.FromState, trans.ToState);
+                long key = ((long)a << 32) | (uint)b;
+                StateTransitionPair pair;
+                if (!pairGroups.TryGetValue(key, out pair))
                 {
-                    Data = geometry,
-                    Stroke = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)),
-                    StrokeThickness = selected ? 2.0 : 1.35,
+                    pair = new StateTransitionPair { StateA = a, StateB = b };
+                    pairGroups[key] = pair;
+                }
+                if (trans.FromState == a) pair.Forward.Add(trans);
+                else pair.Reverse.Add(trans);
+            }
+
+            foreach (var pair in pairGroups.Values)
+            {
+                if (pair.StateA == pair.StateB)
+                {
+                    // Self-transition loop
+                    var state = layer.States[pair.StateA];
+                    if (state == null) continue;
+                    double nodeWidth = state.Kind == StateKind.Entry ? 92 : state.Kind == StateKind.Any ? 120 : state.Kind == StateKind.Exit ? 88 : 130;
+                    double nodeHeight = state.Kind == StateKind.Entry || state.Kind == StateKind.Exit || state.Kind == StateKind.Any ? 44 : 48;
+                    Point start = new Point(state.GraphX + nodeWidth, state.GraphY + nodeHeight * 0.3);
+                    Point end = new Point(state.GraphX + nodeWidth, state.GraphY + nodeHeight * 0.7);
+                    Point c1 = new Point(start.X + 38.0, start.Y - 25.0);
+                    Point c2 = new Point(end.X + 38.0, end.Y + 25.0);
+                    var figure = new PathFigure { StartPoint = start, IsClosed = false };
+                    figure.Segments.Add(new BezierSegment(c1, c2, end, true));
+                    var geometry = new PathGeometry();
+                    geometry.Figures.Add(figure);
+
+                    var selfTrans = pair.Forward.Count > 0 ? pair.Forward[0] : pair.Reverse[0];
+                    bool sel = ReferenceEquals(_selectedGraphTransition, selfTrans);
+                    var line = new System.Windows.Shapes.Path
+                    {
+                        Data = geometry,
+                        Stroke = sel ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)),
+                        StrokeThickness = sel ? 2.0 : 1.35,
+                        Fill = Brushes.Transparent,
+                        Cursor = Cursors.Hand,
+                        Tag = selfTrans
+                    };
+                    line.MouseLeftButtonDown += (s, e) => { SelectGraphTransition(selfTrans, layer); e.Handled = true; };
+                    Panel.SetZIndex(line, 0);
+                    _stateMachineGraphCanvas.Children.Add(line);
+
+                    var badge = CreateDirectionBadge(">", sel, () => SelectGraphTransition(selfTrans, layer), state.Name + " (self)");
+                    Canvas.SetLeft(badge, start.X + 26.0);
+                    Canvas.SetTop(badge, state.GraphY + nodeHeight / 2.0 - 11.0);
+                    Panel.SetZIndex(badge, 15);
+                    _stateMachineGraphCanvas.Children.Add(badge);
+                    continue;
+                }
+
+                var stA = layer.States[pair.StateA];
+                var stB = layer.States[pair.StateB];
+                if (stA == null || stB == null) continue;
+
+                MachineState leftState = (stA.GraphX <= stB.GraphX) ? stA : stB;
+                MachineState rightState = (stA.GraphX <= stB.GraphX) ? stB : stA;
+                bool aIsLeft = (leftState == stA);
+
+                double leftWidth = leftState.Kind == StateKind.Entry ? 92 : leftState.Kind == StateKind.Any ? 120 : leftState.Kind == StateKind.Exit ? 88 : 130;
+                double leftHeight = leftState.Kind == StateKind.Entry || leftState.Kind == StateKind.Exit || leftState.Kind == StateKind.Any ? 44 : 48;
+                double rightWidth = rightState.Kind == StateKind.Entry ? 92 : rightState.Kind == StateKind.Any ? 120 : rightState.Kind == StateKind.Exit ? 88 : 130;
+                double rightHeight = rightState.Kind == StateKind.Entry || rightState.Kind == StateKind.Exit || rightState.Kind == StateKind.Any ? 44 : 48;
+
+                Point pStart = new Point(leftState.GraphX + leftWidth, leftState.GraphY + leftHeight / 2.0);
+                Point pEnd = new Point(rightState.GraphX, rightState.GraphY + rightHeight / 2.0);
+                double reach = Math.Max(32.0, Math.Abs(pEnd.X - pStart.X) * 0.42);
+                Point pc1 = new Point(pStart.X + reach, pStart.Y);
+                Point pc2 = new Point(pEnd.X - reach, pEnd.Y);
+
+                var pFigure = new PathFigure { StartPoint = pStart, IsClosed = false };
+                pFigure.Segments.Add(new BezierSegment(pc1, pc2, pEnd, true));
+                var pGeometry = new PathGeometry();
+                pGeometry.Figures.Add(pFigure);
+
+                List<StateTransition> leftToRight = aIsLeft ? pair.Forward : pair.Reverse;
+                List<StateTransition> rightToLeft = aIsLeft ? pair.Reverse : pair.Forward;
+
+                bool isAnySelected = (leftToRight.Any(t => ReferenceEquals(_selectedGraphTransition, t)) || rightToLeft.Any(t => ReferenceEquals(_selectedGraphTransition, t)));
+                StateTransition representative = leftToRight.Count > 0 ? leftToRight[0] : rightToLeft[0];
+
+                var wirePath = new System.Windows.Shapes.Path
+                {
+                    Data = pGeometry,
+                    Stroke = isAnySelected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)),
+                    StrokeThickness = isAnySelected ? 2.0 : 1.35,
                     Fill = Brushes.Transparent,
                     Cursor = Cursors.Hand,
-                    Tag = transition,
-                    ToolTip = from.Name + " → " + to.Name + " · " + TransitionConditionSummary(transition)
+                    Tag = representative
                 };
-                line.MouseLeftButtonDown += (s, e) => { SelectGraphTransition(transition, layer); e.Handled = true; };
-                line.MouseRightButtonUp += (s, e) => ShowTransitionContextMenu(line, layer, transition);
-                Panel.SetZIndex(line, 0);
-                _stateMachineGraphCanvas.Children.Add(line);
+                wirePath.MouseLeftButtonDown += (s, e) => { SelectGraphTransition(representative, layer); e.Handled = true; };
+                Panel.SetZIndex(wirePath, 0);
+                _stateMachineGraphCanvas.Children.Add(wirePath);
 
-                // Mid-wire directional polygon arrow aligned with tangent vector at t = 0.5 (D-04)
-                Point mid = new Point((start.X + 3.0 * c1.X + 3.0 * c2.X + end.X) / 8.0, (start.Y + 3.0 * c1.Y + 3.0 * c2.Y + end.Y) / 8.0);
-                Vector tangent = new Vector((end.X + c2.X) - (c1.X + start.X), (end.Y + c2.Y) - (c1.Y + start.Y));
-                if (tangent.Length < 0.001) tangent = new Vector(1, 0);
-                tangent.Normalize();
-                Vector perp = new Vector(-tangent.Y, tangent.X);
-                var arrow = new Polygon
-                {
-                    Points = new PointCollection
-                    {
-                        mid + tangent * 6.0,
-                        mid - tangent * 4.0 + perp * 4.5,
-                        mid - tangent * 4.0 - perp * 4.5
-                    },
-                    Fill = selected ? KerfBrand.MintBrush : new SolidColorBrush(Color.FromRgb(120, 130, 145)),
-                    Tag = transition,
-                    IsHitTestVisible = false
-                };
-                Panel.SetZIndex(arrow, 11);
-                _stateMachineGraphCanvas.Children.Add(arrow);
+                Point mid = new Point((pStart.X + 3.0 * pc1.X + 3.0 * pc2.X + pEnd.X) / 8.0, (pStart.Y + 3.0 * pc1.Y + 3.0 * pc2.Y + pEnd.Y) / 8.0);
 
-                // Centered duration pill (D-04)
-                var label = new Border
+                if (leftToRight.Count > 0 && rightToLeft.Count > 0)
                 {
-                    Background = KerfBrand.FigmaCardBrush,
-                    BorderBrush = selected ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(8),
-                    Padding = new Thickness(6, 2, 6, 2),
-                    Tag = transition,
-                    Cursor = Cursors.Hand,
-                    Child = new TextBlock { Text = string.Format("{0:0.##}s", transition.Duration), FontSize = 8.5, Foreground = Brushes.White },
-                    ToolTip = TransitionConditionSummary(transition) + " · " + transition.Interpolation
-                };
-                Canvas.SetLeft(label, mid.X - 16.0);
-                Canvas.SetTop(label, mid.Y - 20.0);
-                label.MouseLeftButtonDown += (s, e) =>
+                    // Bidirectional: single wire with two center circles ">" and "<" (D-11)
+                    StateTransition fwdTrans = leftToRight[0];
+                    StateTransition revTrans = rightToLeft[0];
+
+                    bool fwdSel = ReferenceEquals(_selectedGraphTransition, fwdTrans);
+                    bool revSel = ReferenceEquals(_selectedGraphTransition, revTrans);
+
+                    var fwdBadge = CreateDirectionBadge(">", fwdSel, () => SelectGraphTransition(fwdTrans, layer), leftState.Name + " → " + rightState.Name);
+                    Canvas.SetLeft(fwdBadge, mid.X - 25.0);
+                    Canvas.SetTop(fwdBadge, mid.Y - 11.0);
+                    Panel.SetZIndex(fwdBadge, 15);
+                    _stateMachineGraphCanvas.Children.Add(fwdBadge);
+
+                    var revBadge = CreateDirectionBadge("<", revSel, () => SelectGraphTransition(revTrans, layer), rightState.Name + " → " + leftState.Name);
+                    Canvas.SetLeft(revBadge, mid.X + 3.0);
+                    Canvas.SetTop(revBadge, mid.Y - 11.0);
+                    Panel.SetZIndex(revBadge, 15);
+                    _stateMachineGraphCanvas.Children.Add(revBadge);
+                }
+                else if (leftToRight.Count > 0)
                 {
-                    if (e.ClickCount >= 2) ShowEditTransitionDialog(transition, layer);
-                    else SelectGraphTransition(transition, layer);
-                    e.Handled = true;
-                };
-                label.MouseRightButtonUp += (s, e) => ShowTransitionContextMenu(label, layer, transition);
-                Panel.SetZIndex(label, 2);
-                _stateMachineGraphCanvas.Children.Add(label);
+                    // Unidirectional forward ">"
+                    StateTransition fwdTrans = leftToRight[0];
+                    bool fwdSel = ReferenceEquals(_selectedGraphTransition, fwdTrans);
+                    var fwdBadge = CreateDirectionBadge(">", fwdSel, () => SelectGraphTransition(fwdTrans, layer), leftState.Name + " → " + rightState.Name);
+                    Canvas.SetLeft(fwdBadge, mid.X - 11.0);
+                    Canvas.SetTop(fwdBadge, mid.Y - 11.0);
+                    Panel.SetZIndex(fwdBadge, 15);
+                    _stateMachineGraphCanvas.Children.Add(fwdBadge);
+                }
+                else if (rightToLeft.Count > 0)
+                {
+                    // Unidirectional reverse "<"
+                    StateTransition revTrans = rightToLeft[0];
+                    bool revSel = ReferenceEquals(_selectedGraphTransition, revTrans);
+                    var revBadge = CreateDirectionBadge("<", revSel, () => SelectGraphTransition(revTrans, layer), rightState.Name + " → " + leftState.Name);
+                    Canvas.SetLeft(revBadge, mid.X - 11.0);
+                    Canvas.SetTop(revBadge, mid.Y - 11.0);
+                    Panel.SetZIndex(revBadge, 15);
+                    _stateMachineGraphCanvas.Children.Add(revBadge);
+                }
             }
         }
 
@@ -17167,6 +18476,93 @@ namespace Kerf.UI
             _selectedGraphStateIndices.Clear();
             BuildStateMachineStatesGraph();
             RefreshStateMachineInspector();
+            RefreshPropertyInspector();
+        }
+
+        private void DeleteSelectedStateGraphNodes()
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            if (sm.Definition == null || sm.Definition.Layers == null || sm.Definition.Layers.Count == 0) return;
+            var layer = sm.Definition.Layers[0];
+            if (layer == null || layer.States == null) return;
+
+            var indices = new HashSet<int>(_selectedGraphStateIndices);
+            if (_selectedGraphStateIndex >= 0) indices.Add(_selectedGraphStateIndex);
+
+            var toDelete = new List<MachineState>();
+            foreach (int idx in indices)
+            {
+                if (idx >= 0 && idx < layer.States.Count)
+                {
+                    var s = layer.States[idx];
+                    // Entry and Exit cannot be deleted
+                    if (s != null && s.Kind != StateKind.Entry && s.Kind != StateKind.Exit)
+                    {
+                        toDelete.Add(s);
+                    }
+                }
+            }
+
+            if (toDelete.Count > 0)
+            {
+                var cmd = new DeleteStateNodesCommand(layer, toDelete, () =>
+                {
+                    _selectedGraphStateIndex = -1;
+                    _selectedGraphStateIndices.Clear();
+                    _selectedGraphTransition = null;
+                    BuildStateMachineStatesGraph();
+                    BuildStateMachineAnimationsList();
+                    RefreshStateMachineInspector();
+                    RefreshPropertyInspector();
+                    RefreshStateMachineValidationBadge();
+                });
+                if (History != null) History.Execute(cmd);
+                else cmd.Execute();
+            }
+        }
+
+        private void DeleteSelectedStateGraphTransition()
+        {
+            if (_selectedGraphTransition == null) return;
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var sm = _timelineController.ActiveStateMachine;
+            if (sm.Definition == null || sm.Definition.Layers == null || sm.Definition.Layers.Count == 0) return;
+            var layer = _selectedGraphTransitionLayer ?? sm.Definition.Layers[0];
+            if (layer == null) return;
+
+            var trans = _selectedGraphTransition;
+            var cmd = new DeleteTransitionsCommand(layer, trans, () =>
+            {
+                _selectedGraphTransition = null;
+                _selectedGraphTransitionLayer = null;
+                BuildStateMachineStatesGraph();
+                RefreshStateMachineInspector();
+                RefreshPropertyInspector();
+                RefreshStateMachineValidationBadge();
+            });
+            if (History != null) History.Execute(cmd);
+            else cmd.Execute();
+        }
+
+        private void HandleStateGraphKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.OriginalSource is TextBox) return;
+            if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0 && (e.Key == Key.Delete || e.Key == Key.Back))
+            {
+                if (_selectedGraphStateIndices.Count > 0 || _selectedGraphStateIndex >= 0)
+                {
+                    DeleteSelectedStateGraphNodes();
+                    e.Handled = true;
+                    return;
+                }
+                if (_selectedGraphTransition != null)
+                {
+                    DeleteSelectedStateGraphTransition();
+                    e.Handled = true;
+                    return;
+                }
+            }
         }
 
         private void StartStateGraphNodeDrag(int stateIndex, Point point)
@@ -17372,7 +18768,10 @@ namespace Kerf.UI
                 foreach (var child in _stateMachineGraphCanvas.Children.OfType<FrameworkElement>().Where(element => string.Equals(element.Tag as string, "__connectionPreview", StringComparison.Ordinal)).ToList())
                     _stateMachineGraphCanvas.Children.Remove(child);
                 int target = HitTestStateGraphNode(point);
-                if (target >= 0 && target != stateIndex) CreateStateGraphTransition(stateIndex, target);
+                if (target >= 0 && target != stateIndex && layer != null && target < layer.States.Count && layer.States[target] != null && layer.States[target].HasInputPort())
+                {
+                    CreateStateGraphTransition(stateIndex, target);
+                }
             }
             else if (mode == 3) // Marquee selection released
             {
@@ -17389,8 +18788,8 @@ namespace Kerf.UI
                         {
                             var st = layer.States[i];
                             if (st == null) continue;
-                            double width = st.Kind == StateKind.Entry ? 88 : st.Kind == StateKind.Any ? 116 : st.Kind == StateKind.Exit ? 78 : 132;
-                            double height = st.Kind == StateKind.Entry || st.Kind == StateKind.Exit ? 40 : 48;
+                            double width = st.Kind == StateKind.Entry ? 92 : st.Kind == StateKind.Any ? 120 : st.Kind == StateKind.Exit ? 88 : 130;
+                            double height = st.Kind == StateKind.Entry || st.Kind == StateKind.Exit || st.Kind == StateKind.Any ? 44 : 48;
                             var stRect = new Rect(st.GraphX, st.GraphY, width, height);
                             if (stRect.IntersectsWith(_stateGraphMarqueeRect))
                             {
@@ -17409,6 +18808,7 @@ namespace Kerf.UI
                     _selectedGraphTransition = null;
                 }
                 RefreshStateMachineInspector();
+                RefreshPropertyInspector();
             }
             BuildStateMachineStatesGraph();
             e.Handled = true;
@@ -17475,6 +18875,10 @@ namespace Kerf.UI
             if (sm.Definition == null || sm.Definition.Layers == null || sm.Definition.Layers.Count == 0) return;
             var layer = sm.Definition.Layers[0];
             if (fromIndex < 0 || fromIndex >= layer.States.Count || toIndex < 0 || toIndex >= layer.States.Count) return;
+
+            // Reject transitions from states without output port or to states without input port (D-10)
+            if (!layer.States[fromIndex].HasOutputPort() || !layer.States[toIndex].HasInputPort()) return;
+            if (fromIndex == toIndex) return;
 
             // Reject transitions to Entry/Any as destination, or from Exit as source (D-04, T-06-06)
             if (layer.States[toIndex].Kind == StateKind.Entry || layer.States[toIndex].Kind == StateKind.Any) return;
@@ -18552,28 +19956,18 @@ namespace Kerf.UI
             _timelineController.Duration = defaultClip.Duration;
 
             // Minimal, editable starter graph: Entry → Idle, plus an input-driven interrupt state.
-            var interruptClip = new Clip(101, "interrupt", defaultClip.Duration, 60.0, LoopMode.OneShot);
             var smDef = new StateMachineDefinition("State Machine 1");
-            smDef.AddViewModelProperty(new ViewModelPropertyDefinition("Hovering", ViewModelPropertyKind.Boolean));
             var smLayer = new MachineLayer("Base Layer");
-            int stEntry = smLayer.AddState(new MachineState(0, "Entry", StateKind.Entry));
-            int stIdle = smLayer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
-            int stInterrupt = smLayer.AddState(new MachineState(2, "interrupt", StateKind.Animation, 1));
-            smLayer.AddState(new MachineState(3, "Any State", StateKind.Any));
-            smLayer.AddState(new MachineState(4, "Exit", StateKind.Exit));
-            smLayer.AddTransition(new StateTransition(stEntry, stIdle, 0.0));
-            var idleToInterrupt = new StateTransition(stIdle, stInterrupt, 0.25);
-            idleToInterrupt.Conditions.Add(new TransitionCondition("Hovering", ConditionOp.Eq, 1.0));
-            smLayer.AddTransition(idleToInterrupt);
-            var interruptToIdle = new StateTransition(stInterrupt, stIdle, 0.25);
-            interruptToIdle.Conditions.Add(new TransitionCondition("Hovering", ConditionOp.Eq, 0.0));
-            smLayer.AddTransition(interruptToIdle);
+            smLayer.AddState(new MachineState(0, "Entry", StateKind.Entry) { GraphX = 80, GraphY = 80 });
+            smLayer.AddState(new MachineState(1, "Any State", StateKind.Any) { GraphX = 80, GraphY = 180 });
+            smLayer.AddState(new MachineState(2, "Exit", StateKind.Exit) { GraphX = 380, GraphY = 80 });
             smDef.AddLayer(smLayer);
-            var clips = new List<Clip> { defaultClip, interruptClip };
+            var clips = new List<Clip> { defaultClip };
             _timelineController.ActiveStateMachine = new StateMachineRuntime(smDef, clips);
             Document.Animation.Clips = clips;
             Document.Animation.StateMachine = smDef;
-            Document.Animation.ActiveClipId = defaultClip.Id;            if (_timelineScrubber != null) _timelineScrubber.Maximum = _timelineController.Duration;
+            Document.Animation.ActiveClipId = defaultClip.Id;
+            if (_timelineScrubber != null) _timelineScrubber.Maximum = _timelineController.Duration;
             if (_timelineClipText != null) _timelineClipText.Text = "Clip: " + defaultClip.Name;
             BuildStateMachineInputsControls();
             BuildStateMachineStatesGraph();
