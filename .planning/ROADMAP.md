@@ -110,28 +110,28 @@ Plans:
 ---
 
 ### Phase 6: Interactive State Machine Engine
-**Goal**: Implement a complete interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean, Number, Trigger), and canvas event listeners.
+**Goal**: Implement a complete interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean, Number, Trigger), and visual graph authoring environment.
 **Depends on**: Phase 5
-**Requirements**: STATE-01, STATE-02, STATE-03, STATE-04, STATE-05, STATE-06
+**Requirements**: STATE-01, STATE-02, STATE-03, STATE-06
 **Success Criteria** (what must be TRUE):
   1. Users can construct state machine graphs containing Entry, AnyState, and custom animation states connected by directional transitions.
-  2. Transitions evaluate conditional logic against Boolean, Number, and Trigger state machine inputs.
-  3. Canvas pointer interactions (Hover In, Hover Out, Pointer Down, Pointer Up, Click) trigger state inputs and fire transitions.
-  4. Transition cross-fading blends smoothly between active animation clips without visual popping or geometry snaps.
-  5. An interactive node graph UI panel allows visual inspection, state creation, and transition wiring.
+  2. Transitions evaluate conditional logic against Boolean, Number, and Trigger state machine inputs with compound condition groups (OR of ANDs).
+  3. All graph modifications, node dragging, inputs, and transitions participate fully in transactional undo/redo via CommandHistory.
+  4. An interactive 3-column node graph UI panel allows visual inspection, state creation, port drag-to-connect wiring, and marquee selection.
+  5. A non-destructive diagnostics engine validates state machine definitions and reports errors/warnings without mutating graph data.
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: Build state machine graph data model, inputs system, and condition evaluation engine.
-- [ ] 06-02: Implement state transition runtime with clip cross-fade blending and canvas event listener integration.
-- [ ] 06-03: Create interactive State Machine visual node graph editor panel in Kerf Studio UI.
+- [ ] 06-01-PLAN.md — Core state machine graph model, compound condition groups, validation engine, and Test #60 automated scaffold
+- [ ] 06-02-PLAN.md — Reversible transactional commands in CommandHistory and undo/redo engine
+- [ ] 06-03-PLAN.md — Interactive 3-column visual graph editor, port drag-to-connect, canvas marquee, and inspector panels
 
 ---
 
 ### Phase 7: Verification, Legacy Migration & Safe Deprecation
 **Goal**: Validate end-to-end animation workflows, migrate legacy project files to the new schema, and safely deprecate legacy property binders with zero regressions.
 **Depends on**: Phase 6
-**Requirements**: MIGR-01, MIGR-02, MIGR-03
+**Requirements**: STATE-04, STATE-05, MIGR-01, MIGR-02, MIGR-03
 **Success Criteria** (what must be TRUE):
   1. Existing project files containing legacy animation data automatically convert into the new clip and track data model.
   2. Old destructive `PropertyBinder` scaling code is cleanly deprecated and removed without affecting design tools.

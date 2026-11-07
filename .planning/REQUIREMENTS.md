@@ -106,8 +106,8 @@ Which phases cover which requirements.
 | STATE-01 | Phase 6 | Pending |
 | STATE-02 | Phase 6 | Pending |
 | STATE-03 | Phase 6 | Pending |
-| STATE-04 | Phase 6 | Pending |
-| STATE-05 | Phase 6 | Pending |
+| STATE-04 | Phase 7 | Pending |
+| STATE-05 | Phase 7 | Pending |
 | STATE-06 | Phase 6 | Pending |
 | MIGR-01 | Phase 7 | Pending |
 | MIGR-02 | Phase 7 | Pending |
