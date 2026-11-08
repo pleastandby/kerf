@@ -97,6 +97,7 @@ namespace Kerf.Tests
             RunTest("Interrupted Transition Snapshot Blending & RenderTransform Isolation", TestInterruptedTransitionSnapshotBlending);
             RunTest("Deterministic Transition Priority, ExitTime Gating & Clip Playback", TestDeterministicTransitionPriorityExitTimeAndClipAdvancement);
             RunTest("Non-Destructive StateMachineValidator Listener Diagnostics", TestStateMachineValidatorListenerDiagnostics);
+            RunTest("Interactive Listeners, State Machine Runtime & Transition Execution", TestInteractiveListenersAndStateMachineRuntimeExecution);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -7879,6 +7880,457 @@ namespace Kerf.Tests
             Assert(missingTargetDef.Listeners.Count == 1, "Listeners list count preserved without deletions");
             Assert(missingTargetDef.Listeners[0].Actions.Count == 1, "Listener actions list preserved without deletions");
             Assert(missingTargetDef.Inputs.Count == 1, "Inputs preserved");
+        }
+
+        private static void TestInteractiveListenersAndStateMachineRuntimeExecution()
+        {
+            // =========================================================================
+            // Section 1: Event Dispatcher & Pointer Lifecycle (STATE-04, LISTENER-01)
+            // =========================================================================
+            var page = new Page();
+            var btnLayer = new LayerNode
+            {
+                Id = "btn_1",
+                Name = "Button 1",
+                Type = ElementType.Rectangle,
+                X = 100,
+                Y = 100,
+                Width = 200,
+                Height = 60,
+                IsVisible = true
+            };
+            page.Layers.Add(btnLayer);
+            uint btnId = PropertyBinder.GetNumericNodeId(btnLayer.Id);
+
+            var sceneGraph = new RetainedSceneGraph(new GpuRenderer());
+            sceneGraph.Synchronize(page);
+
+            var def = new StateMachineDefinition("LifecycleDef");
+            int inEnter = def.AddInput(MachineInput.Bool("enterFired", false));
+            int inExit = def.AddInput(MachineInput.Bool("exitFired", false));
+            int inDown = def.AddInput(MachineInput.Bool("downFired", false));
+            int inUp = def.AddInput(MachineInput.Bool("upFired", false));
+            int inClick = def.AddInput(MachineInput.Bool("clickFired", false));
+            int inTap = def.AddInput(MachineInput.Bool("tapFired", false));
+            int inDragStart = def.AddInput(MachineInput.Bool("dragStartFired", false));
+            int inDrag = def.AddInput(MachineInput.Bool("dragFired", false));
+            int inDragEnd = def.AddInput(MachineInput.Bool("dragEndFired", false));
+
+            var lEnter = new NodeListener(btnId, PointerEventKind.PointerEnter);
+            lEnter.Actions.Add(new ListenerAction(ActionKind.SetBool, inEnter) { Parameter = 1.0 });
+            def.Listeners.Add(lEnter);
+
+            var lExit = new NodeListener(btnId, PointerEventKind.PointerExit);
+            lExit.Actions.Add(new ListenerAction(ActionKind.SetBool, inExit) { Parameter = 1.0 });
+            def.Listeners.Add(lExit);
+
+            var lDown = new NodeListener(btnId, PointerEventKind.PointerDown);
+            lDown.Actions.Add(new ListenerAction(ActionKind.SetBool, inDown) { Parameter = 1.0 });
+            def.Listeners.Add(lDown);
+
+            var lUp = new NodeListener(btnId, PointerEventKind.PointerUp);
+            lUp.Actions.Add(new ListenerAction(ActionKind.SetBool, inUp) { Parameter = 1.0 });
+            def.Listeners.Add(lUp);
+
+            var lClick = new NodeListener(btnId, PointerEventKind.Click);
+            lClick.Actions.Add(new ListenerAction(ActionKind.SetBool, inClick) { Parameter = 1.0 });
+            def.Listeners.Add(lClick);
+
+            var lTap = new NodeListener(btnId, PointerEventKind.Tap);
+            lTap.Actions.Add(new ListenerAction(ActionKind.SetBool, inTap) { Parameter = 1.0 });
+            def.Listeners.Add(lTap);
+
+            var lDragStart = new NodeListener(btnId, PointerEventKind.DragStart);
+            lDragStart.Actions.Add(new ListenerAction(ActionKind.SetBool, inDragStart) { Parameter = 1.0 });
+            def.Listeners.Add(lDragStart);
+
+            var lDrag = new NodeListener(btnId, PointerEventKind.Drag);
+            lDrag.Actions.Add(new ListenerAction(ActionKind.SetBool, inDrag) { Parameter = 1.0 });
+            def.Listeners.Add(lDrag);
+
+            var lDragEnd = new NodeListener(btnId, PointerEventKind.DragEnd);
+            lDragEnd.Actions.Add(new ListenerAction(ActionKind.SetBool, inDragEnd) { Parameter = 1.0 });
+            def.Listeners.Add(lDragEnd);
+
+            var rt = new StateMachineRuntime(def, new List<Clip>());
+            var dispatcher = new InteractiveEventDispatcher();
+
+            // 1. Move from outside (0, 0) to inside (150, 120): Enter fires
+            dispatcher.OnPointerMove(rt, sceneGraph, new Point(0, 0));
+            Assert(rt.Definition.Inputs[inEnter].Value == 0.0, "Enter not fired at (0, 0)");
+
+            dispatcher.OnPointerMove(rt, sceneGraph, new Point(150, 120));
+            Assert(dispatcher.LastHoverNodeId == btnId, "Dispatcher tracks hover on btnId");
+            Assert(rt.Definition.Inputs[inEnter].Value == 1.0, "PointerEnter event fired and set input");
+
+            // Move inside (160, 120): still hovering, Exit not fired
+            dispatcher.OnPointerMove(rt, sceneGraph, new Point(160, 120));
+            Assert(dispatcher.LastHoverNodeId == btnId, "Still hovering on btnId");
+            Assert(rt.Definition.Inputs[inExit].Value == 0.0, "Exit not fired while moving inside");
+
+            // PointerDown at (150, 120)
+            dispatcher.OnPointerDown(rt, sceneGraph, new Point(150, 120));
+            Assert(dispatcher.PointerDownNodeId == btnId, "Down node ID recorded");
+            Assert(rt.Definition.Inputs[inDown].Value == 1.0, "PointerDown event fired and set input");
+
+            // PointerMove with delta > 4.0px to (180, 140)
+            dispatcher.OnPointerMove(rt, sceneGraph, new Point(180, 140));
+            Assert(dispatcher.IsDragging, "Drag threshold exceeded (>4px)");
+            Assert(rt.Definition.Inputs[inDragStart].Value == 1.0, "DragStart fired");
+            Assert(rt.Definition.Inputs[inDrag].Value == 1.0, "Drag fired");
+
+            // PointerUp at (180, 140): DragEnd and Up fired, Click NOT fired (since dragging occurred)
+            dispatcher.OnPointerUp(rt, sceneGraph, new Point(180, 140));
+            Assert(!dispatcher.IsDragging, "Dragging ended");
+            Assert(rt.Definition.Inputs[inDragEnd].Value == 1.0, "DragEnd fired");
+            Assert(rt.Definition.Inputs[inUp].Value == 1.0, "Up fired");
+            Assert(rt.Definition.Inputs[inClick].Value == 0.0, "Click NOT fired when drag occurred");
+            Assert(rt.Definition.Inputs[inTap].Value == 0.0, "Tap NOT fired when drag occurred");
+
+            // Reset click & up inputs to test clean click without drag
+            rt.Definition.Inputs[inClick].Value = 0.0;
+            rt.Definition.Inputs[inTap].Value = 0.0;
+            rt.Definition.Inputs[inUp].Value = 0.0;
+            dispatcher.OnPointerDown(rt, sceneGraph, new Point(150, 120));
+            dispatcher.OnPointerUp(rt, sceneGraph, new Point(150, 120)); // delta = 0 < 4.0px
+            Assert(rt.Definition.Inputs[inClick].Value == 1.0, "Click fired on zero-drag pointer release");
+            Assert(rt.Definition.Inputs[inTap].Value == 1.0, "Tap fired on zero-drag pointer release");
+            Assert(rt.Definition.Inputs[inUp].Value == 1.0, "Up fired on pointer release");
+
+            // Move back outside to (0, 0) -> Exit fired
+            dispatcher.OnPointerMove(rt, sceneGraph, new Point(0, 0));
+            Assert(dispatcher.LastHoverNodeId == 0u, "Hover cleared");
+            Assert(rt.Definition.Inputs[inExit].Value == 1.0, "Exit fired moving outside");
+
+            // =========================================================================
+            // Section 2: Listener Actions & Input Mutation (LISTENER-02)
+            // =========================================================================
+            var actDef = new StateMachineDefinition("ActionDef");
+            int inBool = actDef.AddInput(MachineInput.Bool("b", false));
+            int inNum = actDef.AddInput(MachineInput.Number("num", 10.0));
+            int inTrig = actDef.AddInput(MachineInput.Trigger("trig"));
+
+            // SetBool on Click
+            var lSetBool = new NodeListener(btnId, PointerEventKind.Click);
+            lSetBool.Actions.Add(new ListenerAction(ActionKind.SetBool, inBool) { Parameter = 1.0 });
+            actDef.Listeners.Add(lSetBool);
+
+            // ToggleBool on Tap
+            var lToggle = new NodeListener(btnId, PointerEventKind.Tap);
+            lToggle.Actions.Add(new ListenerAction(ActionKind.ToggleBool, inBool));
+            actDef.Listeners.Add(lToggle);
+
+            // SetNumber on Enter
+            var lSetNum = new NodeListener(btnId, PointerEventKind.PointerEnter);
+            lSetNum.Actions.Add(new ListenerAction(ActionKind.SetNumber, inNum) { Parameter = 42.5 });
+            actDef.Listeners.Add(lSetNum);
+
+            // FireTrigger on Down
+            var lTrig = new NodeListener(btnId, PointerEventKind.PointerDown);
+            lTrig.Actions.Add(new ListenerAction(ActionKind.Fire, inTrig));
+            actDef.Listeners.Add(lTrig);
+
+            // Reset on Exit
+            var lReset = new NodeListener(btnId, PointerEventKind.PointerExit);
+            lReset.Actions.Add(new ListenerAction(ActionKind.Reset, inNum));
+            actDef.Listeners.Add(lReset);
+
+            var actRt = new StateMachineRuntime(actDef, new List<Clip>());
+
+            // Test SetBool
+            actRt.OnPointerEvent(btnId, PointerEventKind.Click);
+            Assert(actRt.Definition.Inputs[inBool].Value == 1.0, "SetBool set bool input to 1.0");
+
+            // Test ToggleBool (from 1.0 to 0.0)
+            actRt.OnPointerEvent(btnId, PointerEventKind.Tap);
+            Assert(actRt.Definition.Inputs[inBool].Value == 0.0, "ToggleBool toggled 1.0 to 0.0");
+
+            // ToggleBool (from 0.0 to 1.0)
+            actRt.OnPointerEvent(btnId, PointerEventKind.Tap);
+            Assert(actRt.Definition.Inputs[inBool].Value == 1.0, "ToggleBool toggled 0.0 to 1.0");
+
+            // Test SetNumber
+            actRt.OnPointerEvent(btnId, PointerEventKind.PointerEnter);
+            Assert(Math.Abs(actRt.Definition.Inputs[inNum].Value - 42.5) < 0.001, "SetNumber set input to 42.5");
+
+            // Test FireTrigger
+            actRt.OnPointerEvent(btnId, PointerEventKind.PointerDown);
+            Assert(actRt.Definition.Inputs[inTrig].Fired, "FireTrigger set trigger Fired to true");
+            var emptyPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            actRt.Update(0.016, emptyPose);
+            Assert(!actRt.Definition.Inputs[inTrig].Fired, "Update step auto-cleared trigger Fired to false");
+
+            // Test Reset
+            actRt.OnPointerEvent(btnId, PointerEventKind.PointerExit);
+            Assert(Math.Abs(actRt.Definition.Inputs[inNum].Value - 10.0) < 0.001, "Reset restored number input to InitialValue 10.0");
+
+            // Test Enabled gate (D-02)
+            lSetBool.Enabled = false;
+            actRt.Definition.Inputs[inBool].Value = 0.0;
+            actRt.OnPointerEvent(btnId, PointerEventKind.Click);
+            Assert(actRt.Definition.Inputs[inBool].Value == 0.0, "Disabled listener (Enabled = false) did NOT execute actions per D-02");
+
+            // =========================================================================
+            // Section 3: Reversible Commands in CommandHistory (LISTENER-02, D-03)
+            // =========================================================================
+            var cmdDef = new StateMachineDefinition("CmdDef");
+            var cmdListener = new NodeListener(1001u, PointerEventKind.Click);
+            cmdListener.Actions.Add(new ListenerAction(ActionKind.SetBool, 0) { Parameter = 1.0 });
+
+            bool historyCallbackFired = false;
+            Action onHistoryChanged = () => { historyCallbackFired = true; };
+
+            // AddListenerCommand
+            var addCmd = new AddListenerCommand(cmdDef, cmdListener, onHistoryChanged);
+            addCmd.Execute();
+            Assert(cmdDef.Listeners.Contains(cmdListener), "AddListenerCommand added listener");
+            Assert(historyCallbackFired, "AddListenerCommand invoked change callback");
+
+            addCmd.Unexecute();
+            Assert(!cmdDef.Listeners.Contains(cmdListener), "AddListenerCommand Unexecute removed listener");
+
+            addCmd.Execute(); // re-add for delete test
+            Assert(cmdDef.Listeners.Contains(cmdListener), "AddListenerCommand re-executed");
+
+            // DeleteListenerCommand
+            var delCmd = new DeleteListenerCommand(cmdDef, cmdListener, onHistoryChanged);
+            delCmd.Execute();
+            Assert(!cmdDef.Listeners.Contains(cmdListener), "DeleteListenerCommand removed listener");
+
+            delCmd.Unexecute();
+            Assert(cmdDef.Listeners.Contains(cmdListener), "DeleteListenerCommand Unexecute restored listener at exact index");
+
+            // ModifyListenerCommand
+            var beforeSnap = new NodeListenerSnapshot(cmdListener);
+            var afterSnap = new NodeListenerSnapshot
+            {
+                TargetNodeId = 2002u,
+                Kind = PointerEventKind.Drag,
+                Enabled = false,
+                Actions = new List<ListenerAction> { new ListenerAction(ActionKind.SetNumber, 1) { Parameter = 99.0 } }
+            };
+            var modCmd = new ModifyListenerCommand(cmdListener, beforeSnap, afterSnap, onHistoryChanged);
+            modCmd.Execute();
+            Assert(cmdListener.TargetNodeId == 2002u && cmdListener.Kind == PointerEventKind.Drag && !cmdListener.Enabled, "ModifyListenerCommand applied new snapshot");
+
+            modCmd.Unexecute();
+            Assert(cmdListener.TargetNodeId == 1001u && cmdListener.Kind == PointerEventKind.Click && cmdListener.Enabled, "ModifyListenerCommand Unexecute restored exact previous snapshot");
+
+            // =========================================================================
+            // Section 4: Deterministic Transition Priority & ExitTime (RUNTIME-01, D-05)
+            // =========================================================================
+            var prioDef = new StateMachineDefinition("PrioDef");
+            int inPrio = prioDef.AddInput(MachineInput.Bool("prioInput", false));
+            var prioLayer = new MachineLayer("PrioLayer");
+            int stA = prioLayer.AddState(new MachineState(0, "A", StateKind.Animation, 0));
+            int stB = prioLayer.AddState(new MachineState(1, "B", StateKind.Animation, 0));
+            int stC = prioLayer.AddState(new MachineState(2, "C", StateKind.Animation, 0));
+            int stAny = prioLayer.AddState(new MachineState(3, "Any", StateKind.Any, -1));
+
+            // T1: CurrentState A -> B (input == 1.0)
+            var tCurrent = new StateTransition(stA, stB, 0.5);
+            tCurrent.WithCondition(new TransitionCondition(inPrio, ConditionOp.Eq, 1.0));
+
+            // T2: AnyState -> C (input == 1.0)
+            var tAny = new StateTransition(stAny, stC, 0.5);
+            tAny.WithCondition(new TransitionCondition(inPrio, ConditionOp.Eq, 1.0));
+
+            // Add AnyState transition first to verify current state priority
+            prioLayer.AddTransition(tAny);
+            prioLayer.AddTransition(tCurrent);
+
+            prioDef.AddLayer(prioLayer);
+
+            var dummyClips = new List<Clip> { new Clip(0, "Clip0", 2.0, 60.0, LoopMode.Loop) };
+            var prioRt = new StateMachineRuntime(prioDef, dummyClips);
+            var pPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            prioRt.Update(0.0, pPose);
+
+            // Fire input
+            prioRt.SetBool(inPrio, true);
+            prioRt.Update(0.016, pPose);
+
+            Assert(prioRt.LayerRuntimes[0].ActiveTransition != null, "Transition triggered");
+            Assert(prioRt.LayerRuntimes[0].ActiveTransition.ToState == stB, "Current state transition (A -> B) prioritized over AnyState (Any -> C) per D-05");
+
+            // ExitTime threshold gating
+            var exitDef2 = new StateMachineDefinition("ExitDef2");
+            var exitLayer2 = new MachineLayer("ExitLayer2");
+            int exA = exitLayer2.AddState(new MachineState(0, "ExA", StateKind.Animation, 0)); // Clip duration 2.0s
+            int exB = exitLayer2.AddState(new MachineState(1, "ExB", StateKind.Animation, 0));
+
+            var exitTrans2 = new StateTransition(exA, exB, 0.1);
+            exitTrans2.ExitTime = 0.8; // Requires 80% progress = 1.6s
+            exitLayer2.AddTransition(exitTrans2);
+            exitDef2.AddLayer(exitLayer2);
+
+            var exitRt2 = new StateMachineRuntime(exitDef2, dummyClips);
+            exitRt2.Update(0.0, pPose);
+            Assert(exitRt2.LayerRuntimes[0].ActiveTransition == null, "No transition at start");
+
+            exitRt2.Update(0.8, pPose); // 0.8s / 2.0s = 0.40 progress (< 0.80)
+            Assert(exitRt2.LayerRuntimes[0].ActiveTransition == null, "ExitTime 0.8 blocks transition at progress 0.40");
+
+            exitRt2.Update(0.9, pPose); // total 1.7s / 2.0s = 0.85 progress (>= 0.80)
+            Assert(exitRt2.LayerRuntimes[0].ActiveTransition != null && exitRt2.LayerRuntimes[0].ActiveTransition.ToState == exB,
+                "ExitTime 0.8 allows transition at progress 0.85 per RUNTIME-01");
+
+            // =========================================================================
+            // Section 5: In-Flight Interrupted Snapshot Blending (BLEND-01, STATE-05, D-04, D-06)
+            // =========================================================================
+            var testLayer = new LayerNode
+            {
+                Id = "blend_box",
+                Name = "Blend Box",
+                Type = ElementType.Rectangle,
+                X = 100,
+                Y = 100,
+                Width = 200,
+                Height = 100
+            };
+            uint targetNodeId = PropertyBinder.GetNumericNodeId(testLayer.Id);
+
+            var blendClips = new List<Clip>();
+
+            // Clip A: ScaleX = 1.0
+            var clipA = new Clip(0, "ScaleA", 1.0, 60.0, LoopMode.Loop);
+            var trAX = new Track(targetNodeId, (ushort)PropKey.ScaleX);
+            trAX.AddKeyframe(Keyframe.Linear(0.0, 1.0));
+            clipA.AddTrack(trAX);
+            blendClips.Add(clipA);
+
+            // Clip B: ScaleX = 3.0
+            var clipB = new Clip(1, "ScaleB", 1.0, 60.0, LoopMode.Loop);
+            var trBX = new Track(targetNodeId, (ushort)PropKey.ScaleX);
+            trBX.AddKeyframe(Keyframe.Linear(0.0, 3.0));
+            clipB.AddTrack(trBX);
+            blendClips.Add(clipB);
+
+            // Clip C: ScaleX = 5.0
+            var clipC = new Clip(2, "ScaleC", 1.0, 60.0, LoopMode.Loop);
+            var trCX = new Track(targetNodeId, (ushort)PropKey.ScaleX);
+            trCX.AddKeyframe(Keyframe.Linear(0.0, 5.0));
+            clipC.AddTrack(trCX);
+            blendClips.Add(clipC);
+
+            var blendDef = new StateMachineDefinition("BlendMachine");
+            int boolB = blendDef.AddInput(MachineInput.Bool("goB", false));
+            int boolC = blendDef.AddInput(MachineInput.Bool("goC", false));
+
+            var bLayer = new MachineLayer("BlendLayer");
+            int stateA = bLayer.AddState(new MachineState(0, "StateA", StateKind.Animation, 0));
+            int stateB = bLayer.AddState(new MachineState(1, "StateB", StateKind.Animation, 1));
+            int stateC = bLayer.AddState(new MachineState(2, "StateC", StateKind.Animation, 2));
+            int stateAnyBlend = bLayer.AddState(new MachineState(3, "Any", StateKind.Any, -1));
+
+            // Transition A -> B: 1.0s, Linear, Interrupt = true
+            var transAB = new StateTransition(stateA, stateB, 1.0);
+            transAB.Interpolation = InterpMode.Linear;
+            transAB.Interrupt = true;
+            transAB.WithCondition(new TransitionCondition(boolB, ConditionOp.Eq, 1.0));
+            bLayer.AddTransition(transAB);
+
+            // Transition AnyState -> C: 1.0s, Linear, Interrupt = true
+            var transAC = new StateTransition(stateAnyBlend, stateC, 1.0);
+            transAC.Interpolation = InterpMode.Linear;
+            transAC.Interrupt = true;
+            transAC.WithCondition(new TransitionCondition(boolC, ConditionOp.Eq, 1.0));
+            bLayer.AddTransition(transAC);
+
+            blendDef.AddLayer(bLayer);
+
+            var blendRt = new StateMachineRuntime(blendDef, blendClips);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+
+            // Frame 0: in State A
+            blendRt.Update(0.0, pose);
+            Assert(pose.ContainsKey(targetNodeId) && Math.Abs(pose[targetNodeId][(ushort)PropKey.ScaleX] - 1.0) < 0.01, "Initial Scale is 1.0");
+
+            // Trigger A -> B
+            blendRt.SetBool(boolB, true);
+            blendRt.Update(0.0, pose); // starts transition A -> B
+            blendRt.Update(0.5, pose); // Advance 0.5s through 1.0s transition
+
+            // Evaluated Scale is approximately 2.0 (1.0 + (3.0 - 1.0) * 0.5)
+            double scaleMid = pose[targetNodeId][(ushort)PropKey.ScaleX];
+            Assert(Math.Abs(scaleMid - 2.0) < 0.05, string.Format("Mid-transition Scale is approximately 2.0, got {0}", scaleMid));
+
+            // Interrupt with transition -> C
+            blendRt.SetBool(boolB, false); // mutually exclusive
+            blendRt.SetBool(boolC, true);
+            blendRt.Update(0.0, pose); // starts transition to C and captures SnapshotPose
+
+            // Assert ActiveTransition.SnapshotPose is captured holding Scale ≈ 2.0 per D-04
+            var activeTrans = blendRt.LayerRuntimes[0].ActiveTransition;
+            Assert(activeTrans != null, "Transition to C is active");
+            Assert(activeTrans.SnapshotPose != null && activeTrans.SnapshotPose.ContainsKey(targetNodeId), "SnapshotPose captured upon interruption");
+            double snapScale = activeTrans.SnapshotPose[targetNodeId][(ushort)PropKey.ScaleX];
+            Assert(Math.Abs(snapScale - 2.0) < 0.05, string.Format("SnapshotPose captures in-flight scale ~2.0, got {0}", snapScale));
+
+            // Advance runtime 0.5s: smoothly blends from 2.0 towards 5.0
+            blendRt.Update(0.5, pose);
+            double scaleInterp = pose[targetNodeId][(ushort)PropKey.ScaleX];
+            // Expected: 2.0 + (5.0 - 2.0) * 0.5 = 3.5
+            Assert(Math.Abs(scaleInterp - 3.5) < 0.15, string.Format("Interrupted blend smoothly reaches ~3.5 without visual snap or reset to 1.0, got {0}", scaleInterp));
+
+            // Assert evaluated transforms apply strictly to RenderTransform without modifying persistent layer bounds per D-06
+            PropertyBinder.ApplyPoseToLayer(testLayer, targetNodeId, pose);
+            Assert(testLayer.RenderTransform != null, "RenderTransform instantiated");
+            Assert(Math.Abs(testLayer.RenderTransform.ScaleX - scaleInterp) < 0.001, "RenderTransform.ScaleX updated from animated pose");
+            Assert(testLayer.X == 100 && testLayer.Y == 100 && testLayer.Width == 200 && testLayer.Height == 100,
+                "Persistent layer geometry (X, Y, Width, Height) remains untouched per D-06");
+
+            // =========================================================================
+            // Section 6: Simulation Playback Gating (D-01)
+            // =========================================================================
+            var timelineCtrl = new AnimationTimelineController();
+            timelineCtrl.UseStateMachine = true;
+            timelineCtrl.ActiveStateMachine = blendRt;
+
+            // When paused, Step(0.5) must NOT advance runtime (effectiveDt = 0.0 per D-01)
+            Assert(!timelineCtrl.IsPlaying, "TimelineController starts paused");
+            double transProgressBefore = blendRt.LayerRuntimes[0].ActiveTransition != null ? blendRt.LayerRuntimes[0].ActiveTransition.Elapsed : 0.0;
+            timelineCtrl.Step(0.5);
+            double transProgressAfter = blendRt.LayerRuntimes[0].ActiveTransition != null ? blendRt.LayerRuntimes[0].ActiveTransition.Elapsed : 0.0;
+            Assert(Math.Abs(transProgressBefore - transProgressAfter) < 0.0001,
+                "When paused (IsPlaying == false), animation evaluation holds with dt = 0.0 per D-01");
+
+            // When playing, Step(0.2) advances runtime
+            timelineCtrl.Play();
+            Assert(timelineCtrl.IsPlaying, "TimelineController is now playing");
+            timelineCtrl.Step(0.2);
+            double transProgressPlaying = blendRt.LayerRuntimes[0].ActiveTransition != null ? blendRt.LayerRuntimes[0].ActiveTransition.Elapsed : 0.0;
+            Assert(transProgressPlaying > transProgressBefore,
+                "When playing (IsPlaying == true), animation evaluation advances with effectiveDt per D-01");
+
+            // Test StudioView canvas pointer gating
+            var studio = new StudioView();
+            studio.PanOffset = new Point(0, 0);
+            studio.ZoomScale = 1.0;
+            studio.SwitchStudioMode(StudioView.StudioMode.Animate);
+            studio.Document.GetActivePage().Layers.Add(btnLayer);
+            studio.SynchronizeSceneGraph();
+            studio.TimelineController.UseStateMachine = true;
+            studio.TimelineController.ActiveStateMachine = rt;
+
+            // 1. When paused: canvas mouse down does NOT dispatch to interactive event dispatcher
+            Assert(!studio.TimelineController.IsPlaying, "StudioView starts paused in Animate mode");
+            studio.HandleCanvasMouseDown(new Point(150, 120), System.Windows.Input.MouseButton.Left, 1);
+            Assert(studio.InteractiveDispatcher.PointerDownNodeId == 0u,
+                "Paused canvas pointer down does not trigger simulation dispatcher per D-01");
+
+            // 2. When playing: canvas mouse down dispatches and sets PointerDownNodeId
+            studio.PlayAnimation();
+            Assert(studio.TimelineController.IsPlaying, "StudioView is now playing");
+            studio.HandleCanvasMouseDown(new Point(150, 120), System.Windows.Input.MouseButton.Left, 1);
+            Assert(studio.InteractiveDispatcher.PointerDownNodeId == btnId,
+                "Playing canvas pointer down dispatches to simulation dispatcher per D-01");
+
+            // 3. Pause resets dispatcher
+            studio.PauseAnimation();
+            Assert(!studio.TimelineController.IsPlaying, "StudioView is now paused");
+            Assert(studio.InteractiveDispatcher.PointerDownNodeId == 0u,
+                "Pausing simulation resets interactive event dispatcher per D-01");
         }
     }
 }

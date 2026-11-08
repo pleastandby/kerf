@@ -234,6 +234,16 @@ namespace Kerf.UI
 
         private GpuRenderer _renderer;
         private RetainedSceneGraph _sceneGraph;
+        public RetainedSceneGraph SceneGraph { get { return _sceneGraph; } }
+
+        public void SynchronizeSceneGraph()
+        {
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (_sceneGraph != null && page != null)
+            {
+                _sceneGraph.Synchronize(page);
+            }
+        }
         private RetainedCanvasHost _canvasHost;
 
         // Viewport & Pan/Zoom
