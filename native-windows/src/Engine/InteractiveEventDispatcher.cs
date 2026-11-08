@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using Kerf.Engine.Animation;
 using Kerf.Model;
@@ -9,7 +10,9 @@ namespace Kerf.Engine
     public class InteractiveEventDispatcher
     {
         private uint _lastHoverNodeId = 0u;
+        private readonly List<uint> _lastHoverHierarchy = new List<uint>();
         private uint _pointerDownNodeId = 0u;
+        private readonly List<uint> _pointerDownHierarchy = new List<uint>();
         private Point _pointerDownPoint;
         private bool _isDragging = false;
         private const double DragThreshold = 4.0;
@@ -29,33 +32,94 @@ namespace Kerf.Engine
             get { return _isDragging; }
         }
 
-        public void OnPointerMove(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
+        private LayerNode ResolveHit(RetainedSceneGraph sceneGraph, Page page, Point canvasPt, out List<uint> hierarchy)
         {
-            if (runtime == null) return;
-            LayerNode hit = (sceneGraph != null) ? sceneGraph.HitTest(canvasPt) : null;
-            if (hit == null && page != null)
+            hierarchy = new List<uint>();
+            LayerNode hit = null;
+
+            if (page != null)
             {
                 var hitRes = CanvasInteractionController.HitTest(page, canvasPt);
                 hit = hitRes.DeepestNode ?? hitRes.OutermostNode;
+                if (hitRes.HierarchyPath != null)
+                {
+                    for (int i = 0; i < hitRes.HierarchyPath.Count; i++)
+                    {
+                        var n = hitRes.HierarchyPath[i];
+                        if (n != null)
+                        {
+                            uint nid = PropertyBinder.GetNumericNodeId(n.Id);
+                            if (nid != 0u && !hierarchy.Contains(nid)) hierarchy.Add(nid);
+                        }
+                    }
+                }
             }
+
+            if (hit == null && sceneGraph != null)
+            {
+                hit = sceneGraph.HitTest(canvasPt);
+            }
+
+            if (hit != null)
+            {
+                uint hitId = PropertyBinder.GetNumericNodeId(hit.Id);
+                if (hitId != 0u && !hierarchy.Contains(hitId)) hierarchy.Add(hitId);
+            }
+
+            return hit;
+        }
+
+        private static bool AreHierarchiesEqual(List<uint> a, List<uint> b)
+        {
+            if (a == null && b == null) return true;
+            if (a == null || b == null) return false;
+            if (a.Count != b.Count) return false;
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (a[i] != b[i]) return false;
+            }
+            return true;
+        }
+
+        public void OnPointerMove(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
+        {
+            if (runtime == null) return;
+            List<uint> hierarchy;
+            LayerNode hit = ResolveHit(sceneGraph, page, canvasPt, out hierarchy);
             uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
 
-            // Hover tracking: Enter and Exit
-            if (hitId != _lastHoverNodeId)
+            // Hover tracking: Enter and Exit per node in hierarchy
+            if (hitId != _lastHoverNodeId || !AreHierarchiesEqual(_lastHoverHierarchy, hierarchy))
             {
-                if (_lastHoverNodeId != 0u)
+                for (int i = 0; i < _lastHoverHierarchy.Count; i++)
                 {
-                    runtime.OnPointerEvent(_lastHoverNodeId, PointerEventKind.Exit);
+                    uint oldId = _lastHoverHierarchy[i];
+                    if (!hierarchy.Contains(oldId))
+                    {
+                        runtime.OnPointerEvent(oldId, PointerEventKind.Exit);
+                    }
                 }
-                if (hitId != 0u)
+
+                for (int i = 0; i < hierarchy.Count; i++)
                 {
-                    runtime.OnPointerEvent(hitId, PointerEventKind.Enter);
+                    uint newId = hierarchy[i];
+                    if (!_lastHoverHierarchy.Contains(newId))
+                    {
+                        runtime.OnPointerEvent(newId, PointerEventKind.Enter);
+                    }
+                    else
+                    {
+                        runtime.OnPointerEvent(newId, PointerEventKind.Move);
+                    }
                 }
+
+                _lastHoverHierarchy.Clear();
+                _lastHoverHierarchy.AddRange(hierarchy);
                 _lastHoverNodeId = hitId;
             }
-            else if (hitId != 0u)
+            else if (hierarchy.Count > 0)
             {
-                runtime.OnPointerEvent(hitId, PointerEventKind.Move);
+                runtime.OnPointerEvent(hierarchy, PointerEventKind.Move);
             }
 
             // Drag tracking
@@ -68,11 +132,13 @@ namespace Kerf.Engine
                 if (!_isDragging && distSq >= DragThreshold * DragThreshold)
                 {
                     _isDragging = true;
-                    runtime.OnPointerEvent(_pointerDownNodeId, PointerEventKind.DragStart);
+                    var dragTargets = _pointerDownHierarchy.Count > 0 ? (IList<uint>)_pointerDownHierarchy : new List<uint> { _pointerDownNodeId };
+                    runtime.OnPointerEvent(dragTargets, PointerEventKind.DragStart);
                 }
                 if (_isDragging)
                 {
-                    runtime.OnPointerEvent(_pointerDownNodeId, PointerEventKind.Drag);
+                    var dragTargets = _pointerDownHierarchy.Count > 0 ? (IList<uint>)_pointerDownHierarchy : new List<uint> { _pointerDownNodeId };
+                    runtime.OnPointerEvent(dragTargets, PointerEventKind.Drag);
                 }
             }
         }
@@ -80,53 +146,92 @@ namespace Kerf.Engine
         public void OnPointerDown(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
         {
             if (runtime == null) return;
-            LayerNode hit = (sceneGraph != null) ? sceneGraph.HitTest(canvasPt) : null;
-            if (hit == null && page != null)
-            {
-                var hitRes = CanvasInteractionController.HitTest(page, canvasPt);
-                hit = hitRes.DeepestNode ?? hitRes.OutermostNode;
-            }
+            List<uint> hierarchy;
+            LayerNode hit = ResolveHit(sceneGraph, page, canvasPt, out hierarchy);
             uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
+
             _pointerDownNodeId = hitId;
+            _pointerDownHierarchy.Clear();
+            _pointerDownHierarchy.AddRange(hierarchy);
             _pointerDownPoint = canvasPt;
             _isDragging = false;
 
-            runtime.OnPointerEvent(hitId, PointerEventKind.Down);
+            var targets = hierarchy.Count > 0 ? (IList<uint>)hierarchy : new List<uint> { hitId };
+            runtime.OnPointerEvent(targets, PointerEventKind.Down);
         }
 
         public void OnPointerUp(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
         {
             if (runtime == null) return;
-            LayerNode hit = (sceneGraph != null) ? sceneGraph.HitTest(canvasPt) : null;
-            if (hit == null && page != null)
-            {
-                var hitRes = CanvasInteractionController.HitTest(page, canvasPt);
-                hit = hitRes.DeepestNode ?? hitRes.OutermostNode;
-            }
+            List<uint> hierarchy;
+            LayerNode hit = ResolveHit(sceneGraph, page, canvasPt, out hierarchy);
             uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
 
             if (_isDragging)
             {
-                if (_pointerDownNodeId != 0u)
+                if (_pointerDownNodeId != 0u || _pointerDownHierarchy.Count > 0)
                 {
-                    runtime.OnPointerEvent(_pointerDownNodeId, PointerEventKind.DragEnd);
+                    var dragTargets = _pointerDownHierarchy.Count > 0 ? (IList<uint>)_pointerDownHierarchy : new List<uint> { _pointerDownNodeId };
+                    runtime.OnPointerEvent(dragTargets, PointerEventKind.DragEnd);
                 }
                 _isDragging = false;
             }
-            else if (_pointerDownNodeId == hitId)
+            else
             {
-                runtime.OnPointerEvent(hitId, PointerEventKind.Click);
-                runtime.OnPointerEvent(hitId, PointerEventKind.Tap);
+                bool isClickMatch = false;
+                if (_pointerDownNodeId == hitId)
+                {
+                    isClickMatch = true;
+                }
+                else if (hitId != 0u && _pointerDownHierarchy.Contains(hitId))
+                {
+                    isClickMatch = true;
+                }
+                else if (_pointerDownNodeId != 0u && hierarchy.Contains(_pointerDownNodeId))
+                {
+                    isClickMatch = true;
+                }
+
+                if (isClickMatch)
+                {
+                    var clickTargets = hierarchy.Count > 0 ? (IList<uint>)hierarchy : new List<uint> { hitId };
+                    runtime.OnPointerEvent(clickTargets, PointerEventKind.Click);
+                    runtime.OnPointerEvent(clickTargets, PointerEventKind.Tap);
+                }
             }
 
-            runtime.OnPointerEvent(hitId, PointerEventKind.Up);
+            var upTargets = hierarchy.Count > 0 ? (IList<uint>)hierarchy : new List<uint> { hitId };
+            runtime.OnPointerEvent(upTargets, PointerEventKind.Up);
             _pointerDownNodeId = 0u;
+            _pointerDownHierarchy.Clear();
+        }
+
+        public void OnClick(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
+        {
+            if (runtime == null) return;
+            List<uint> hierarchy;
+            LayerNode hit = ResolveHit(sceneGraph, page, canvasPt, out hierarchy);
+            uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
+            var targets = hierarchy.Count > 0 ? (IList<uint>)hierarchy : new List<uint> { hitId };
+            runtime.OnPointerEvent(targets, PointerEventKind.Click);
+        }
+
+        public void OnTap(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
+        {
+            if (runtime == null) return;
+            List<uint> hierarchy;
+            LayerNode hit = ResolveHit(sceneGraph, page, canvasPt, out hierarchy);
+            uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
+            var targets = hierarchy.Count > 0 ? (IList<uint>)hierarchy : new List<uint> { hitId };
+            runtime.OnPointerEvent(targets, PointerEventKind.Tap);
         }
 
         public void Reset()
         {
             _lastHoverNodeId = 0u;
+            _lastHoverHierarchy.Clear();
             _pointerDownNodeId = 0u;
+            _pointerDownHierarchy.Clear();
             _isDragging = false;
         }
     }

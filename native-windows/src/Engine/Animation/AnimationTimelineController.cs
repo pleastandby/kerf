@@ -110,34 +110,45 @@ namespace Kerf.Engine.Animation
 
             if (IsPlaying)
             {
-                double nextTime = CurrentTime + stepDt * _playDirection;
-
-                switch (LoopMode)
+                if (UseStateMachine)
                 {
-                    case LoopMode.OneShot:
-                        if (nextTime >= Duration)
-                        {
-                            CurrentTime = Duration;
-                            IsPlaying = false;
-                        }
-                        else if (nextTime <= 0.0)
-                        {
-                            CurrentTime = 0.0;
-                            IsPlaying = false;
-                        }
-                        else CurrentTime = nextTime;
-                        break;
+                    CurrentTime += stepDt * _playDirection;
+                    if (ActiveStateMachine != null && ActiveStateMachine.IsFinished)
+                    {
+                        IsPlaying = false;
+                    }
+                }
+                else
+                {
+                    double nextTime = CurrentTime + stepDt * _playDirection;
 
-                    case LoopMode.Loop:
-                        CurrentTime = PositiveModulo(nextTime, Duration);
-                        _playDirection = 1;
-                        break;
+                    switch (LoopMode)
+                    {
+                        case LoopMode.OneShot:
+                            if (nextTime >= Duration)
+                            {
+                                CurrentTime = Duration;
+                                IsPlaying = false;
+                            }
+                            else if (nextTime <= 0.0)
+                            {
+                                CurrentTime = 0.0;
+                                IsPlaying = false;
+                            }
+                            else CurrentTime = nextTime;
+                            break;
 
-                    case LoopMode.PingPong:
-                        double phase = PositiveModulo(nextTime, Duration * 2.0);
-                        CurrentTime = phase <= Duration ? phase : (Duration * 2.0 - phase);
-                        _playDirection = (phase <= Duration ? 1 : -1) * _playDirection;
-                        break;
+                        case LoopMode.Loop:
+                            CurrentTime = PositiveModulo(nextTime, Duration);
+                            _playDirection = 1;
+                            break;
+
+                        case LoopMode.PingPong:
+                            double phase = PositiveModulo(nextTime, Duration * 2.0);
+                            CurrentTime = phase <= Duration ? phase : (Duration * 2.0 - phase);
+                            _playDirection = (phase <= Duration ? 1 : -1) * _playDirection;
+                            break;
+                    }
                 }
             }
 

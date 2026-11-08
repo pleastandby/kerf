@@ -49,6 +49,19 @@ namespace Kerf.Engine.Animation
         public List<string> ReportedEvents { get; private set; }
         public Dictionary<uint, Dictionary<ushort, double>> RestPose { get; set; }
 
+        public bool IsFinished
+        {
+            get
+            {
+                if (LayerRuntimes == null || LayerRuntimes.Count == 0) return false;
+                for (int i = 0; i < LayerRuntimes.Count; i++)
+                {
+                    if (LayerRuntimes[i] != null && !LayerRuntimes[i].IsFinished) return false;
+                }
+                return true;
+            }
+        }
+
         public bool HasActiveTransitions()
         {
             if (LayerRuntimes == null) return false;
@@ -198,6 +211,10 @@ namespace Kerf.Engine.Animation
             if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Bool)
             {
                 Definition.Inputs[inputIdx].Value = val ? 1.0 : 0.0;
+                if (ViewModel != null && !string.IsNullOrEmpty(Definition.Inputs[inputIdx].Name))
+                {
+                    ViewModel.SetBool(Definition.Inputs[inputIdx].Name, val);
+                }
             }
         }
 
@@ -212,6 +229,10 @@ namespace Kerf.Engine.Animation
             if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Number && !double.IsNaN(val) && !double.IsInfinity(val))
             {
                 Definition.Inputs[inputIdx].Value = val;
+                if (ViewModel != null && !string.IsNullOrEmpty(Definition.Inputs[inputIdx].Name))
+                {
+                    ViewModel.SetNumber(Definition.Inputs[inputIdx].Name, val);
+                }
             }
         }
 
@@ -226,6 +247,10 @@ namespace Kerf.Engine.Animation
             if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Trigger)
             {
                 Definition.Inputs[inputIdx].Fired = true;
+                if (ViewModel != null && !string.IsNullOrEmpty(Definition.Inputs[inputIdx].Name))
+                {
+                    ViewModel.FireTrigger(Definition.Inputs[inputIdx].Name);
+                }
             }
         }
 
@@ -279,14 +304,24 @@ namespace Kerf.Engine.Animation
 
         public void OnPointerEvent(uint targetNodeId, PointerEventKind kind)
         {
+            OnPointerEvent(new List<uint> { targetNodeId }, kind);
+        }
+
+        public void OnPointerEvent(IList<uint> targetNodeIds, PointerEventKind kind)
+        {
             if (Definition == null || Definition.Listeners == null) return;
             List<ListenerAction> actionsToRun = new List<ListenerAction>();
             for (int i = 0; i < Definition.Listeners.Count; i++)
             {
                 NodeListener listener = Definition.Listeners[i];
-                if (listener != null && listener.Enabled && (listener.TargetNodeId == targetNodeId || listener.TargetNodeId == 0) && listener.Kind == kind && listener.Actions != null)
+                if (listener != null && listener.Enabled && listener.Kind == kind && listener.Actions != null)
                 {
-                    actionsToRun.AddRange(listener.Actions);
+                    bool targetMatches = listener.TargetNodeId == 0u ||
+                                         (targetNodeIds != null && targetNodeIds.Contains(listener.TargetNodeId));
+                    if (targetMatches)
+                    {
+                        actionsToRun.AddRange(listener.Actions);
+                    }
                 }
             }
 

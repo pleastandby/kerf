@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Media;
 using Kerf.Model;
+using Kerf.Tools;
 
 namespace Kerf.Engine
 {
@@ -490,22 +491,22 @@ namespace Kerf.Engine
 
         private LayerNode HitTestSubtree(SceneVisualNode vNode, Point point)
         {
-            if (!vNode.ModelNode.IsVisible || vNode.ModelNode.IsLocked) return null;
+            if (vNode == null || vNode.ModelNode == null || !vNode.ModelNode.IsVisible || vNode.ModelNode.IsLocked) return null;
 
-            Point localPt = CanvasToLocalPoint(vNode.ModelNode, point);
-            var bounds = vNode.WorldBounds.IsEmpty && vNode.ModelNode != null ? vNode.ModelNode.GetBounds() : vNode.WorldBounds;
+            bool contains = CanvasInteractionController.ContainsPoint(vNode.ModelNode, point);
+
             // Respect container clipping: if container clips content and point is outside, children cannot be hit
-            if (vNode.ModelNode.ClipContent && !bounds.Contains(localPt)) return null;
+            if (vNode.ModelNode.ClipContent && !contains) return null;
 
-            // Check children first (topmost child first)
+            // Check children first (topmost child first in canvas space)
             for (int i = vNode.Children.Count - 1; i >= 0; i--)
             {
-                var hit = HitTestSubtree(vNode.Children[i], localPt);
+                var hit = HitTestSubtree(vNode.Children[i], point);
                 if (hit != null) return hit;
             }
 
             // Check self bounds (Groups have no background geometry and cannot be hit in empty space)
-            if (vNode.ModelNode.Type != ElementType.Group && bounds.Contains(localPt))
+            if (vNode.ModelNode.Type != ElementType.Group && contains)
             {
                 return vNode.ModelNode;
             }

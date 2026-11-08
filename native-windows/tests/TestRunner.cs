@@ -98,6 +98,7 @@ namespace Kerf.Tests
             RunTest("Deterministic Transition Priority, ExitTime Gating & Clip Playback", TestDeterministicTransitionPriorityExitTimeAndClipAdvancement);
             RunTest("Non-Destructive StateMachineValidator Listener Diagnostics", TestStateMachineValidatorListenerDiagnostics);
             RunTest("Interactive Listeners, State Machine Runtime & Transition Execution", TestInteractiveListenersAndStateMachineRuntimeExecution);
+            RunTest("Continuous Playback, Input Gating & Interactive Pointer Transitions", TestContinuousPlaybackAndInputDrivenTransitions);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -8373,6 +8374,111 @@ namespace Kerf.Tests
             dispatcher.OnPointerDown(canvasRt, sceneGraph, new Point(500, 500));
             dispatcher.OnPointerUp(canvasRt, sceneGraph, new Point(500, 500));
             Assert(actDef.Inputs[inCanvasClick].Value == 1.0, "Canvas listener (TargetNodeId 0) fired on canvas click");
+        }
+
+        private static void TestContinuousPlaybackAndInputDrivenTransitions()
+        {
+            // 1. Requirement: State machine plays continuously past timeline Duration (e.g. 2.0s) without stopping
+            var smDef = new StateMachineDefinition("ContinuousSM");
+            var layer = new MachineLayer("BaseLayer");
+            int sEntry = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int sIdle = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
+            int sHover = layer.AddState(new MachineState(2, "Hover", StateKind.Animation, 1));
+            layer.AddTransition(new StateTransition(sEntry, sIdle, 0.0));
+
+            int inHover = smDef.AddInput(MachineInput.Bool("Hovering", false));
+
+            // Idle -> Hover requires Hovering == 1.0
+            var tEnter = new StateTransition(sIdle, sHover, 0.2);
+            tEnter.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 1.0));
+            layer.AddTransition(tEnter);
+
+            // Hover -> Idle requires Hovering == 0.0
+            var tExit = new StateTransition(sHover, sIdle, 0.2);
+            tExit.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 0.0));
+            layer.AddTransition(tExit);
+
+            smDef.AddLayer(layer);
+
+            var clips = new List<Clip>
+            {
+                new Clip(10, "IdleClip", 2.0, 60.0, LoopMode.OneShot),
+                new Clip(11, "HoverClip", 2.0, 60.0, LoopMode.OneShot)
+            };
+
+            var timelineCtrl = new AnimationTimelineController();
+            timelineCtrl.Duration = 2.0;
+            timelineCtrl.LoopMode = LoopMode.OneShot;
+            timelineCtrl.UseStateMachine = true;
+            var runtime = new StateMachineRuntime(smDef, clips);
+            timelineCtrl.ActiveStateMachine = runtime;
+
+            // Start playing: Step past 2.0 seconds
+            timelineCtrl.Play();
+            timelineCtrl.Step(1.5);
+            Assert(timelineCtrl.IsPlaying, "Timeline is playing at 1.5s");
+            timelineCtrl.Step(1.5); // Total 3.0s > Duration 2.0s
+            Assert(timelineCtrl.IsPlaying, "State machine plays continuously past 2.0s without auto-pausing");
+            Assert(Math.Abs(timelineCtrl.CurrentTime - 3.0) < 0.001, "CurrentTime advanced to 3.0s without being clamped to 2.0s");
+
+            // 2. Requirement: Animation state does NOT transition without input when condition is configured
+            // State should remain in Idle (sIdle = 1) because Hovering is 0.0
+            Assert(runtime.LayerRuntimes[0].CurrentState == sIdle, "State remains in Idle without input condition fulfilled");
+            Assert(!runtime.HasActiveTransitions(), "No transition occurs while condition is false");
+
+            // 3. Requirement: Pointer enter on document object triggers listener and activates transition
+            var page = new Page { Id = "test_page" };
+            var rect = new LayerNode
+            {
+                Id = "rect_interactive",
+                Name = "InteractiveCard",
+                Type = ElementType.Rectangle,
+                X = 100,
+                Y = 100,
+                Width = 200,
+                Height = 150,
+                IsVisible = true
+            };
+            page.Layers.Add(rect);
+            uint rectId = PropertyBinder.GetNumericNodeId(rect.Id);
+
+            // Attach PointerEnter and PointerExit listeners to the rectangle
+            var lEnter = new NodeListener(rectId, PointerEventKind.Enter);
+            lEnter.Actions.Add(new ListenerAction(ActionKind.SetBool, inHover) { Parameter = 1.0 });
+            smDef.AddListener(lEnter);
+
+            var lExit = new NodeListener(rectId, PointerEventKind.Exit);
+            lExit.Actions.Add(new ListenerAction(ActionKind.SetBool, inHover) { Parameter = 0.0 });
+            smDef.AddListener(lExit);
+
+            var dispatcher = new InteractiveEventDispatcher();
+
+            // Pointer moves inside rectangle (150, 150)
+            dispatcher.OnPointerMove(runtime, null, new Point(150, 150), page);
+            Assert(smDef.Inputs[inHover].Value == 1.0, "PointerEnter listener set Hovering input to 1.0 (True)");
+
+            // Advance state machine: transition Idle -> Hover should now trigger!
+            timelineCtrl.Step(0.016);
+            Assert(runtime.HasActiveTransitions(), "Transition Idle -> Hover is now active after pointer entered");
+            Assert(runtime.LayerRuntimes[0].ActiveTransition != null && runtime.LayerRuntimes[0].ActiveTransition.ToState == sHover,
+                "Active transition target is Hover state");
+
+            // Step through transition duration (0.2s)
+            timelineCtrl.Step(0.25);
+            Assert(runtime.LayerRuntimes[0].CurrentState == sHover, "State smoothly completed transition into Hover state");
+
+            // Pointer moves outside rectangle (500, 500)
+            dispatcher.OnPointerMove(runtime, null, new Point(500, 500), page);
+            Assert(smDef.Inputs[inHover].Value == 0.0, "PointerExit listener set Hovering input to 0.0 (False)");
+
+            // Advance state machine: transition Hover -> Idle should now trigger!
+            timelineCtrl.Step(0.016);
+            Assert(runtime.HasActiveTransitions(), "Transition Hover -> Idle is now active after pointer exited");
+            Assert(runtime.LayerRuntimes[0].ActiveTransition != null && runtime.LayerRuntimes[0].ActiveTransition.ToState == sIdle,
+                "Active transition target is Idle state");
+
+            timelineCtrl.Step(0.25);
+            Assert(runtime.LayerRuntimes[0].CurrentState == sIdle, "State returned to Idle after pointer exit");
         }
     }
 }

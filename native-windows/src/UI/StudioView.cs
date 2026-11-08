@@ -5311,6 +5311,10 @@ namespace Kerf.UI
                                     targetC.InputId = chosenIn.InputId;
                                     targetC.PropertyName = chosenIn.Name;
                                     targetC.InputIndex = sm.Definition.Inputs.IndexOf(chosenIn);
+                                    if (chosenIn.Kind == InputKind.Bool && targetC.Value == 0.0)
+                                    {
+                                        targetC.Value = 1.0;
+                                    }
                                     var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
                                     {
                                         BuildStateMachineStatesGraph();
@@ -5493,9 +5497,11 @@ namespace Kerf.UI
                     var newGroups = CloneConditionGroups(trans.ConditionGroups);
                     if (groupIndex < newGroups.Count)
                     {
-                        string firstId = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].InputId : null;
-                        string firstName = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].Name : null;
-                        newGroups[groupIndex].Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, 0.0, true) { PropertyName = firstName });
+                        var firstInput = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0] : null;
+                        string firstId = firstInput != null ? firstInput.InputId : null;
+                        string firstName = firstInput != null ? firstInput.Name : null;
+                        double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                        newGroups[groupIndex].Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, defaultCondVal, true) { PropertyName = firstName });
                         var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
                         {
                             BuildStateMachineStatesGraph();
@@ -5537,9 +5543,11 @@ namespace Kerf.UI
                 var oldGroups = CloneConditionGroups(trans.ConditionGroups);
                 var newGroups = CloneConditionGroups(trans.ConditionGroups);
                 var newGroup = new ConditionGroup();
-                string firstId = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].InputId : null;
-                string firstName = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].Name : null;
-                newGroup.Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, 0.0, true) { PropertyName = firstName });
+                var firstInput = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0] : null;
+                string firstId = firstInput != null ? firstInput.InputId : null;
+                string firstName = firstInput != null ? firstInput.Name : null;
+                double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                newGroup.Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, defaultCondVal, true) { PropertyName = firstName });
                 newGroups.Add(newGroup);
                 var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
                 {
@@ -5693,8 +5701,14 @@ namespace Kerf.UI
             addBtn.Click += (s, e) =>
             {
                 if (smDef == null) return;
-                var newListener = new NodeListener(targetId, PointerEventKind.Click);
-                newListener.Actions.Add(new ListenerAction(ActionKind.Fire, 0));
+                var firstInp = (smDef.Inputs != null && smDef.Inputs.Count > 0) ? smDef.Inputs[0] : null;
+                string firstInpId = firstInp != null ? firstInp.InputId : null;
+                string firstInpName = firstInp != null ? firstInp.Name : null;
+                ActionKind defaultAction = (firstInp != null && firstInp.Kind == InputKind.Bool) ? ActionKind.SetBool : (firstInp != null && firstInp.Kind == InputKind.Number ? ActionKind.SetNumber : ActionKind.Fire);
+                double defaultParam = (firstInp != null && firstInp.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                PointerEventKind defaultEvent = (firstInp != null && firstInp.Kind == InputKind.Bool) ? PointerEventKind.Enter : PointerEventKind.Click;
+                var newListener = new NodeListener(targetId, defaultEvent);
+                newListener.Actions.Add(new ListenerAction(defaultAction, 0, defaultParam) { InputId = firstInpId, PropertyName = firstInpName });
                 var addCmd = new AddListenerCommand(smDef, newListener, () =>
                 {
                     RefreshPropertyInspector();
@@ -5993,6 +6007,7 @@ namespace Kerf.UI
                         {
                             newSnap.Actions[0].InputId = newInputId;
                             newSnap.Actions[0].InputIndex = newIdx;
+                            newSnap.Actions[0].PropertyName = (newIdx >= 0 && newIdx < smDef.Inputs.Count && smDef.Inputs[newIdx] != null) ? smDef.Inputs[newIdx].Name : null;
                         }
                         var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
                         {
@@ -13794,6 +13809,23 @@ namespace Kerf.UI
             RefreshCanvas();
         }
 
+        public void SelectLayers(IList<LayerNode> layers)
+        {
+            _selectedLayers.Clear();
+            if (layers != null)
+            {
+                for (int i = 0; i < layers.Count; i++)
+                {
+                    if (layers[i] != null && !_selectedLayers.Contains(layers[i]))
+                    {
+                        _selectedLayers.Add(layers[i]);
+                    }
+                }
+            }
+            OnSelectionChanged();
+            RefreshCanvas();
+        }
+
         public void StartRename(string layerId)
         {
             var page = Document != null ? Document.GetActivePage() : null;
@@ -17163,6 +17195,10 @@ namespace Kerf.UI
                                         targetC.InputId = chosenIn.InputId;
                                         targetC.PropertyName = chosenIn.Name;
                                         targetC.InputIndex = sm.Definition.Inputs.IndexOf(chosenIn);
+                                        if (chosenIn.Kind == InputKind.Bool && targetC.Value == 0.0)
+                                        {
+                                            targetC.Value = 1.0;
+                                        }
                                         var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
                                         {
                                             BuildStateMachineStatesGraph();
@@ -17341,9 +17377,11 @@ namespace Kerf.UI
                         var newGroups = CloneConditionGroups(trans.ConditionGroups);
                         if (groupIndex < newGroups.Count)
                         {
-                            string firstId = (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].InputId : null;
-                            string firstName = (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0].Name : null;
-                            newGroups[groupIndex].Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, 0.0, true) { PropertyName = firstName });
+                            var firstInput = (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0] : null;
+                            string firstId = firstInput != null ? firstInput.InputId : null;
+                            string firstName = firstInput != null ? firstInput.Name : null;
+                            double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                            newGroups[groupIndex].Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, defaultCondVal, true) { PropertyName = firstName });
                             var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
                             {
                                 BuildStateMachineStatesGraph();
@@ -17387,7 +17425,8 @@ namespace Kerf.UI
                     if (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0)
                     {
                         var firstInp = sm.Definition.Inputs[0];
-                        newGrp.Conditions.Add(new TransitionCondition(firstInp.InputId, ConditionOp.Eq, 0.0, true) { PropertyName = firstInp.Name });
+                        double defaultCondVal = (firstInp != null && firstInp.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                        newGrp.Conditions.Add(new TransitionCondition(firstInp.InputId, ConditionOp.Eq, defaultCondVal, true) { PropertyName = firstInp.Name });
                     }
                     newGroups.Add(newGrp);
                     var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
