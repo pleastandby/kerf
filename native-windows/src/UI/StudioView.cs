@@ -121,8 +121,13 @@ namespace Kerf.UI
         private TextBlock _assetsCountBlock;
 
         // Interactive Vector State Machine Canvas Binding
-        private uint _lastHoverNodeId = 0;
-        private uint _stateMachinePointerDownNodeId = 0;
+        private readonly InteractiveEventDispatcher _interactiveEventDispatcher = new InteractiveEventDispatcher();
+
+        public InteractiveEventDispatcher InteractiveDispatcher
+        {
+            get { return _interactiveEventDispatcher; }
+        }
+
         private bool _interactiveCanvasEnabled = true;
         private TextBlock _stateMachineStatusBadge;
         private Panel _stateMachineInputsStack;
@@ -413,8 +418,7 @@ namespace Kerf.UI
             _timelineController = null;
             _animationRestPose.Clear();
             _animationNodesById.Clear();
-            _lastHoverNodeId = 0;
-            _stateMachinePointerDownNodeId = 0;
+            if (_interactiveEventDispatcher != null) _interactiveEventDispatcher.Reset();
             _isStateMachineMode = true;
             if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
             if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Visible;
@@ -9911,6 +9915,18 @@ namespace Kerf.UI
                 EndInPlaceTextEditing(commit: true);
             }
 
+            // Gated simulation pointer handling (D-01 & Pitfall 1)
+            if (_currentStudioMode == StudioMode.Animate && _timelineController != null && _timelineController.IsPlaying && button == MouseButton.Left)
+            {
+                var sm = _timelineController.ActiveStateMachine;
+                if (sm != null && _sceneGraph != null)
+                {
+                    _interactiveEventDispatcher.OnPointerDown(sm, _sceneGraph, canvasPt);
+                    TriggerStateMachineStep(continuePlayback: true);
+                }
+                return; // CRITICAL per D-01 and Pitfall 1: return immediately to prevent vector editing, layer moving, or marquee selection during live simulation
+            }
+
             // Middle button or Space held: Pan
             if (button == MouseButton.Middle || (button == MouseButton.Left && Keyboard.IsKeyDown(Key.Space)) || _activeTool == ToolType.Hand)
             {
@@ -9952,17 +9968,6 @@ namespace Kerf.UI
                     }
                 }
 
-                // In Animate mode, route click directly into State Machine
-                if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
-                {
-                    var hit = _sceneGraph.HitTest(canvasPt);
-                    uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
-                    _stateMachinePointerDownNodeId = hitId;
-                    _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Down);
-                    if (hit != null) SetStateMachineBool("isHovered", true);
-                    SetStateMachineBool("isPressed", true);
-                    TriggerStateMachineStep(continuePlayback: true);
-                }
 
                 // 1. Vector Edit Mode interaction (if currently vector editing a path)
                 if (_isVectorEditing && _editingVectorNode != null && _editingVectorNode.Geometry != null)
@@ -10386,37 +10391,24 @@ namespace Kerf.UI
         {
             Point canvasPt = ScreenToCanvas(screenPt);
 
+            // Gated simulation pointer handling (D-01 & Pitfall 1)
+            if (_currentStudioMode == StudioMode.Animate && _timelineController != null && _timelineController.IsPlaying)
+            {
+                var sm = _timelineController.ActiveStateMachine;
+                if (sm != null && _sceneGraph != null)
+                {
+                    _interactiveEventDispatcher.OnPointerMove(sm, _sceneGraph, canvasPt);
+                    TriggerStateMachineStep(continuePlayback: true);
+                }
+                return; // CRITICAL: return immediately
+            }
+
             if (_activeGuideDrag != null)
             {
                 _activeGuideDrag.Position = _activeGuideDrag.IsVertical ? canvasPt.X : canvasPt.Y;
                 RefreshCanvas();
                 _lastMousePos = screenPt;
                 return;
-            }
-
-            if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
-            {
-                var hit = _sceneGraph.HitTest(canvasPt);
-                uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0;
-                if (hitId != _lastHoverNodeId)
-                {
-                    if (_lastHoverNodeId != 0)
-                    {
-                        _timelineController.ActiveStateMachine.OnPointerEvent(_lastHoverNodeId, PointerEventKind.Exit);
-                    }
-                    if (hitId != 0)
-                    {
-                        _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Enter);
-                    }
-                    _lastHoverNodeId = hitId;
-                    SetStateMachineBool("isHovered", hitId != 0);
-                    SetStateMachineBool("Hovering", hitId != 0);
-                    TriggerStateMachineStep(continuePlayback: true);
-                }
-                else if (hitId != 0)
-                {
-                    _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Move);
-                }
             }
 
             // Marquee / Rectangle selection dragging
@@ -11211,6 +11203,19 @@ namespace Kerf.UI
 
         public void HandleCanvasMouseUp(Point screenPt, MouseButton button)
         {
+            // Gated simulation pointer handling (D-01 & Pitfall 1)
+            if (_currentStudioMode == StudioMode.Animate && _timelineController != null && _timelineController.IsPlaying && button == MouseButton.Left)
+            {
+                Point canvasPt = ScreenToCanvas(screenPt);
+                var sm = _timelineController.ActiveStateMachine;
+                if (sm != null && _sceneGraph != null)
+                {
+                    _interactiveEventDispatcher.OnPointerUp(sm, _sceneGraph, canvasPt);
+                    TriggerStateMachineStep(continuePlayback: true);
+                }
+                return; // CRITICAL: return immediately
+            }
+
             if (button == MouseButton.Right)
             {
                 if (_isPanning) _isPanning = false;
@@ -11260,18 +11265,6 @@ namespace Kerf.UI
                 return;
             }
 
-            if (_currentStudioMode == StudioMode.Animate && _interactiveCanvasEnabled && _timelineController != null && _timelineController.ActiveStateMachine != null)
-            {
-                Point canvasPt = ScreenToCanvas(screenPt);
-                var hit = _sceneGraph.HitTest(canvasPt);
-                uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
-                _timelineController.ActiveStateMachine.OnPointerEvent(hitId, PointerEventKind.Up);
-                if (hitId != 0 && hitId == _stateMachinePointerDownNodeId)
-                    SetStateMachineTrigger("clickTrigger");
-                SetStateMachineBool("isPressed", false);
-                _stateMachinePointerDownNodeId = 0;
-                TriggerStateMachineStep(continuePlayback: true);
-            }
 
             if (_isDraggingGradientHandle)
             {
@@ -21288,6 +21281,7 @@ namespace Kerf.UI
         {
             if (_timelineController != null) _timelineController.Pause();
             if (_timelinePlayBtnText != null) _timelinePlayBtnText.Text = "▶ Play";
+            if (_interactiveEventDispatcher != null) _interactiveEventDispatcher.Reset();
             bool keepTimer = _timelineController != null &&
                              _timelineController.UseStateMachine &&
                              _interactiveCanvasEnabled &&
@@ -21298,6 +21292,7 @@ namespace Kerf.UI
         public void StopAnimationPlayback()
         {
             PauseAnimation();
+            if (_interactiveEventDispatcher != null) _interactiveEventDispatcher.Reset();
             if (_timelineController != null)
             {
                 _timelineController.Stop();
