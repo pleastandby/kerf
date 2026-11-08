@@ -347,6 +347,10 @@ namespace Kerf.UI
         private TextBlock _zoomPercentBlock;
         private StackPanel _layerListStack;
         private StackPanel _propertyInspectorStack;
+        public StackPanel PropertyInspectorStack
+        {
+            get { return _propertyInspectorStack; }
+        }
         private Dictionary<ToolType, Button> _toolButtons;
         private StackPanel _booleanToolbar;
         private DispatcherTimer _autosaveTimer;
@@ -3633,10 +3637,6 @@ namespace Kerf.UI
 
             if (_selectedLayers.Count == 0)
             {
-                if (_currentStudioMode == StudioMode.Animate)
-                {
-                    _propertyInspectorStack.Children.Add(BuildKeyframeMotionInspectorSection());
-                }
                 // Page settings
                 _propertyInspectorStack.Children.Add(CreateInspectorSection("Page Settings"));
                 _propertyInspectorStack.Children.Add(CreateColorRow("Canvas BG", page.BackgroundColor, hex =>
@@ -4513,23 +4513,12 @@ namespace Kerf.UI
             // Keep selection-level styles at the end of the inspector, after object properties.
             if (_selectedLayers.Count > 1 || primary.Type == ElementType.Frame || primary.Type == ElementType.Group)
                 BuildSelectionColorsSection(_selectedLayers);
-
-            if (_currentStudioMode == StudioMode.Animate)
-            {
-                _propertyInspectorStack.Children.Add(BuildListenersInspectorSection(primary));
-                _propertyInspectorStack.Children.Add(BuildKeyframeMotionInspectorSection());
-            }
         }
 
         private void BuildStateMachineRightPanelInspector()
         {
             if (_propertyInspectorStack == null) return;
             _propertyInspectorStack.Children.Clear();
-
-            if (_selectedLayers != null && _selectedLayers.Count > 0)
-            {
-                _propertyInspectorStack.Children.Add(BuildListenersInspectorSection(_selectedLayers[0]));
-            }
 
             var sm = _timelineController != null ? _timelineController.ActiveStateMachine : null;
             var layer = (sm != null && sm.Definition != null && sm.Definition.Layers != null && sm.Definition.Layers.Count > 0)
@@ -9929,9 +9918,10 @@ namespace Kerf.UI
             if (_currentStudioMode == StudioMode.Animate && _timelineController != null && _timelineController.IsPlaying && button == MouseButton.Left)
             {
                 var sm = _timelineController.ActiveStateMachine;
+                var page = Document != null ? Document.GetActivePage() : null;
                 if (sm != null && _sceneGraph != null)
                 {
-                    _interactiveEventDispatcher.OnPointerDown(sm, _sceneGraph, canvasPt);
+                    _interactiveEventDispatcher.OnPointerDown(sm, _sceneGraph, canvasPt, page);
                     TriggerStateMachineStep(continuePlayback: true);
                 }
                 return; // CRITICAL per D-01 and Pitfall 1: return immediately to prevent vector editing, layer moving, or marquee selection during live simulation
@@ -10405,9 +10395,10 @@ namespace Kerf.UI
             if (_currentStudioMode == StudioMode.Animate && _timelineController != null && _timelineController.IsPlaying)
             {
                 var sm = _timelineController.ActiveStateMachine;
+                var page = Document != null ? Document.GetActivePage() : null;
                 if (sm != null && _sceneGraph != null)
                 {
-                    _interactiveEventDispatcher.OnPointerMove(sm, _sceneGraph, canvasPt);
+                    _interactiveEventDispatcher.OnPointerMove(sm, _sceneGraph, canvasPt, page);
                     TriggerStateMachineStep(continuePlayback: true);
                 }
                 return; // CRITICAL: return immediately
@@ -11218,9 +11209,10 @@ namespace Kerf.UI
             {
                 Point canvasPt = ScreenToCanvas(screenPt);
                 var sm = _timelineController.ActiveStateMachine;
+                var page = Document != null ? Document.GetActivePage() : null;
                 if (sm != null && _sceneGraph != null)
                 {
-                    _interactiveEventDispatcher.OnPointerUp(sm, _sceneGraph, canvasPt);
+                    _interactiveEventDispatcher.OnPointerUp(sm, _sceneGraph, canvasPt, page);
                     TriggerStateMachineStep(continuePlayback: true);
                 }
                 return; // CRITICAL: return immediately
@@ -18307,19 +18299,41 @@ namespace Kerf.UI
             // 1. Target (Canvas or Layer)
             var targetBox = CreateModernComboBox(30);
             targetBox.Items.Add(new ComboBoxItem { Content = "(Artboard / Entire Canvas)", Tag = 0u });
-            foreach (var layer in layers)
+            uint selectedNodeId = 0u;
+            if (_selectedLayers != null && _selectedLayers.Count > 0 && _selectedLayers[0] != null)
             {
-                targetBox.Items.Add(new ComboBoxItem { Content = layer.Name, Tag = PropertyBinder.GetNumericNodeId(layer.Id) });
+                selectedNodeId = PropertyBinder.GetNumericNodeId(_selectedLayers[0].Id);
             }
-            targetBox.SelectedIndex = layers.Count > 0 ? 1 : 0;
+            int targetIdxToSelect = 0;
+            for (int li = 0; li < layers.Count; li++)
+            {
+                var layer = layers[li];
+                uint nid = PropertyBinder.GetNumericNodeId(layer.Id);
+                var cbi = new ComboBoxItem { Content = layer.Name, Tag = nid };
+                targetBox.Items.Add(cbi);
+                if (selectedNodeId != 0u && nid == selectedNodeId)
+                {
+                    targetIdxToSelect = targetBox.Items.Count - 1;
+                }
+            }
+            if (targetIdxToSelect == 0 && layers.Count > 0 && selectedNodeId == 0u)
+            {
+                targetIdxToSelect = 1;
+            }
+            targetBox.SelectedIndex = targetIdxToSelect;
             form.Children.Add(CreateTransitionFormRow("Target", targetBox));
 
             // 2. Event Kind
             var eventBox = CreateModernComboBox(30);
             eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Enter (Hover)", Tag = PointerEventKind.Enter });
             eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Exit (Unhover)", Tag = PointerEventKind.Exit });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Down (Click)", Tag = PointerEventKind.Down });
+            eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Down (Press)", Tag = PointerEventKind.Down });
             eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Up (Release)", Tag = PointerEventKind.Up });
+            eventBox.Items.Add(new ComboBoxItem { Content = "Click", Tag = PointerEventKind.Click });
+            eventBox.Items.Add(new ComboBoxItem { Content = "Tap", Tag = PointerEventKind.Tap });
+            eventBox.Items.Add(new ComboBoxItem { Content = "Drag Start", Tag = PointerEventKind.DragStart });
+            eventBox.Items.Add(new ComboBoxItem { Content = "Drag", Tag = PointerEventKind.Drag });
+            eventBox.Items.Add(new ComboBoxItem { Content = "Drag End", Tag = PointerEventKind.DragEnd });
             eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Move", Tag = PointerEventKind.Move });
             eventBox.SelectedIndex = 0;
             form.Children.Add(CreateTransitionFormRow("Event", eventBox));
@@ -18343,7 +18357,14 @@ namespace Kerf.UI
             var boolValBox = CreateModernComboBox(30);
             boolValBox.Items.Add(new ComboBoxItem { Content = "Set True (1)", Tag = 1.0 });
             boolValBox.Items.Add(new ComboBoxItem { Content = "Set False (0)", Tag = 0.0 });
+            boolValBox.Items.Add(new ComboBoxItem { Content = "Toggle (Flip)", Tag = -1.0 });
+            boolValBox.Items.Add(new ComboBoxItem { Content = "Reset to Default", Tag = -2.0 });
             boolValBox.SelectedIndex = 0;
+
+            var numActionBox = CreateModernComboBox(30);
+            numActionBox.Items.Add(new ComboBoxItem { Content = "Set Value", Tag = 0 });
+            numActionBox.Items.Add(new ComboBoxItem { Content = "Reset to Default", Tag = 1 });
+            numActionBox.SelectedIndex = 0;
 
             var numValBox = new TextBox
             {
@@ -18370,17 +18391,22 @@ namespace Kerf.UI
                 var inp = selectedItem != null ? selectedItem.Tag as MachineInput : null;
                 if (inp == null || inp.Kind == InputKind.Bool)
                 {
-                    valueContainer.Children.Add(CreateTransitionFormRow("Value", boolValBox));
+                    valueContainer.Children.Add(CreateTransitionFormRow("Action / Value", boolValBox));
                 }
                 else if (inp.Kind == InputKind.Number)
                 {
-                    valueContainer.Children.Add(CreateTransitionFormRow("Set Value", numValBox));
+                    valueContainer.Children.Add(CreateTransitionFormRow("Action", numActionBox));
+                    if (numActionBox.SelectedIndex == 0)
+                    {
+                        valueContainer.Children.Add(CreateTransitionFormRow("Value", numValBox));
+                    }
                 }
                 else if (inp.Kind == InputKind.Trigger)
                 {
                     valueContainer.Children.Add(triggerHelp);
                 }
             };
+            numActionBox.SelectionChanged += (s, e) => updateValueRow();
             inputBox.SelectionChanged += (s, e) => updateValueRow();
             updateValueRow();
 
@@ -18417,27 +18443,44 @@ namespace Kerf.UI
                 {
                     var bvItem = boolValBox.SelectedItem as ComboBoxItem;
                     double bv = bvItem != null && bvItem.Tag is double ? (double)bvItem.Tag : 1.0;
-                    action = new ListenerAction(ActionKind.SetBool, inputIdx, bv);
-                    action.PropertyName = inp.Name;
+                    if (bv == -1.0)
+                        action = new ListenerAction(ActionKind.ToggleBool, inputIdx, 0.0);
+                    else if (bv == -2.0)
+                        action = new ListenerAction(ActionKind.Reset, inputIdx, 0.0);
+                    else
+                        action = new ListenerAction(ActionKind.SetBool, inputIdx, bv);
                 }
                 else if (inp.Kind == InputKind.Number)
                 {
-                    double nv;
-                    if (!double.TryParse(numValBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out nv)) nv = 1.0;
-                    action = new ListenerAction(ActionKind.SetNumber, inputIdx, nv);
-                    action.PropertyName = inp.Name;
+                    var naItem = numActionBox.SelectedItem as ComboBoxItem;
+                    int na = naItem != null && naItem.Tag is int ? (int)naItem.Tag : 0;
+                    if (na == 1)
+                    {
+                        action = new ListenerAction(ActionKind.Reset, inputIdx, 0.0);
+                    }
+                    else
+                    {
+                        double nv;
+                        if (!double.TryParse(numValBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out nv)) nv = 1.0;
+                        action = new ListenerAction(ActionKind.SetNumber, inputIdx, nv);
+                    }
                 }
                 else // Trigger
                 {
                     action = new ListenerAction(ActionKind.Fire, inputIdx, 0.0);
-                    action.PropertyName = inp.Name;
                 }
+                action.InputId = inp.InputId;
+                action.PropertyName = inp.Name;
                 listener.Actions.Add(action);
 
                 if (sm.Definition.Listeners == null) sm.Definition.Listeners = new List<NodeListener>();
-                sm.Definition.AddListener(listener);
-                if (History != null) History.MarkDirty();
-                BuildStateMachineListeners();
+                var addCmd = new AddListenerCommand(sm.Definition, listener, () =>
+                {
+                    BuildStateMachineListeners();
+                    RefreshCanvas();
+                });
+                if (History != null) History.Execute(addCmd);
+                else addCmd.Execute();
                 dialog.Close();
             }, 6);
             create.Width = 78;
@@ -18480,10 +18523,14 @@ namespace Kerf.UI
                     string prop = !string.IsNullOrEmpty(act.PropertyName) ? act.PropertyName : ("Input #" + act.InputIndex);
                     if (act.Kind == ActionKind.SetBool)
                         actionText = prop + " = " + (act.Parameter > 0.5 ? "True" : "False");
+                    else if (act.Kind == ActionKind.ToggleBool)
+                        actionText = "Toggle " + prop;
                     else if (act.Kind == ActionKind.SetNumber)
                         actionText = prop + " = " + act.Parameter.ToString("0.##", CultureInfo.InvariantCulture);
                     else if (act.Kind == ActionKind.Fire)
                         actionText = "Fire " + prop;
+                    else if (act.Kind == ActionKind.Reset)
+                        actionText = "Reset " + prop;
                     else
                         actionText = prop;
                 }
@@ -18496,10 +18543,10 @@ namespace Kerf.UI
                     CornerRadius = new CornerRadius(4),
                     Padding = new Thickness(7, 5, 7, 5),
                     Margin = new Thickness(0, 2, 0, 2),
-                    Cursor = Cursors.Hand,
-                    ToolTip = "Click × to remove listener"
+                    ToolTip = "Listener"
                 };
                 var chipGrid = new DockPanel { LastChildFill = true };
+
                 var delBtn = new TextBlock
                 {
                     Text = "×",
@@ -18507,19 +18554,44 @@ namespace Kerf.UI
                     Foreground = KerfBrand.TextMutedBrush,
                     Cursor = Cursors.Hand,
                     Margin = new Thickness(6, 0, 0, 0),
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
+                    ToolTip = "Delete listener"
                 };
                 delBtn.MouseEnter += (s, e) => delBtn.Foreground = new SolidColorBrush(Color.FromRgb(255, 107, 107));
                 delBtn.MouseLeave += (s, e) => delBtn.Foreground = KerfBrand.TextMutedBrush;
                 delBtn.MouseLeftButtonDown += (s, e) =>
                 {
-                    sm.Definition.Listeners.Remove(listener);
-                    if (History != null) History.MarkDirty();
-                    BuildStateMachineListeners();
+                    var delCmd = new DeleteListenerCommand(sm.Definition, listener, () =>
+                    {
+                        BuildStateMachineListeners();
+                        RefreshCanvas();
+                    });
+                    if (History != null) History.Execute(delCmd);
+                    else delCmd.Execute();
                     e.Handled = true;
                 };
                 DockPanel.SetDock(delBtn, Dock.Right);
                 chipGrid.Children.Add(delBtn);
+
+                var enCheck = new CheckBox
+                {
+                    IsChecked = listener.Enabled,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 8, 0),
+                    ToolTip = "Enable or disable listener"
+                };
+                enCheck.Checked += (s, e) =>
+                {
+                    listener.Enabled = true;
+                    if (History != null) History.MarkDirty();
+                };
+                enCheck.Unchecked += (s, e) =>
+                {
+                    listener.Enabled = false;
+                    if (History != null) History.MarkDirty();
+                };
+                DockPanel.SetDock(enCheck, Dock.Left);
+                chipGrid.Children.Add(enCheck);
 
                 var lbl = new TextBlock
                 {

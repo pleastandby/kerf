@@ -8331,6 +8331,48 @@ namespace Kerf.Tests
             Assert(!studio.TimelineController.IsPlaying, "StudioView is now paused");
             Assert(studio.InteractiveDispatcher.PointerDownNodeId == 0u,
                 "Pausing simulation resets interactive event dispatcher per D-01");
+
+            // 4. Verification: No redundant listeners or keyframe easing in right property inspector stack
+            studio.SelectLayers(new List<LayerNode> { btnLayer });
+            studio.RefreshPropertyInspector();
+            var inspectorStack = studio.PropertyInspectorStack;
+            if (inspectorStack != null)
+            {
+                for (int c = 0; c < inspectorStack.Children.Count; c++)
+                {
+                    var child = inspectorStack.Children[c] as FrameworkElement;
+                    if (child is TextBlock)
+                    {
+                        var tb = child as TextBlock;
+                        Assert(!tb.Text.Contains("Keyframe Motion & Easing"), "Redundant Keyframe Motion section removed from right inspector");
+                    }
+                    if (child is Border)
+                    {
+                        var b = child as Border;
+                        var spChild = b.Child as StackPanel;
+                        if (spChild != null && spChild.Children.Count > 0 && spChild.Children[0] is DockPanel)
+                        {
+                            var dp = spChild.Children[0] as DockPanel;
+                            if (dp.Children.Count > 0 && dp.Children[0] is TextBlock)
+                            {
+                                var tb = dp.Children[0] as TextBlock;
+                                Assert(!tb.Text.Contains("Listeners ("), "Redundant Listeners section removed from right inspector");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Verification: Canvas-level listener (TargetNodeId == 0u) fires on canvas pointer click
+            int inCanvasClick = actDef.AddInput(MachineInput.Bool("canvasClicked", false));
+            var lCanvas = new NodeListener(0u, PointerEventKind.Click);
+            lCanvas.Actions.Add(new ListenerAction(ActionKind.SetBool, inCanvasClick) { Parameter = 1.0 });
+            actDef.Listeners.Add(lCanvas);
+
+            var canvasRt = new StateMachineRuntime(actDef, new List<Clip>());
+            dispatcher.OnPointerDown(canvasRt, sceneGraph, new Point(500, 500));
+            dispatcher.OnPointerUp(canvasRt, sceneGraph, new Point(500, 500));
+            Assert(actDef.Inputs[inCanvasClick].Value == 1.0, "Canvas listener (TargetNodeId 0) fired on canvas click");
         }
     }
 }

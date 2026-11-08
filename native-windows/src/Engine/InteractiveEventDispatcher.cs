@@ -1,6 +1,8 @@
 using System;
 using System.Windows;
 using Kerf.Engine.Animation;
+using Kerf.Model;
+using Kerf.Tools;
 
 namespace Kerf.Engine
 {
@@ -27,10 +29,15 @@ namespace Kerf.Engine
             get { return _isDragging; }
         }
 
-        public void OnPointerMove(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt)
+        public void OnPointerMove(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
         {
-            if (runtime == null || sceneGraph == null) return;
-            var hit = sceneGraph.HitTest(canvasPt);
+            if (runtime == null) return;
+            LayerNode hit = (sceneGraph != null) ? sceneGraph.HitTest(canvasPt) : null;
+            if (hit == null && page != null)
+            {
+                var hitRes = CanvasInteractionController.HitTest(page, canvasPt);
+                hit = hitRes.DeepestNode ?? hitRes.OutermostNode;
+            }
             uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
 
             // Hover tracking: Enter and Exit
@@ -70,25 +77,32 @@ namespace Kerf.Engine
             }
         }
 
-        public void OnPointerDown(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt)
+        public void OnPointerDown(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
         {
-            if (runtime == null || sceneGraph == null) return;
-            var hit = sceneGraph.HitTest(canvasPt);
+            if (runtime == null) return;
+            LayerNode hit = (sceneGraph != null) ? sceneGraph.HitTest(canvasPt) : null;
+            if (hit == null && page != null)
+            {
+                var hitRes = CanvasInteractionController.HitTest(page, canvasPt);
+                hit = hitRes.DeepestNode ?? hitRes.OutermostNode;
+            }
             uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
             _pointerDownNodeId = hitId;
             _pointerDownPoint = canvasPt;
             _isDragging = false;
 
-            if (hitId != 0u)
-            {
-                runtime.OnPointerEvent(hitId, PointerEventKind.Down);
-            }
+            runtime.OnPointerEvent(hitId, PointerEventKind.Down);
         }
 
-        public void OnPointerUp(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt)
+        public void OnPointerUp(StateMachineRuntime runtime, RetainedSceneGraph sceneGraph, Point canvasPt, Page page = null)
         {
-            if (runtime == null || sceneGraph == null) return;
-            var hit = sceneGraph.HitTest(canvasPt);
+            if (runtime == null) return;
+            LayerNode hit = (sceneGraph != null) ? sceneGraph.HitTest(canvasPt) : null;
+            if (hit == null && page != null)
+            {
+                var hitRes = CanvasInteractionController.HitTest(page, canvasPt);
+                hit = hitRes.DeepestNode ?? hitRes.OutermostNode;
+            }
             uint hitId = (hit != null) ? PropertyBinder.GetNumericNodeId(hit.Id) : 0u;
 
             if (_isDragging)
@@ -99,16 +113,13 @@ namespace Kerf.Engine
                 }
                 _isDragging = false;
             }
-            else if (_pointerDownNodeId != 0u && _pointerDownNodeId == hitId)
+            else if (_pointerDownNodeId == hitId)
             {
                 runtime.OnPointerEvent(hitId, PointerEventKind.Click);
                 runtime.OnPointerEvent(hitId, PointerEventKind.Tap);
             }
 
-            if (hitId != 0u)
-            {
-                runtime.OnPointerEvent(hitId, PointerEventKind.Up);
-            }
+            runtime.OnPointerEvent(hitId, PointerEventKind.Up);
             _pointerDownNodeId = 0u;
         }
 
