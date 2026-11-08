@@ -628,12 +628,12 @@ public void OnPointerEvent(uint targetNodeId, PointerEventKind kind)
 
 *No high-risk assumptions present. All core types and behaviors are verified directly against repository source files.*
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should listeners created in Animate Mode be visible in the Right Inspector during Design Mode?**
    - What we know: D-02 specifies listener creation/inspection lives in the Right Inspector when an object is selected in Animate mode.
    - What's unclear: Whether users might want to view interactive listener triggers while in Design mode.
-   - Recommendation: Render the "Listeners" section primarily in `StudioMode.Animate`. In `StudioMode.Design`, provide a subtle badge or toggle to view interactive triggers if desired, keeping Design mode clean.
+   - RESOLVED: Render the "Listeners" section strictly in `StudioMode.Animate` when an object is selected, keeping Design mode clean and uncluttered as decided in D-02. In Design mode, users focus entirely on vector editing.
 
 ## Environment Availability
 
