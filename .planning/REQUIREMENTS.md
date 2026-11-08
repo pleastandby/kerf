@@ -48,7 +48,7 @@ Requirements for the animation engine refactor milestone. Each maps directly to 
 - [x] **STATE-02**: Directional transitions with duration, blend curves, and conditional checks.
 - [x] **STATE-03**: State machine inputs system supporting Boolean, Numeric, and Trigger variables.
 - [x] **STATE-04**: Interactive canvas event listeners (Hover Enter/Exit, Pointer Down/Up, Click) linked to state transitions.
-- [ ] **STATE-05**: State blending engine supporting smooth cross-fade interpolation between active clips.
+- [x] **STATE-05**: State blending engine supporting smooth cross-fade interpolation between active clips.
 - [x] **STATE-06**: Interactive UI panel for inspecting, creating, and wiring state machine nodes and transitions.
 
 ### Verification, Migration & Deprecation
@@ -107,7 +107,7 @@ Which phases cover which requirements.
 | STATE-02 | Phase 6 | Complete |
 | STATE-03 | Phase 6 | Complete |
 | STATE-04 | Phase 7 | Complete |
-| STATE-05 | Phase 7 | Pending |
+| STATE-05 | Phase 7 | Complete |
 | STATE-06 | Phase 6 | Complete |
 | MIGR-01 | Phase 7 | Pending |
 | MIGR-02 | Phase 7 | Pending |

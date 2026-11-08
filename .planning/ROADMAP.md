@@ -145,7 +145,7 @@ Plans:
 
 Plans:
 - [x] 07-01-PLAN.md — Centralized event dispatcher, document object listener model, and Right Inspector UI with undo/redo
-- [ ] 07-02-PLAN.md — StateMachineRuntime execution engine: transition conditions, exit times, clip playback, and snapshot crossfade blending
+- [x] 07-02-PLAN.md — StateMachineRuntime execution engine: transition conditions, exit times, clip playback, and snapshot crossfade blending
 - [ ] 07-03-PLAN.md — Simulation playback gating, early-return pointer dispatch, and comprehensive Test #66 verification
 
 ---
