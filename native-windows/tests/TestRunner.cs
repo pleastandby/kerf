@@ -7414,6 +7414,79 @@ namespace Kerf.Tests
 
             dispatcher.Reset();
             Assert(dispatcher.LastHoverNodeId == 0u && dispatcher.PointerDownNodeId == 0u && !dispatcher.IsDragging, "Reset clears all dispatcher state");
+
+            // 5. Transactional Reversible Listener Commands in CommandHistory
+            var testDef = new StateMachineDefinition();
+            var l1 = new NodeListener(301u, PointerEventKind.PointerEnter);
+            var l2 = new NodeListener(302u, PointerEventKind.PointerExit);
+            var l3 = new NodeListener(303u, PointerEventKind.Click);
+
+            int callbackCount = 0;
+            Action onChanged = () => { callbackCount++; };
+
+            // AddListenerCommand
+            var addCmd1 = new AddListenerCommand(testDef, l1, onChanged);
+            addCmd1.Execute();
+            Assert(testDef.Listeners.Count == 1 && testDef.Listeners[0] == l1, "AddListenerCommand added first listener");
+            Assert(callbackCount == 1, "AddListenerCommand triggered onChanged callback");
+
+            var addCmd2 = new AddListenerCommand(testDef, l2, onChanged);
+            addCmd2.Execute();
+            Assert(testDef.Listeners.Count == 2 && testDef.Listeners[1] == l2, "AddListenerCommand added second listener at end");
+
+            // Insert l3 at index 1
+            var addCmd3 = new AddListenerCommand(testDef, l3, 1, onChanged);
+            addCmd3.Execute();
+            Assert(testDef.Listeners.Count == 3 && testDef.Listeners[1] == l3 && testDef.Listeners[2] == l2, "AddListenerCommand inserted listener at index 1");
+
+            // Undo addCmd3
+            addCmd3.Unexecute();
+            Assert(testDef.Listeners.Count == 2 && !testDef.Listeners.Contains(l3), "AddListenerCommand Unexecute removed inserted listener");
+
+            // Re-execute addCmd3
+            addCmd3.Execute();
+            Assert(testDef.Listeners.Count == 3 && testDef.Listeners[1] == l3, "AddListenerCommand Execute re-inserted listener");
+
+            // DeleteListenerCommand (deleting l3 at index 1)
+            var delCmd = new DeleteListenerCommand(testDef, l3, onChanged);
+            delCmd.Execute();
+            Assert(testDef.Listeners.Count == 2 && !testDef.Listeners.Contains(l3), "DeleteListenerCommand removed listener");
+            Assert(testDef.Listeners[0] == l1 && testDef.Listeners[1] == l2, "Remaining listeners preserved");
+
+            // Undo delete: must restore to index 1!
+            delCmd.Unexecute();
+            Assert(testDef.Listeners.Count == 3 && testDef.Listeners[1] == l3, "DeleteListenerCommand Unexecute restored listener to exact index 1");
+
+            // ModifyListenerCommand
+            var oldSnap = new NodeListenerSnapshot(l3);
+            var newSnap = new NodeListenerSnapshot
+            {
+                TargetNodeId = 999u,
+                Kind = PointerEventKind.DragStart,
+                Enabled = false,
+                Actions = new List<ListenerAction>
+                {
+                    new ListenerAction(ActionKind.ToggleBool, 5) { InputId = "modified_input", Parameter = 1.0 }
+                }
+            };
+
+            var modCmd = new ModifyListenerCommand(l3, oldSnap, newSnap, onChanged);
+            modCmd.Execute();
+            Assert(l3.TargetNodeId == 999u, "ModifyListenerCommand updated TargetNodeId");
+            Assert(l3.Kind == PointerEventKind.DragStart, "ModifyListenerCommand updated Kind");
+            Assert(l3.Enabled == false, "ModifyListenerCommand updated Enabled");
+            Assert(l3.Actions.Count == 1 && l3.Actions[0].InputId == "modified_input", "ModifyListenerCommand updated Actions");
+
+            // Undo modify: restores old snapshot exactly
+            modCmd.Unexecute();
+            Assert(l3.TargetNodeId == 303u, "ModifyListenerCommand Unexecute restored TargetNodeId");
+            Assert(l3.Kind == PointerEventKind.Click, "ModifyListenerCommand Unexecute restored Kind");
+            Assert(l3.Enabled == true, "ModifyListenerCommand Unexecute restored Enabled");
+            Assert(l3.Actions.Count == 0, "ModifyListenerCommand Unexecute restored Actions count");
+
+            // Redo modify
+            modCmd.Execute();
+            Assert(l3.TargetNodeId == 999u && l3.Enabled == false && l3.Actions.Count == 1, "ModifyListenerCommand re-executed cleanly");
         }
     }
 }

@@ -3099,4 +3099,198 @@ namespace Kerf.Engine
         }
     }
 
+    public class NodeListenerSnapshot
+    {
+        public uint TargetNodeId { get; set; }
+        public PointerEventKind Kind { get; set; }
+        public bool Enabled { get; set; }
+        public List<ListenerAction> Actions { get; set; }
+
+        public NodeListenerSnapshot()
+        {
+            Actions = new List<ListenerAction>();
+        }
+
+        public NodeListenerSnapshot(NodeListener listener)
+        {
+            if (listener != null)
+            {
+                TargetNodeId = listener.TargetNodeId;
+                Kind = listener.Kind;
+                Enabled = listener.Enabled;
+                Actions = new List<ListenerAction>();
+                if (listener.Actions != null)
+                {
+                    for (int i = 0; i < listener.Actions.Count; i++)
+                    {
+                        if (listener.Actions[i] != null)
+                        {
+                            Actions.Add(listener.Actions[i].Clone());
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Actions = new List<ListenerAction>();
+            }
+        }
+
+        public void ApplyTo(NodeListener listener)
+        {
+            if (listener == null) return;
+            listener.TargetNodeId = TargetNodeId;
+            listener.Kind = Kind;
+            listener.Enabled = Enabled;
+            listener.Actions = new List<ListenerAction>();
+            if (Actions != null)
+            {
+                for (int i = 0; i < Actions.Count; i++)
+                {
+                    if (Actions[i] != null)
+                    {
+                        listener.Actions.Add(Actions[i].Clone());
+                    }
+                }
+            }
+        }
+    }
+
+    public class AddListenerCommand : ICommand
+    {
+        public string Description { get { return "Add Listener"; } }
+        private readonly StateMachineDefinition _def;
+        private readonly NodeListener _listener;
+        private readonly int _insertIndex;
+        private readonly Action _onChanged;
+
+        public AddListenerCommand(StateMachineDefinition def, NodeListener listener, int insertIndex = -1, Action onChanged = null)
+        {
+            _def = def;
+            _listener = listener;
+            _insertIndex = insertIndex;
+            _onChanged = onChanged;
+        }
+
+        public AddListenerCommand(StateMachineDefinition def, NodeListener listener, Action onChanged)
+            : this(def, listener, -1, onChanged)
+        {
+        }
+
+        public void Execute()
+        {
+            if (_def != null && _listener != null)
+            {
+                if (_def.Listeners == null)
+                {
+                    _def.Listeners = new List<NodeListener>();
+                }
+                if (!_def.Listeners.Contains(_listener))
+                {
+                    if (_insertIndex >= 0 && _insertIndex <= _def.Listeners.Count)
+                    {
+                        _def.Listeners.Insert(_insertIndex, _listener);
+                    }
+                    else
+                    {
+                        _def.Listeners.Add(_listener);
+                    }
+                }
+                if (_onChanged != null) _onChanged();
+            }
+        }
+
+        public void Unexecute()
+        {
+            if (_def != null && _listener != null && _def.Listeners != null)
+            {
+                _def.Listeners.Remove(_listener);
+                if (_onChanged != null) _onChanged();
+            }
+        }
+    }
+
+    public class DeleteListenerCommand : ICommand
+    {
+        public string Description { get { return "Delete Listener"; } }
+        private readonly StateMachineDefinition _def;
+        private readonly NodeListener _listener;
+        private readonly int _removedIndex;
+        private readonly Action _onChanged;
+
+        public DeleteListenerCommand(StateMachineDefinition def, NodeListener listener, Action onChanged = null)
+        {
+            _def = def;
+            _listener = listener;
+            _onChanged = onChanged;
+            _removedIndex = (_def != null && _def.Listeners != null && listener != null) ? _def.Listeners.IndexOf(listener) : -1;
+        }
+
+        public void Execute()
+        {
+            if (_def != null && _listener != null && _def.Listeners != null)
+            {
+                _def.Listeners.Remove(_listener);
+                if (_onChanged != null) _onChanged();
+            }
+        }
+
+        public void Unexecute()
+        {
+            if (_def != null && _listener != null)
+            {
+                if (_def.Listeners == null)
+                {
+                    _def.Listeners = new List<NodeListener>();
+                }
+                if (!_def.Listeners.Contains(_listener))
+                {
+                    if (_removedIndex >= 0 && _removedIndex <= _def.Listeners.Count)
+                    {
+                        _def.Listeners.Insert(_removedIndex, _listener);
+                    }
+                    else
+                    {
+                        _def.Listeners.Add(_listener);
+                    }
+                }
+                if (_onChanged != null) _onChanged();
+            }
+        }
+    }
+
+    public class ModifyListenerCommand : ICommand
+    {
+        public string Description { get { return "Modify Listener"; } }
+        private readonly NodeListener _listener;
+        private readonly NodeListenerSnapshot _oldSnap;
+        private readonly NodeListenerSnapshot _newSnap;
+        private readonly Action _onChanged;
+
+        public ModifyListenerCommand(NodeListener listener, NodeListenerSnapshot oldSnap, NodeListenerSnapshot newSnap, Action onChanged = null)
+        {
+            _listener = listener;
+            _oldSnap = oldSnap;
+            _newSnap = newSnap;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_listener != null && _newSnap != null)
+            {
+                _newSnap.ApplyTo(_listener);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_listener != null && _oldSnap != null)
+            {
+                _oldSnap.ApplyTo(_listener);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
 }
