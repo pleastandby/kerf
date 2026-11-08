@@ -22,6 +22,7 @@ using Kerf.Model;
 using Kerf.Tools;
 using Microsoft.Win32;
 using IOPath = System.IO.Path;
+using Layer = Kerf.Model.LayerNode;
 
 namespace Kerf.UI
 {
@@ -3598,8 +3599,8 @@ namespace Kerf.UI
             if (_propertyInspectorStack == null) return;
             _propertyInspectorStack.Children.Clear();
 
-            // When in Animate mode and State Machine is active (no state timeline open), show dedicated State Machine Inspector (D-09)
-            if (_currentStudioMode == StudioMode.Animate && _isStateMachineMode)
+            // When in Animate mode and State Machine is active with NO layer selected, show dedicated State Machine Inspector (D-09)
+            if (_currentStudioMode == StudioMode.Animate && _isStateMachineMode && _selectedLayers.Count == 0)
             {
                 BuildStateMachineRightPanelInspector();
                 return;
@@ -4501,6 +4502,7 @@ namespace Kerf.UI
 
             if (_currentStudioMode == StudioMode.Animate)
             {
+                _propertyInspectorStack.Children.Add(BuildListenersInspectorSection(primary));
                 _propertyInspectorStack.Children.Add(BuildKeyframeMotionInspectorSection());
             }
         }
@@ -4509,6 +4511,11 @@ namespace Kerf.UI
         {
             if (_propertyInspectorStack == null) return;
             _propertyInspectorStack.Children.Clear();
+
+            if (_selectedLayers != null && _selectedLayers.Count > 0)
+            {
+                _propertyInspectorStack.Children.Add(BuildListenersInspectorSection(_selectedLayers[0]));
+            }
 
             var sm = _timelineController != null ? _timelineController.ActiveStateMachine : null;
             var layer = (sm != null && sm.Definition != null && sm.Definition.Layers != null && sm.Definition.Layers.Count > 0)
@@ -5601,6 +5608,529 @@ namespace Kerf.UI
 
             container.Child = stack;
             return container;
+        }
+
+        private StateMachineDefinition GetOrCreateStateMachineDefinition()
+        {
+            if (_timelineController != null && _timelineController.ActiveStateMachine != null && _timelineController.ActiveStateMachine.Definition != null)
+            {
+                return _timelineController.ActiveStateMachine.Definition;
+            }
+            if (Document != null)
+            {
+                if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+                if (Document.Animation.StateMachine == null) Document.Animation.StateMachine = new StateMachineDefinition();
+                return Document.Animation.StateMachine;
+            }
+            return null;
+        }
+
+        private FrameworkElement BuildListenersInspectorSection(Layer selectedLayer)
+        {
+            var container = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 8, 0, 8)
+            };
+            var mainStack = new StackPanel();
+
+            var smDef = GetOrCreateStateMachineDefinition();
+            if (smDef != null && smDef.Listeners == null)
+            {
+                smDef.Listeners = new List<NodeListener>();
+            }
+
+            uint targetId = selectedLayer != null ? PropertyBinder.GetNumericNodeId(selectedLayer.Id) : 0u;
+
+            var matchingListeners = new List<NodeListener>();
+            if (smDef != null && smDef.Listeners != null)
+            {
+                for (int i = 0; i < smDef.Listeners.Count; i++)
+                {
+                    var l = smDef.Listeners[i];
+                    if (l != null && l.TargetNodeId == targetId)
+                    {
+                        matchingListeners.Add(l);
+                    }
+                }
+            }
+
+            // Header DockPanel
+            var headerDock = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+
+            var headerTitle = new TextBlock
+            {
+                Text = string.Format("⌄  Listeners ({0})", matchingListeners.Count),
+                FontSize = 11.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor = Cursors.Hand
+            };
+            DockPanel.SetDock(headerTitle, Dock.Left);
+            headerDock.Children.Add(headerTitle);
+
+            var addBtn = new Button
+            {
+                Content = "+ Add",
+                Height = 20,
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Padding = new Thickness(8, 0, 8, 0),
+                Background = KerfBrand.MintBrush,
+                Foreground = KerfBrand.TextBlackBrush,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Add interactive listener to this object"
+            };
+            addBtn.Click += (s, e) =>
+            {
+                if (smDef == null) return;
+                var newListener = new NodeListener(targetId, PointerEventKind.Click);
+                newListener.Actions.Add(new ListenerAction(ActionKind.Fire, 0));
+                var addCmd = new AddListenerCommand(smDef, newListener, () =>
+                {
+                    RefreshPropertyInspector();
+                    RefreshCanvas();
+                });
+                if (History != null) History.Execute(addCmd);
+                else addCmd.Execute();
+            };
+            DockPanel.SetDock(addBtn, Dock.Right);
+            headerDock.Children.Add(addBtn);
+            mainStack.Children.Add(headerDock);
+
+            var bodyStack = new StackPanel();
+
+            headerTitle.MouseLeftButtonUp += (s, e) =>
+            {
+                bool isVisible = bodyStack.Visibility == Visibility.Visible;
+                bodyStack.Visibility = isVisible ? Visibility.Collapsed : Visibility.Visible;
+                headerTitle.Text = string.Format("{0}  Listeners ({1})", isVisible ? "›" : "⌄", matchingListeners.Count);
+            };
+
+            if (matchingListeners.Count == 0)
+            {
+                var emptyHint = new TextBlock
+                {
+                    Text = "No listeners on this object. Click + to add interaction.",
+                    FontSize = 10,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 4, 0, 4)
+                };
+                bodyStack.Children.Add(emptyHint);
+            }
+            else
+            {
+                for (int i = 0; i < matchingListeners.Count; i++)
+                {
+                    var listener = matchingListeners[i];
+                    if (listener == null) continue;
+                    var card = BuildListenerCard(listener, smDef);
+                    bodyStack.Children.Add(card);
+                }
+            }
+
+            mainStack.Children.Add(bodyStack);
+            container.Child = mainStack;
+            return container;
+        }
+
+        private FrameworkElement BuildListenerCard(NodeListener listener, StateMachineDefinition smDef)
+        {
+            var cardBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(30, 30, 30)),
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 4, 0, 6)
+            };
+            var cardStack = new StackPanel();
+
+            // Row 1: Header (Event Kind dropdown, Enabled Checkbox, Delete button)
+            var row1 = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+
+            var delBtn = new Button
+            {
+                Content = "✕",
+                Width = 20,
+                Height = 20,
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Delete listener"
+            };
+            delBtn.Click += (s, e) =>
+            {
+                if (smDef == null) return;
+                var delCmd = new DeleteListenerCommand(smDef, listener, () =>
+                {
+                    RefreshPropertyInspector();
+                    RefreshCanvas();
+                });
+                if (History != null) History.Execute(delCmd);
+                else delCmd.Execute();
+            };
+            DockPanel.SetDock(delBtn, Dock.Right);
+            row1.Children.Add(delBtn);
+
+            var enabledCheck = new CheckBox
+            {
+                Content = "Enabled",
+                IsChecked = listener.Enabled,
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            enabledCheck.Click += (s, e) =>
+            {
+                bool newVal = enabledCheck.IsChecked ?? true;
+                if (newVal != listener.Enabled)
+                {
+                    var oldSnap = new NodeListenerSnapshot(listener);
+                    var newSnap = new NodeListenerSnapshot(listener);
+                    newSnap.Enabled = newVal;
+                    var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                    {
+                        RefreshPropertyInspector();
+                        RefreshCanvas();
+                    });
+                    if (History != null) History.Execute(modCmd);
+                    else modCmd.Execute();
+                }
+            };
+            DockPanel.SetDock(enabledCheck, Dock.Right);
+            row1.Children.Add(enabledCheck);
+
+            var eventCombo = CreateModernComboBox(22, double.NaN);
+            eventCombo.Margin = new Thickness(0, 0, 8, 0);
+            eventCombo.Items.Add(CreateModernComboBoxItem("PointerEnter", PointerEventKind.PointerEnter));
+            eventCombo.Items.Add(CreateModernComboBoxItem("PointerExit", PointerEventKind.PointerExit));
+            eventCombo.Items.Add(CreateModernComboBoxItem("PointerDown", PointerEventKind.PointerDown));
+            eventCombo.Items.Add(CreateModernComboBoxItem("PointerUp", PointerEventKind.PointerUp));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Click", PointerEventKind.Click));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Tap", PointerEventKind.Tap));
+            eventCombo.Items.Add(CreateModernComboBoxItem("DragStart", PointerEventKind.DragStart));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Drag", PointerEventKind.Drag));
+            eventCombo.Items.Add(CreateModernComboBoxItem("DragEnd", PointerEventKind.DragEnd));
+
+            for (int k = 0; k < eventCombo.Items.Count; k++)
+            {
+                var cbi = eventCombo.Items[k] as ComboBoxItem;
+                if (cbi != null && (PointerEventKind)cbi.Tag == listener.Kind)
+                {
+                    eventCombo.SelectedIndex = k;
+                    break;
+                }
+            }
+
+            eventCombo.SelectionChanged += (s, e) =>
+            {
+                var cbi = eventCombo.SelectedItem as ComboBoxItem;
+                if (cbi != null && cbi.Tag is PointerEventKind)
+                {
+                    PointerEventKind newKind = (PointerEventKind)cbi.Tag;
+                    if (newKind != listener.Kind)
+                    {
+                        var oldSnap = new NodeListenerSnapshot(listener);
+                        var newSnap = new NodeListenerSnapshot(listener);
+                        newSnap.Kind = newKind;
+                        var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                        {
+                            RefreshPropertyInspector();
+                            RefreshCanvas();
+                        });
+                        if (History != null) History.Execute(modCmd);
+                        else modCmd.Execute();
+                    }
+                }
+            };
+            row1.Children.Add(eventCombo);
+            cardStack.Children.Add(row1);
+
+            // Listener Actions
+            if (listener.Actions == null) listener.Actions = new List<ListenerAction>();
+            if (listener.Actions.Count == 0)
+            {
+                listener.Actions.Add(new ListenerAction(ActionKind.Fire, 0));
+            }
+
+            var action = listener.Actions[0];
+
+            // Row 2: Action dropdown
+            var row2 = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+            var actLabel = new TextBlock
+            {
+                Text = "Action",
+                Width = 46,
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(actLabel, Dock.Left);
+            row2.Children.Add(actLabel);
+
+            var actCombo = CreateModernComboBox(22, double.NaN);
+            actCombo.Items.Add(CreateModernComboBoxItem("SetBool", ActionKind.SetBool));
+            actCombo.Items.Add(CreateModernComboBoxItem("SetNumber", ActionKind.SetNumber));
+            actCombo.Items.Add(CreateModernComboBoxItem("ToggleBool", ActionKind.ToggleBool));
+            actCombo.Items.Add(CreateModernComboBoxItem("FireTrigger", ActionKind.FireTrigger));
+            actCombo.Items.Add(CreateModernComboBoxItem("Reset", ActionKind.Reset));
+
+            for (int k = 0; k < actCombo.Items.Count; k++)
+            {
+                var cbi = actCombo.Items[k] as ComboBoxItem;
+                if (cbi != null && (ActionKind)cbi.Tag == action.Kind)
+                {
+                    actCombo.SelectedIndex = k;
+                    break;
+                }
+            }
+
+            actCombo.SelectionChanged += (s, e) =>
+            {
+                var cbi = actCombo.SelectedItem as ComboBoxItem;
+                if (cbi != null && cbi.Tag is ActionKind)
+                {
+                    ActionKind newKind = (ActionKind)cbi.Tag;
+                    if (newKind != action.Kind)
+                    {
+                        var oldSnap = new NodeListenerSnapshot(listener);
+                        var newSnap = new NodeListenerSnapshot(listener);
+                        if (newSnap.Actions.Count > 0)
+                        {
+                            newSnap.Actions[0].Kind = newKind;
+                        }
+                        var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                        {
+                            RefreshPropertyInspector();
+                            RefreshCanvas();
+                        });
+                        if (History != null) History.Execute(modCmd);
+                        else modCmd.Execute();
+                    }
+                }
+            };
+            row2.Children.Add(actCombo);
+            cardStack.Children.Add(row2);
+
+            // Row 3: Bound Input dropdown
+            var row3 = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+            var inLabel = new TextBlock
+            {
+                Text = "Input",
+                Width = 46,
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(inLabel, Dock.Left);
+            row3.Children.Add(inLabel);
+
+            var inCombo = CreateModernComboBox(22, double.NaN);
+            if (smDef != null && smDef.Inputs != null && smDef.Inputs.Count > 0)
+            {
+                for (int p = 0; p < smDef.Inputs.Count; p++)
+                {
+                    var inp = smDef.Inputs[p];
+                    if (inp == null) continue;
+                    string label = string.Format("{0} ({1})", inp.Name, inp.Kind);
+                    inCombo.Items.Add(CreateModernComboBoxItem(label, inp.InputId));
+                }
+
+                // Resolve selected index
+                int selectedIdx = -1;
+                if (!string.IsNullOrEmpty(action.InputId))
+                {
+                    for (int p = 0; p < inCombo.Items.Count; p++)
+                    {
+                        var cbi = inCombo.Items[p] as ComboBoxItem;
+                        if (cbi != null && string.Equals(cbi.Tag as string, action.InputId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            selectedIdx = p;
+                            break;
+                        }
+                    }
+                }
+                if (selectedIdx < 0 && action.InputIndex >= 0 && action.InputIndex < inCombo.Items.Count)
+                {
+                    selectedIdx = action.InputIndex;
+                }
+                if (selectedIdx >= 0) inCombo.SelectedIndex = selectedIdx;
+            }
+            else
+            {
+                inCombo.Items.Add(CreateModernComboBoxItem("No inputs defined", null));
+                inCombo.SelectedIndex = 0;
+            }
+
+            inCombo.SelectionChanged += (s, e) =>
+            {
+                var cbi = inCombo.SelectedItem as ComboBoxItem;
+                if (cbi != null && cbi.Tag is string && smDef != null && smDef.Inputs != null)
+                {
+                    string newInputId = (string)cbi.Tag;
+                    int newIdx = smDef.GetInputIndex(newInputId);
+                    if (newInputId != action.InputId || newIdx != action.InputIndex)
+                    {
+                        var oldSnap = new NodeListenerSnapshot(listener);
+                        var newSnap = new NodeListenerSnapshot(listener);
+                        if (newSnap.Actions.Count > 0)
+                        {
+                            newSnap.Actions[0].InputId = newInputId;
+                            newSnap.Actions[0].InputIndex = newIdx;
+                        }
+                        var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                        {
+                            RefreshPropertyInspector();
+                            RefreshCanvas();
+                        });
+                        if (History != null) History.Execute(modCmd);
+                        else modCmd.Execute();
+                    }
+                }
+            };
+            row3.Children.Add(inCombo);
+            cardStack.Children.Add(row3);
+
+            // Row 4: Parameter row (if SetBool or SetNumber)
+            if (action.Kind == ActionKind.SetBool)
+            {
+                var row4 = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
+                var valLabel = new TextBlock
+                {
+                    Text = "Value",
+                    Width = 46,
+                    FontSize = 10,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(valLabel, Dock.Left);
+                row4.Children.Add(valLabel);
+
+                var boolCheck = new CheckBox
+                {
+                    Content = action.Parameter > 0.5 ? "True" : "False",
+                    IsChecked = action.Parameter > 0.5,
+                    FontSize = 10,
+                    Foreground = Brushes.White,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                boolCheck.Click += (s, e) =>
+                {
+                    double newParam = (boolCheck.IsChecked == true) ? 1.0 : 0.0;
+                    boolCheck.Content = (newParam > 0.5) ? "True" : "False";
+                    if (Math.Abs(newParam - action.Parameter) > 0.001)
+                    {
+                        var oldSnap = new NodeListenerSnapshot(listener);
+                        var newSnap = new NodeListenerSnapshot(listener);
+                        if (newSnap.Actions.Count > 0)
+                        {
+                            newSnap.Actions[0].Parameter = newParam;
+                        }
+                        var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                        {
+                            RefreshPropertyInspector();
+                            RefreshCanvas();
+                        });
+                        if (History != null) History.Execute(modCmd);
+                        else modCmd.Execute();
+                    }
+                };
+                row4.Children.Add(boolCheck);
+                cardStack.Children.Add(row4);
+            }
+            else if (action.Kind == ActionKind.SetNumber)
+            {
+                var row4 = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
+                var valLabel = new TextBlock
+                {
+                    Text = "Value",
+                    Width = 46,
+                    FontSize = 10,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(valLabel, Dock.Left);
+                row4.Children.Add(valLabel);
+
+                var numBox = new TextBox
+                {
+                    Text = action.Parameter.ToString("0.##", CultureInfo.InvariantCulture),
+                    Height = 22,
+                    FontSize = 11,
+                    Background = new SolidColorBrush(Color.FromRgb(33, 38, 52)),
+                    Foreground = Brushes.White,
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(56, 66, 92)),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(4, 2, 4, 2)
+                };
+                numBox.LostFocus += (s, e) =>
+                {
+                    double parsed;
+                    if (double.TryParse(numBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                    {
+                        if (Math.Abs(parsed - action.Parameter) > 0.0001)
+                        {
+                            var oldSnap = new NodeListenerSnapshot(listener);
+                            var newSnap = new NodeListenerSnapshot(listener);
+                            if (newSnap.Actions.Count > 0)
+                            {
+                                newSnap.Actions[0].Parameter = parsed;
+                            }
+                            var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                            {
+                                RefreshPropertyInspector();
+                                RefreshCanvas();
+                            });
+                            if (History != null) History.Execute(modCmd);
+                            else modCmd.Execute();
+                        }
+                    }
+                };
+                numBox.KeyDown += (s, e) =>
+                {
+                    if (e.Key == Key.Enter)
+                    {
+                        double parsed;
+                        if (double.TryParse(numBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                        {
+                            if (Math.Abs(parsed - action.Parameter) > 0.0001)
+                            {
+                                var oldSnap = new NodeListenerSnapshot(listener);
+                                var newSnap = new NodeListenerSnapshot(listener);
+                                if (newSnap.Actions.Count > 0)
+                                {
+                                    newSnap.Actions[0].Parameter = parsed;
+                                }
+                                var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                                {
+                                    RefreshPropertyInspector();
+                                    RefreshCanvas();
+                                });
+                                if (History != null) History.Execute(modCmd);
+                                else modCmd.Execute();
+                            }
+                        }
+                    }
+                };
+                row4.Children.Add(numBox);
+                cardStack.Children.Add(row4);
+            }
+
+            cardBorder.Child = cardStack;
+            return cardBorder;
         }
 
         private Border EnsureAnimationsSectionBorder()
