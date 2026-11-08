@@ -47,6 +47,18 @@ namespace Kerf.Engine.Animation
         public List<Clip> Clips { get; private set; }
         public List<LayerRuntimeState> LayerRuntimes { get; private set; }
         public List<string> ReportedEvents { get; private set; }
+        public Dictionary<uint, Dictionary<ushort, double>> RestPose { get; set; }
+
+        public bool HasActiveTransitions()
+        {
+            if (LayerRuntimes == null) return false;
+            for (int i = 0; i < LayerRuntimes.Count; i++)
+            {
+                if (LayerRuntimes[i] != null && LayerRuntimes[i].ActiveTransition != null)
+                    return true;
+            }
+            return false;
+        }
 
         public StateMachineRuntime(StateMachineDefinition def, List<Clip> clips)
         {
@@ -426,7 +438,8 @@ namespace Kerf.Engine.Animation
                 if (layerRt.CurTime != null) layerRt.CurTime.Speed = playbackSpeed;
 
                 // 1. Advance current state clip
-                if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
+                bool pauseSource = layerRt.ActiveTransition != null && layerRt.ActiveTransition.Definition != null && layerRt.ActiveTransition.Definition.PauseSourceWhenExiting;
+                if (!pauseSource && layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                 {
                     MachineState curState = layerDef.States[layerRt.CurrentState];
                     if (curState.Kind == StateKind.Animation && curState.ClipIndex >= 0 && curState.ClipIndex < Clips.Count)
@@ -457,25 +470,7 @@ namespace Kerf.Engine.Animation
                     }
                 }
 
-                // 3. Complete finished transition
-                if (layerRt.ActiveTransition != null && layerRt.ActiveTransition.Elapsed >= layerRt.ActiveTransition.Duration)
-                {
-                    int toState = layerRt.ActiveTransition.ToState;
-                    ClipInstance toTime = layerRt.ActiveTransition.ToTime;
-                    layerRt.CurrentState = toState;
-                    layerRt.CurTime = toTime;
-                    layerRt.ActiveTransition = null;
-
-                    if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
-                    {
-                        if (layerDef.States[layerRt.CurrentState].Kind == StateKind.Exit)
-                        {
-                            layerRt.IsFinished = true;
-                        }
-                    }
-                }
-
-                // 4. Resolve transitions with zero-duration chain resolution & cycle guard (max 100 steps)
+                // 3. Resolve transitions with zero-duration chain resolution & cycle guard (max 100 steps)
                 const int MAX_STEPS = 100;
                 for (int step = 0; step < MAX_STEPS; step++)
                 {
@@ -501,12 +496,23 @@ namespace Kerf.Engine.Animation
                         {
                             var fromPose = new Dictionary<uint, Dictionary<ushort, double>>();
                             var toPose = new Dictionary<uint, Dictionary<ushort, double>>();
-                            SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose);
-                            SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose);
+                            if (layerRt.ActiveTransition.SnapshotPose != null)
+                            {
+                                fromPose = layerRt.ActiveTransition.SnapshotPose;
+                            }
+                            else if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
+                            {
+                                SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose);
+                            }
+
+                            if (layerRt.ActiveTransition.ToState >= 0 && layerRt.ActiveTransition.ToState < layerDef.States.Count)
+                            {
+                                SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose);
+                            }
                             double progress = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
                             double mix = layerRt.ActiveTransition.Definition.EvaluateInterpolation(progress);
                             snapshot = new Dictionary<uint, Dictionary<ushort, double>>();
-                            BlendPoses(fromPose, toPose, mix, snapshot);
+                            BlendPoses(fromPose, toPose, mix, snapshot, RestPose);
                         }
 
                         int toState = nextTrans.ToState;
@@ -542,7 +548,7 @@ namespace Kerf.Engine.Animation
                     }
                 }
 
-                // 5. Sample poses and blend
+                // 4. Sample poses and blend
                 var layerPose = new Dictionary<uint, Dictionary<ushort, double>>();
                 if (layerRt.ActiveTransition != null)
                 {
@@ -564,7 +570,25 @@ namespace Kerf.Engine.Animation
 
                     double u = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
                     double mix = layerRt.ActiveTransition.Definition.EvaluateInterpolation(u);
-                    BlendPoses(fromPose, toPose, mix, layerPose);
+                    BlendPoses(fromPose, toPose, mix, layerPose, RestPose);
+
+                    // Commit to target state when transition duration has completed
+                    if (layerRt.ActiveTransition.Elapsed >= layerRt.ActiveTransition.Duration)
+                    {
+                        int toState = layerRt.ActiveTransition.ToState;
+                        ClipInstance toTime = layerRt.ActiveTransition.ToTime;
+                        layerRt.CurrentState = toState;
+                        layerRt.CurTime = toTime;
+                        layerRt.ActiveTransition = null;
+
+                        if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
+                        {
+                            if (layerDef.States[layerRt.CurrentState].Kind == StateKind.Exit)
+                            {
+                                layerRt.IsFinished = true;
+                            }
+                        }
+                    }
                 }
                 else if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                 {
@@ -685,70 +709,87 @@ namespace Kerf.Engine.Animation
             }
         }
 
+        private static double GetDefaultPropValue(ushort prop, uint nodeId, Dictionary<uint, Dictionary<ushort, double>> restPose)
+        {
+            if (restPose != null)
+            {
+                Dictionary<ushort, double> nodeRest;
+                if (restPose.TryGetValue(nodeId, out nodeRest) && nodeRest != null)
+                {
+                    double rVal;
+                    if (nodeRest.TryGetValue(prop, out rVal))
+                    {
+                        return rVal;
+                    }
+                }
+            }
+
+            if (prop == (ushort)PropKey.ScaleX || prop == (ushort)PropKey.ScaleY) return 1.0;
+            if (prop == (ushort)PropKey.Opacity) return 1.0;
+            if (prop == (ushort)PropKey.AnchorX || prop == (ushort)PropKey.AnchorY) return 0.5;
+            return 0.0;
+        }
+
         public static void BlendPoses(
             Dictionary<uint, Dictionary<ushort, double>> basePose,
             Dictionary<uint, Dictionary<ushort, double>> targetPose,
             double mix,
             Dictionary<uint, Dictionary<ushort, double>> outPose)
         {
+            BlendPoses(basePose, targetPose, mix, outPose, null);
+        }
+
+        public static void BlendPoses(
+            Dictionary<uint, Dictionary<ushort, double>> basePose,
+            Dictionary<uint, Dictionary<ushort, double>> targetPose,
+            double mix,
+            Dictionary<uint, Dictionary<ushort, double>> outPose,
+            Dictionary<uint, Dictionary<ushort, double>> restPose)
+        {
             if (outPose == null) return;
             mix = Math.Max(0.0, Math.Min(1.0, mix));
 
-            if (targetPose != null)
-            {
-                foreach (var nKvp in targetPose)
-                {
-                    uint nodeId = nKvp.Key;
-                    Dictionary<ushort, double> baseNodeProps = null;
-                    if (basePose != null) basePose.TryGetValue(nodeId, out baseNodeProps);
-
-                    Dictionary<ushort, double> outNodeProps;
-                    if (!outPose.TryGetValue(nodeId, out outNodeProps))
-                    {
-                        outNodeProps = new Dictionary<ushort, double>();
-                        outPose[nodeId] = outNodeProps;
-                    }
-
-                    foreach (var pKvp in nKvp.Value)
-                    {
-                        ushort prop = pKvp.Key;
-                        double targetVal = pKvp.Value;
-                        double baseVal = (baseNodeProps != null && baseNodeProps.ContainsKey(prop)) ? baseNodeProps[prop] : targetVal;
-                        outNodeProps[prop] = baseVal + (targetVal - baseVal) * mix;
-                    }
-                }
-            }
-
+            var allNodeIds = new HashSet<uint>();
             if (basePose != null)
             {
-                foreach (var nKvp in basePose)
+                foreach (var id in basePose.Keys) allNodeIds.Add(id);
+            }
+            if (targetPose != null)
+            {
+                foreach (var id in targetPose.Keys) allNodeIds.Add(id);
+            }
+
+            foreach (var nodeId in allNodeIds)
+            {
+                Dictionary<ushort, double> baseProps = null;
+                if (basePose != null) basePose.TryGetValue(nodeId, out baseProps);
+
+                Dictionary<ushort, double> targetProps = null;
+                if (targetPose != null) targetPose.TryGetValue(nodeId, out targetProps);
+
+                Dictionary<ushort, double> outProps;
+                if (!outPose.TryGetValue(nodeId, out outProps))
                 {
-                    uint nodeId = nKvp.Key;
-                    if (targetPose == null || !targetPose.ContainsKey(nodeId))
-                    {
-                        Dictionary<ushort, double> outNodeProps;
-                        if (!outPose.TryGetValue(nodeId, out outNodeProps))
-                        {
-                            outNodeProps = new Dictionary<ushort, double>();
-                            outPose[nodeId] = outNodeProps;
-                        }
-                        foreach (var pKvp in nKvp.Value)
-                        {
-                            outNodeProps[pKvp.Key] = pKvp.Value;
-                        }
-                    }
-                    else
-                    {
-                        Dictionary<ushort, double> targetNodeProps = targetPose[nodeId];
-                        Dictionary<ushort, double> outNodeProps = outPose[nodeId];
-                        foreach (var pKvp in nKvp.Value)
-                        {
-                            if (!targetNodeProps.ContainsKey(pKvp.Key))
-                            {
-                                outNodeProps[pKvp.Key] = pKvp.Value;
-                            }
-                        }
-                    }
+                    outProps = new Dictionary<ushort, double>();
+                    outPose[nodeId] = outProps;
+                }
+
+                var allProps = new HashSet<ushort>();
+                if (baseProps != null)
+                {
+                    foreach (var p in baseProps.Keys) allProps.Add(p);
+                }
+                if (targetProps != null)
+                {
+                    foreach (var p in targetProps.Keys) allProps.Add(p);
+                }
+
+                foreach (var prop in allProps)
+                {
+                    double defVal = GetDefaultPropValue(prop, nodeId, restPose);
+                    double bVal = (baseProps != null && baseProps.ContainsKey(prop)) ? baseProps[prop] : defVal;
+                    double tVal = (targetProps != null && targetProps.ContainsKey(prop)) ? targetProps[prop] : defVal;
+                    outProps[prop] = bVal + (tVal - bVal) * mix;
                 }
             }
         }

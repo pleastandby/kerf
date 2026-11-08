@@ -450,6 +450,7 @@ namespace Kerf.UI
             {
                 if (Document != null && History.IsDirty)
                 {
+                    SyncAnimationToDocument();
                     StorageManager.SaveAutosave(Document, CurrentFilePath);
                 }
             };
@@ -12291,6 +12292,27 @@ namespace Kerf.UI
             return SaveDocumentToPath(CurrentFilePath);
         }
 
+        private void SyncAnimationToDocument()
+        {
+            if (Document == null) return;
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (_timelineController != null)
+            {
+                if (_timelineController.ActiveStateMachine != null && _timelineController.ActiveStateMachine.Definition != null)
+                {
+                    Document.Animation.StateMachine = _timelineController.ActiveStateMachine.Definition;
+                }
+                if (_timelineController.ActiveStateMachine != null && _timelineController.ActiveStateMachine.Clips != null)
+                {
+                    Document.Animation.Clips = _timelineController.ActiveStateMachine.Clips;
+                }
+                if (_timelineController.ActiveClip != null)
+                {
+                    Document.Animation.ActiveClipId = _timelineController.ActiveClip.Id;
+                }
+            }
+        }
+
         private bool SaveDocumentToPath(string targetPath)
         {
             if (Document == null || string.IsNullOrEmpty(targetPath)) return false;
@@ -12300,6 +12322,8 @@ namespace Kerf.UI
 
             try
             {
+                SyncAnimationToDocument();
+
                 StorageManager.SaveAtomic(Document, targetPath);
                 StorageManager.AddRecentProject(targetPath);
                 CurrentFilePath = targetPath;
@@ -13873,6 +13897,7 @@ namespace Kerf.UI
                 SanitizeAnimationClips(Document);
                 EnsureTimelineControllerInitialized();
                 CaptureAnimationRestPose();
+                StartAnimationTimer();
                 _isStateMachineMode = true;
                 if (_timelineController != null) _timelineController.UseStateMachine = true;
                 if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
@@ -15377,6 +15402,15 @@ namespace Kerf.UI
                 _canvasInteractBtn.Background = _interactiveCanvasEnabled ? KerfBrand.MintBrush : KerfBrand.FigmaPanelBrush;
                 _canvasInteractBtn.BorderBrush = _interactiveCanvasEnabled ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush;
                 _canvasInteractText.Foreground = _interactiveCanvasEnabled ? KerfBrand.TextBlackBrush : KerfBrand.TextMutedBrush;
+                if (_interactiveCanvasEnabled)
+                {
+                    if (_timelineController != null) _timelineController.UseStateMachine = true;
+                    StartAnimationTimer();
+                }
+                else if (_timelineController != null && !_timelineController.IsPlaying)
+                {
+                    if (_animationTimer != null) _animationTimer.Stop();
+                }
             };
             titleStack.Children.Add(_canvasInteractBtn);
 
@@ -15859,15 +15893,20 @@ namespace Kerf.UI
             }
             int activeClipIndex = Document.Animation.Clips.IndexOf(_timelineController.ActiveClip);
             if (activeClipIndex < 0) activeClipIndex = 0;
-            var definition = new StateMachineDefinition("State Machine 1");
-            var layer = new MachineLayer("Base Layer");
-            layer.AddState(new MachineState(0, "Entry", StateKind.Entry) { GraphX = 80, GraphY = 80 });
-            layer.AddState(new MachineState(1, "Any State", StateKind.Any) { GraphX = 80, GraphY = 180 });
-            layer.AddState(new MachineState(2, "Exit", StateKind.Exit) { GraphX = 380, GraphY = 80 });
-            definition.AddLayer(layer);
-            Document.Animation.StateMachine = definition;
+            StateMachineDefinition definition = Document.Animation.StateMachine;
+            if (definition == null)
+            {
+                definition = new StateMachineDefinition("State Machine 1");
+                var layer = new MachineLayer("Base Layer");
+                layer.AddState(new MachineState(0, "Entry", StateKind.Entry) { GraphX = 80, GraphY = 80 });
+                layer.AddState(new MachineState(1, "Any State", StateKind.Any) { GraphX = 80, GraphY = 180 });
+                layer.AddState(new MachineState(2, "Exit", StateKind.Exit) { GraphX = 380, GraphY = 80 });
+                definition.AddLayer(layer);
+                Document.Animation.StateMachine = definition;
+                if (History != null) History.MarkDirty();
+            }
             _timelineController.ActiveStateMachine = new StateMachineRuntime(definition, Document.Animation.Clips);
-            if (History != null) History.MarkDirty();
+            SyncStateMachineRestPose();
             return _timelineController.ActiveStateMachine;
         }
 
@@ -19719,11 +19758,13 @@ namespace Kerf.UI
             if (_timelineController != null)
             {
                 _timelineController.UseStateMachine = true;
-                // Input and pointer changes update the paused preview. Playback remains explicit.
                 _timelineController.Step(0.0);
                 UpdateStateMachineStatusUI();
                 RefreshTimelineCanvas();
-                BuildStateMachineStatesGraph();
+                if (_interactiveCanvasEnabled || continuePlayback || (_timelineController.ActiveStateMachine != null && _timelineController.ActiveStateMachine.HasActiveTransitions()))
+                {
+                    StartAnimationTimer();
+                }
             }
         }
 
@@ -20738,7 +20779,13 @@ namespace Kerf.UI
                 {
                     if (_timelineController != null)
                     {
-                        if (_timelineController.IsPlaying)
+                        bool isTimelinePlaying = _timelineController.IsPlaying;
+                        bool smHasTransitions = _timelineController.UseStateMachine &&
+                                                _timelineController.ActiveStateMachine != null &&
+                                                _timelineController.ActiveStateMachine.HasActiveTransitions();
+                        bool isPreviewActive = _timelineController.UseStateMachine && _interactiveCanvasEnabled && _currentStudioMode == StudioMode.Animate;
+
+                        if (isTimelinePlaying || smHasTransitions || isPreviewActive)
                         {
                             DateTime now = DateTime.UtcNow;
                             double dt = _lastAnimationTickUtc == DateTime.MinValue
@@ -20754,7 +20801,14 @@ namespace Kerf.UI
                         }
                         else
                         {
-                            PauseAnimation();
+                            if (isTimelinePlaying)
+                            {
+                                PauseAnimation();
+                            }
+                            else if (_animationTimer != null)
+                            {
+                                _animationTimer.Stop();
+                            }
                         }
                     }
                 };
@@ -20777,6 +20831,7 @@ namespace Kerf.UI
             {
                 CaptureAnimationRestPoseForLayer(layer);
             }
+            SyncStateMachineRestPose();
         }
 
         private void CaptureAnimationRestPoseForLayer(LayerNode layer)
@@ -20799,6 +20854,35 @@ namespace Kerf.UI
                 Geometry = layer.Geometry != null ? layer.Geometry.Clone() : null
             };
             _animationNodesById[id] = layer;
+        }
+
+        private void SyncStateMachineRestPose()
+        {
+            if (_timelineController == null || _timelineController.ActiveStateMachine == null) return;
+            var restPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            foreach (var kvp in _animationRestPose)
+            {
+                LayerNode layer = kvp.Key;
+                AnimationRestPose p = kvp.Value;
+                if (layer == null || p == null) continue;
+                uint id = PropertyBinder.GetNumericNodeId(layer.Id);
+                var dict = new Dictionary<ushort, double>();
+                dict[(ushort)PropKey.X] = p.X;
+                dict[(ushort)PropKey.Y] = p.Y;
+                dict[(ushort)PropKey.Width] = p.Width;
+                dict[(ushort)PropKey.Height] = p.Height;
+                dict[(ushort)PropKey.VisualWidth] = p.Width;
+                dict[(ushort)PropKey.VisualHeight] = p.Height;
+                dict[(ushort)PropKey.Rotation] = p.Rotation;
+                dict[(ushort)PropKey.Opacity] = p.Opacity;
+                dict[(ushort)PropKey.CornerRadius] = p.CornerRadius;
+                dict[(ushort)PropKey.ScaleX] = 1.0;
+                dict[(ushort)PropKey.ScaleY] = 1.0;
+                dict[(ushort)PropKey.AnchorX] = 0.5;
+                dict[(ushort)PropKey.AnchorY] = 0.5;
+                restPose[id] = dict;
+            }
+            _timelineController.ActiveStateMachine.RestPose = restPose;
         }
 
         private void RestoreAnimationRestPose()
@@ -20950,6 +21034,27 @@ namespace Kerf.UI
             if (Document.Animation == null) Document.Animation = new AnimationProjectData();
             if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
             SanitizeAnimationClips(Document);
+
+            if (Document.Animation.StateMachine != null)
+            {
+                Clip activeClip = null;
+                if (Document.Animation.Clips.Count > 0)
+                {
+                    activeClip = Document.Animation.Clips.FirstOrDefault(c => c.Id == Document.Animation.ActiveClipId);
+                    if (activeClip == null) activeClip = Document.Animation.Clips[0];
+                    Document.Animation.ActiveClipId = activeClip.Id;
+                    _timelineController.ActiveClip = activeClip;
+                    _timelineController.Duration = Math.Max(0.001, activeClip.Duration);
+                }
+                _timelineController.ActiveStateMachine = new StateMachineRuntime(Document.Animation.StateMachine, Document.Animation.Clips);
+                if (_timelineScrubber != null) _timelineScrubber.Maximum = _timelineController.Duration;
+                if (_timelineClipText != null && activeClip != null) _timelineClipText.Text = "Clip: " + activeClip.Name;
+                SyncStateMachineRestPose();
+                BuildStateMachineInputsControls();
+                BuildStateMachineStatesGraph();
+                return;
+            }
+
             if (Document.Animation.Clips.Count > 0)
             {
                 Clip activeClip = Document.Animation.Clips.FirstOrDefault(c => c.Id == Document.Animation.ActiveClipId);
@@ -20957,10 +21062,17 @@ namespace Kerf.UI
                 Document.Animation.ActiveClipId = activeClip.Id;
                 _timelineController.ActiveClip = activeClip;
                 _timelineController.Duration = Math.Max(0.001, activeClip.Duration);
-                if (Document.Animation.StateMachine != null)
-                    _timelineController.ActiveStateMachine = new StateMachineRuntime(Document.Animation.StateMachine, Document.Animation.Clips);
+                var smDefExisting = new StateMachineDefinition("State Machine 1");
+                var smLayerExisting = new MachineLayer("Base Layer");
+                smLayerExisting.AddState(new MachineState(0, "Entry", StateKind.Entry) { GraphX = 80, GraphY = 80 });
+                smLayerExisting.AddState(new MachineState(1, "Any State", StateKind.Any) { GraphX = 80, GraphY = 180 });
+                smLayerExisting.AddState(new MachineState(2, "Exit", StateKind.Exit) { GraphX = 380, GraphY = 80 });
+                smDefExisting.AddLayer(smLayerExisting);
+                Document.Animation.StateMachine = smDefExisting;
+                _timelineController.ActiveStateMachine = new StateMachineRuntime(smDefExisting, Document.Animation.Clips);
                 if (_timelineScrubber != null) _timelineScrubber.Maximum = _timelineController.Duration;
                 if (_timelineClipText != null) _timelineClipText.Text = "Clip: " + activeClip.Name;
+                SyncStateMachineRestPose();
                 BuildStateMachineInputsControls();
                 BuildStateMachineStatesGraph();
                 return;
@@ -20987,6 +21099,7 @@ namespace Kerf.UI
             Document.Animation.ActiveClipId = defaultClip.Id;
             if (_timelineScrubber != null) _timelineScrubber.Maximum = _timelineController.Duration;
             if (_timelineClipText != null) _timelineClipText.Text = "Clip: " + defaultClip.Name;
+            SyncStateMachineRestPose();
             BuildStateMachineInputsControls();
             BuildStateMachineStatesGraph();
         }

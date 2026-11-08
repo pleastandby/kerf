@@ -12,7 +12,8 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 - [x] **Phase 4: Easing Engine & Interactive Graph Curve Editor** - Build cubic Bézier easing math, curve presets, and a canvas graph editor with draggable tangent handles.
 - [x] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [x] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
-- [ ] **Phase 7: Verification, Legacy Migration & Safe Deprecation** - End-to-end integration tests, legacy project file migration, and deprecation of old property binders with 0 regressions.
+- [ ] **Phase 7: Interactive Listeners, State Machine Runtime and Transition Execution** - Connect canvas interactions, listeners, state machine inputs, transition conditions, animation clips, and animation evaluator into a coherent execution pipeline.
+- [ ] **Phase 8: Verification, Legacy Migration & Safe Deprecation** - End-to-end integration tests, legacy project file migration, and deprecation of old property binders with 0 regressions.
 
 ## Phase Details
 
@@ -129,10 +130,30 @@ Plans:
 
 ---
 
-### Phase 7: Verification, Legacy Migration & Safe Deprecation
-**Goal**: Validate end-to-end animation workflows, migrate legacy project files to the new schema, and safely deprecate legacy property binders with zero regressions.
+### Phase 7: Interactive Listeners, State Machine Runtime and Transition Execution
+**Goal**: Turn the state machine graph created in Phase 6 into a fully operational interactive animation runtime connecting canvas interactions, listeners, state machine inputs, transition conditions, animation clips, and the animation evaluator.
 **Depends on**: Phase 6
-**Requirements**: STATE-04, STATE-05, MIGR-01, MIGR-02, MIGR-03
+**Requirements**: STATE-04, STATE-05, LISTENER-01, LISTENER-02, RUNTIME-01, TRANS-EXEC-01, BLEND-01
+**Success Criteria** (what must be TRUE):
+  1. Centralized event dispatcher receives canvas pointer events (Enter, Exit, Down, Up, Click, Drag) and delivers them to registered document object listeners.
+  2. Functional listener inspector allows creating, configuring target objects, event types, input mutations (Set Bool, Set Number, Toggle Bool, Fire Trigger), enabling/disabling, and deleting listeners with atomic undo/redo.
+  3. StateMachineRuntime initializes to Entry, evaluates compound transition conditions against live inputs/triggers, respects exit times and transition durations, and prevents infinite transition cycles.
+  4. Real animation playback executes assigned clips with speed and looping, blending outgoing and incoming state transforms non-destructively.
+  5. Interactive Preview Mode provides real-time state visualization, input toggles/scrubbers, active transition progress feedback, and clean lifecycle management.
+  6. Automated verification tests pass covering pointer listeners, trigger firing, conditional transitions, state blending, and clean lifecycle.
+**Plans**: 3 plans
+
+Plans:
+- [ ] 07-01: Centralized event dispatcher, document object listener model, and listener inspector UI with undo/redo
+- [ ] 07-02: StateMachineRuntime evaluation engine: transition conditions, exit times, clip playback, and non-destructive transform blending
+- [ ] 07-03: Interactive state machine preview mode, live diagnostics feedback, and automated verification tests
+
+---
+
+### Phase 8: Verification, Legacy Migration & Safe Deprecation
+**Goal**: Validate end-to-end animation workflows, migrate legacy project files to the new schema, and safely deprecate legacy property binders with zero regressions.
+**Depends on**: Phase 7
+**Requirements**: MIGR-01, MIGR-02, MIGR-03
 **Success Criteria** (what must be TRUE):
   1. Existing project files containing legacy animation data automatically convert into the new clip and track data model.
   2. Old destructive `PropertyBinder` scaling code is cleanly deprecated and removed without affecting design tools.
@@ -141,15 +162,15 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07-01: Build legacy animation data migrator and deprecate obsolete prototype binders.
-- [ ] 07-02: Create automated test suites for the complete animation and state machine engine; verify all tests pass.
+- [ ] 08-01: Build legacy animation data migrator and deprecate obsolete prototype binders.
+- [ ] 08-02: Create automated test suites for the complete animation and state machine engine; verify all tests pass.
 
 ---
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -159,7 +180,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Easing Engine & Interactive Graph Curve Editor | 2/2 | Complete | 2026-11-06 |
 | 5. Animation Command History & Full Undo/Redo | 2/2 | Complete | 2026-11-06 |
 | 6. Interactive State Machine Engine | 4/4 | Complete | 2026-11-08 |
-| 7. Verification, Legacy Migration & Safe Deprecation | 0/2 | Not started | - |
+| 7. Interactive Listeners, State Machine Runtime and Transition Execution | 0/3 | In Progress | - |
+| 8. Verification, Legacy Migration & Safe Deprecation | 0/2 | Not started | - |
 
 ---
 *Roadmap defined: 2026-11-05*

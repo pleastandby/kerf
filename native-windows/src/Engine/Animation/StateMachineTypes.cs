@@ -214,7 +214,9 @@ namespace Kerf.Engine.Animation
         public string Id { get; set; }
         public List<TransitionCondition> Conditions { get; set; }
 
-        public ConditionGroup(string id = null)
+        public ConditionGroup() : this(null) { }
+
+        public ConditionGroup(string id)
         {
             Id = !string.IsNullOrEmpty(id) ? id : "sm_cg_" + Guid.NewGuid().ToString("N");
             Conditions = new List<TransitionCondition>();
@@ -757,6 +759,8 @@ namespace Kerf.Engine.Animation
 
         private readonly Dictionary<string, ValueSlot> _values = new Dictionary<string, ValueSlot>(StringComparer.OrdinalIgnoreCase);
         private readonly List<ViewModelPropertyDefinition> _definitions;
+
+        public StateMachineViewModel() : this(null) { }
 
         public StateMachineViewModel(IEnumerable<ViewModelPropertyDefinition> definitions)
         {

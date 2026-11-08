@@ -92,6 +92,7 @@ namespace Kerf.Tests
             RunTest("Group Bounds Lockstep, Zero Fill Default, HitTest & Undo/Redo", TestGroupingBoundingBoxAndNoFillDefault);
             RunTest("Interactive State Machine Refinement: Clean Slate, Ports, Single-Wire Badges & Canvas Deletion", TestInteractiveStateMachineEngineRefinement);
             RunTest("State Machine Batch Transitions, Easing Presets, Multiselect & Clip Renaming", TestStateMachineBatchTransitionsPresetsMultiselectAndClipRenaming);
+            RunTest("State Machine Persistence & Smooth Rest-Pose Transition Blending", TestStateMachinePersistenceAndSmoothTransitionBlending);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -7087,6 +7088,170 @@ namespace Kerf.Tests
 
             bool intersects = (100.0 <= boxRight && 300.0 >= boxLeft && 100.0 >= boxTop && 100.0 <= boxBottom);
             Assert(intersects, "Marquee bounding box correctly intersects transition wire between states");
+        }
+
+        private static void TestStateMachinePersistenceAndSmoothTransitionBlending()
+        {
+            // 1. Serialization & Deserialization roundtrip of StateMachineDefinition with ConditionGroups
+            var doc = new KerfDocument();
+            doc.Name = "StateMachineTestDoc";
+            doc.Animation = new AnimationProjectData();
+
+            var clip1 = new Clip(101u, "IdleClip", 1.0, 60.0, LoopMode.Loop);
+            var track1 = new Track(1001u, (ushort)PropKey.X);
+            track1.Keys.Add(new Keyframe(0.0, 100.0, InterpMode.Linear));
+            track1.Keys.Add(new Keyframe(1.0, 200.0, InterpMode.Linear));
+            clip1.Tracks.Add(track1);
+            doc.Animation.Clips.Add(clip1);
+
+            var clip2 = new Clip(102u, "HoverClip", 1.0, 60.0, LoopMode.Loop);
+            var track2 = new Track(1001u, (ushort)PropKey.Opacity);
+            track2.Keys.Add(new Keyframe(0.0, 0.5, InterpMode.Linear));
+            track2.Keys.Add(new Keyframe(1.0, 0.2, InterpMode.Linear));
+            clip2.Tracks.Add(track2);
+            doc.Animation.Clips.Add(clip2);
+
+            var smDef = new StateMachineDefinition("InteractiveSM");
+            smDef.AddInput(new MachineInput("isHovered", InputKind.Bool, 0.0, "input_hover"));
+            smDef.AddInput(new MachineInput("speedMultiplier", InputKind.Number, 1.0, "input_speed"));
+
+            var layer = new MachineLayer("Base Layer");
+            var stateEntry = new MachineState(0, "Entry", StateKind.Entry) { GraphX = 10, GraphY = 10 };
+            var stateIdle = new MachineState(1, "Idle", StateKind.Animation, 0) { GraphX = 100, GraphY = 10 };
+            var stateHover = new MachineState(2, "Hover", StateKind.Animation, 1) { GraphX = 300, GraphY = 10 };
+            var stateExit = new MachineState(3, "Exit", StateKind.Exit) { GraphX = 500, GraphY = 10 };
+            layer.AddState(stateEntry);
+            layer.AddState(stateIdle);
+            layer.AddState(stateHover);
+            layer.AddState(stateExit);
+
+            var tEntryIdle = new StateTransition(0, 1, 0.0);
+            layer.AddTransition(tEntryIdle);
+
+            var tIdleHover = new StateTransition(1, 2, 0.5, "t_idle_hover")
+            {
+                ExitTime = 0.8,
+                PauseSourceWhenExiting = true,
+                AllowExitDuringTransition = true,
+                Interpolation = InterpMode.Cubic,
+                X1 = 0.25,
+                Y1 = 0.1,
+                X2 = 0.25,
+                Y2 = 1.0
+            };
+            var condGroup = new ConditionGroup("cg_1");
+            condGroup.Conditions.Add(new TransitionCondition("input_hover", ConditionOp.Eq, 1.0, true));
+            tIdleHover.ConditionGroups.Add(condGroup);
+            layer.AddTransition(tIdleHover);
+
+            smDef.AddLayer(layer);
+            doc.Animation.StateMachine = smDef;
+            doc.Animation.ActiveClipId = clip1.Id;
+
+            // Save and reload via StorageManager
+            string tempFile = Path.Combine(Path.GetTempPath(), "kerf_sm_test_" + Guid.NewGuid().ToString("N") + ".kerf");
+            try
+            {
+                StorageManager.SaveAtomic(doc, tempFile);
+                var loadedDoc = StorageManager.LoadDocument(tempFile);
+
+                Assert(loadedDoc != null, "Loaded document must not be null");
+                Assert(loadedDoc.Animation != null, "Loaded document Animation must be preserved");
+                Assert(loadedDoc.Animation.Clips != null && loadedDoc.Animation.Clips.Count == 2, "Loaded document must preserve 2 clips");
+                Assert(loadedDoc.Animation.StateMachine != null, "Loaded document must preserve StateMachineDefinition");
+                Assert(loadedDoc.Animation.StateMachine.Name == "InteractiveSM", "StateMachine name preserved");
+                Assert(loadedDoc.Animation.StateMachine.Inputs.Count == 2, "StateMachine inputs preserved");
+                Assert(loadedDoc.Animation.StateMachine.Layers.Count == 1, "StateMachine layers preserved");
+
+                var loadedLayer = loadedDoc.Animation.StateMachine.Layers[0];
+                Assert(loadedLayer.States.Count == 4, "4 states preserved in loaded layer");
+                Assert(loadedLayer.Transitions.Count == 2, "2 transitions preserved in loaded layer");
+
+                var loadedT = loadedLayer.Transitions.FirstOrDefault(t => t.TransitionId == "t_idle_hover");
+                Assert(loadedT != null, "Transition 't_idle_hover' found in loaded document");
+                Assert(Math.Abs(loadedT.Duration - 0.5) < 0.001, "Transition duration 0.5s preserved");
+                Assert(loadedT.ExitTime == 0.8, "Transition ExitTime 0.8s preserved");
+                Assert(loadedT.PauseSourceWhenExiting == true, "Transition PauseSourceWhenExiting preserved");
+                Assert(loadedT.AllowExitDuringTransition == true, "Transition AllowExitDuringTransition preserved");
+                Assert(loadedT.Interpolation == InterpMode.Cubic, "Transition Cubic interpolation preserved");
+                Assert(Math.Abs(loadedT.X1 - 0.25) < 0.001 && Math.Abs(loadedT.Y2 - 1.0) < 0.001, "Cubic bezier handles preserved");
+                Assert(loadedT.ConditionGroups.Count == 1, "ConditionGroup preserved");
+                Assert(loadedT.ConditionGroups[0].Conditions.Count == 1, "TransitionCondition preserved inside group");
+                Assert(loadedT.ConditionGroups[0].Conditions[0].InputId == "input_hover", "InputId preserved in condition");
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    try { File.Delete(tempFile); } catch { }
+                }
+            }
+
+            // 2. Smooth Transition Blending with RestPose
+            uint nodeId = 1001u;
+            var restPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            var nodeRest = new Dictionary<ushort, double>();
+            nodeRest[(ushort)PropKey.X] = 10.0;
+            nodeRest[(ushort)PropKey.Opacity] = 1.0;
+            nodeRest[(ushort)PropKey.ScaleX] = 1.0;
+            nodeRest[(ushort)PropKey.ScaleY] = 1.0;
+            restPose[nodeId] = nodeRest;
+
+            // Base pose has X = 100.0 (no Opacity)
+            var basePose = new Dictionary<uint, Dictionary<ushort, double>>();
+            var baseNode = new Dictionary<ushort, double>();
+            baseNode[(ushort)PropKey.X] = 100.0;
+            basePose[nodeId] = baseNode;
+
+            // Target pose has Opacity = 0.2 (no X)
+            var targetPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            var targetNode = new Dictionary<ushort, double>();
+            targetNode[(ushort)PropKey.Opacity] = 0.2;
+            targetPose[nodeId] = targetNode;
+
+            var outPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            // Blend at mix = 0.5
+            StateMachineRuntime.BlendPoses(basePose, targetPose, 0.5, outPose, restPose);
+
+            Assert(outPose.ContainsKey(nodeId), "Blended pose contains test node");
+            // X blends from 100.0 towards rest pose 10.0: 100 + (10 - 100) * 0.5 = 55.0
+            Assert(Math.Abs(outPose[nodeId][(ushort)PropKey.X] - 55.0) < 0.001, "X property smoothly blends from base to rest pose (55.0)");
+            // Opacity blends from rest pose 1.0 towards target 0.2: 1.0 + (0.2 - 1.0) * 0.5 = 0.6
+            Assert(Math.Abs(outPose[nodeId][(ushort)PropKey.Opacity] - 0.6) < 0.001, "Opacity property smoothly blends from rest pose to target (0.6)");
+
+            // 3. StateMachineRuntime HasActiveTransitions and continuous smooth transition advancement
+            var runtime = new StateMachineRuntime(smDef, doc.Animation.Clips);
+            runtime.RestPose = restPose;
+
+            Assert(!runtime.HasActiveTransitions(), "Runtime has no active transitions initially");
+
+            // Advance through Entry -> Idle
+            var runPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            runtime.Update(0.0, runPose);
+            Assert(runtime.LayerRuntimes[0].CurrentState == 1, "Layer entered Idle state");
+
+            // Now set input isHovered = true
+            runtime.SetBool(0, true);
+
+            // Before reaching ExitTime (0.8s), transition must not fire yet
+            runtime.Update(0.4, runPose);
+            Assert(!runtime.HasActiveTransitions(), "Transition respects ExitTime (0.8s) and does not fire at 0.4s");
+
+            // Advance past ExitTime (at 0.85s): condition is met and ExitTime reached, transition begins!
+            runtime.Update(0.45, runPose);
+            Assert(runtime.HasActiveTransitions(), "Active transition fires after reaching ExitTime (0.8s)");
+            Assert(runtime.LayerRuntimes[0].ActiveTransition != null, "Layer has active transition state");
+            Assert(runtime.LayerRuntimes[0].ActiveTransition.ToState == 2, "Transition destination is Hover state (2)");
+
+            // Advance dt = 0.25 (halfway through 0.5s transition duration)
+            runtime.Update(0.25, runPose);
+            Assert(runtime.HasActiveTransitions(), "Transition still in flight at 0.25s / 0.5s");
+            Assert(Math.Abs(runtime.LayerRuntimes[0].ActiveTransition.Elapsed - 0.25) < 0.001, "Elapsed time is 0.25s");
+
+            // Advance dt = 0.25 (transition completion)
+            runtime.Update(0.25, runPose);
+            Assert(!runtime.HasActiveTransitions(), "Transition finished and cleared at 0.5s");
+            Assert(runtime.LayerRuntimes[0].CurrentState == 2, "Layer successfully in Hover state (2)");
         }
     }
 }

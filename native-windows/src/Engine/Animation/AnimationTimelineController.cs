@@ -103,6 +103,14 @@ namespace Kerf.Engine.Animation
             if (double.IsNaN(Speed) || double.IsInfinity(Speed)) Speed = 1.0;
             dt = Math.Max(0.0, dt);
             double stepDt = dt * Math.Abs(Speed);
+
+            if (UseStateMachine)
+            {
+                CurrentTime += stepDt;
+                EvaluateAndNotify(stepDt);
+                return;
+            }
+
             double nextTime = CurrentTime + stepDt * _playDirection;
 
             switch (LoopMode)

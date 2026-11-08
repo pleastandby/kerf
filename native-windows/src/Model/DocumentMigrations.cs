@@ -5,6 +5,7 @@ using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows;
 using Kerf.Model;
+using Kerf.Engine.Animation;
 
 namespace Kerf.Model
 {
@@ -129,6 +130,21 @@ namespace Kerf.Model
                             }
                         }
                     }
+                }
+
+                // Preserve Animation and State Machine data if present in dictionary
+                object animRaw = null;
+                if (dict.ContainsKey("Animation")) animRaw = dict["Animation"];
+                else if (dict.ContainsKey("animation")) animRaw = dict["animation"];
+
+                if (animRaw != null)
+                {
+                    try
+                    {
+                        string animJson = serializer.Serialize(animRaw);
+                        migrated.Animation = serializer.Deserialize<AnimationProjectData>(animJson);
+                    }
+                    catch { }
                 }
 
                 migrated.SchemaVersion = "3.0.0";
