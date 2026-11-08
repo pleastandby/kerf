@@ -27,6 +27,9 @@ namespace Kerf.Engine.Animation
     public class LayerRuntimeState
     {
         public int CurrentState { get; set; }
+        public int PreviousState { get; set; }
+        public double TimeInCurrentState { get; set; }
+        public int InputVersionAtStateEntry { get; set; }
         public ClipInstance CurTime { get; set; }
         public ActiveTransitionState ActiveTransition { get; set; }
         public bool IsFinished { get; set; }
@@ -34,6 +37,9 @@ namespace Kerf.Engine.Animation
         public LayerRuntimeState(int entryState)
         {
             CurrentState = entryState;
+            PreviousState = -1;
+            TimeInCurrentState = 0.0;
+            InputVersionAtStateEntry = 1;
             CurTime = new ClipInstance(entryState);
             ActiveTransition = null;
             IsFinished = false;
@@ -172,8 +178,21 @@ namespace Kerf.Engine.Animation
             Reset();
         }
 
+        private int _inputVersion = 1;
+
+        public int InputVersion
+        {
+            get { return _inputVersion; }
+        }
+
+        public void NotifyInputChanged()
+        {
+            _inputVersion++;
+        }
+
         public void Reset()
         {
+            _inputVersion++;
             if (ViewModel != null) ViewModel.Reset();
             for (int i = 0; i < Definition.Inputs.Count; i++)
             {
@@ -194,10 +213,13 @@ namespace Kerf.Engine.Animation
                         break;
                     }
                 }
+                LayerRuntimes[i].PreviousState = -1;
                 LayerRuntimes[i].CurrentState = entryIdx;
                 LayerRuntimes[i].CurTime = new ClipInstance(entryIdx);
                 LayerRuntimes[i].ActiveTransition = null;
                 LayerRuntimes[i].IsFinished = false;
+                LayerRuntimes[i].TimeInCurrentState = 0.0;
+                LayerRuntimes[i].InputVersionAtStateEntry = _inputVersion;
             }
         }
 
@@ -210,6 +232,7 @@ namespace Kerf.Engine.Animation
         {
             if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Bool)
             {
+                _inputVersion++;
                 Definition.Inputs[inputIdx].Value = val ? 1.0 : 0.0;
                 if (ViewModel != null && !string.IsNullOrEmpty(Definition.Inputs[inputIdx].Name))
                 {
@@ -228,6 +251,7 @@ namespace Kerf.Engine.Animation
         {
             if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Number && !double.IsNaN(val) && !double.IsInfinity(val))
             {
+                _inputVersion++;
                 Definition.Inputs[inputIdx].Value = val;
                 if (ViewModel != null && !string.IsNullOrEmpty(Definition.Inputs[inputIdx].Name))
                 {
@@ -246,6 +270,7 @@ namespace Kerf.Engine.Animation
         {
             if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Trigger)
             {
+                _inputVersion++;
                 Definition.Inputs[inputIdx].Fired = true;
                 if (ViewModel != null && !string.IsNullOrEmpty(Definition.Inputs[inputIdx].Name))
                 {
@@ -277,21 +302,25 @@ namespace Kerf.Engine.Animation
 
         public bool SetViewModelBool(string name, bool value)
         {
+            _inputVersion++;
             return ViewModel != null && ViewModel.SetBool(name, value);
         }
 
         public bool SetViewModelNumber(string name, double value)
         {
+            _inputVersion++;
             return ViewModel != null && ViewModel.SetNumber(name, value);
         }
 
         public bool SetViewModelText(string name, string value)
         {
+            _inputVersion++;
             return ViewModel != null && ViewModel.SetText(name, value);
         }
 
         public bool FireViewModelTrigger(string name)
         {
+            _inputVersion++;
             return ViewModel != null && ViewModel.FireTrigger(name);
         }
 
@@ -321,6 +350,50 @@ namespace Kerf.Engine.Animation
                     if (targetMatches)
                     {
                         actionsToRun.AddRange(listener.Actions);
+                    }
+                }
+            }
+
+            // Auto-unhover for PointerExit: if an object has a PointerEnter listener setting a bool input to True,
+            // and no explicit PointerExit listener for that input is registered, automatically reset it to False.
+            if (kind == PointerEventKind.Exit && targetNodeIds != null && Definition.Listeners != null)
+            {
+                for (int i = 0; i < Definition.Listeners.Count; i++)
+                {
+                    NodeListener listener = Definition.Listeners[i];
+                    if (listener != null && listener.Enabled && (listener.Kind == PointerEventKind.Enter || listener.Kind == PointerEventKind.PointerEnter) && listener.Actions != null)
+                    {
+                        bool targetMatches = listener.TargetNodeId == 0u || targetNodeIds.Contains(listener.TargetNodeId);
+                        if (targetMatches)
+                        {
+                            for (int a = 0; a < listener.Actions.Count; a++)
+                            {
+                                ListenerAction enterAction = listener.Actions[a];
+                                if (enterAction != null && enterAction.Kind == ActionKind.SetBool && enterAction.Parameter > 0.5)
+                                {
+                                    bool hasExplicitExit = false;
+                                    for (int ex = 0; ex < actionsToRun.Count; ex++)
+                                    {
+                                        if (actionsToRun[ex] != null &&
+                                            (actionsToRun[ex].InputIndex == enterAction.InputIndex ||
+                                             (!string.IsNullOrEmpty(enterAction.InputId) && actionsToRun[ex].InputId == enterAction.InputId) ||
+                                             (!string.IsNullOrEmpty(enterAction.PropertyName) && actionsToRun[ex].PropertyName == enterAction.PropertyName)))
+                                        {
+                                            hasExplicitExit = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!hasExplicitExit)
+                                    {
+                                        actionsToRun.Add(new ListenerAction(ActionKind.SetBool, enterAction.InputIndex, 0.0)
+                                        {
+                                            InputId = enterAction.InputId,
+                                            PropertyName = enterAction.PropertyName
+                                        });
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -428,7 +501,7 @@ namespace Kerf.Engine.Animation
             return trans.EvaluateConditions(Definition.Inputs, ViewModel, Definition);
         }
 
-        private StateTransition FindValidTransition(MachineLayer layer, int currentState, double curTime, int activeTransitionToState)
+        private StateTransition FindValidTransition(MachineLayer layer, int currentState, double curTime, int activeTransitionToState, LayerRuntimeState layerRt = null)
         {
             int anyStateIdx = -1;
             for (int s = 0; s < layer.States.Count; s++)
@@ -508,6 +581,17 @@ namespace Kerf.Engine.Animation
                     continue;
                 }
 
+                // Cycle oscillation guard:
+                // Prevent bouncing back to PreviousState immediately if inputs haven't changed and exit time not reached
+                if (layerRt != null &&
+                    toIdx == layerRt.PreviousState &&
+                    layerRt.TimeInCurrentState < 0.1 &&
+                    _inputVersion == layerRt.InputVersionAtStateEntry &&
+                    !trans.ExitTime.HasValue)
+                {
+                    continue;
+                }
+
                 // Check transition feasibility via CanTransition
                 if (CanTransition(trans, progress))
                 {
@@ -530,6 +614,8 @@ namespace Kerf.Engine.Animation
 
                 if (layerRt.IsFinished) continue;
 
+                layerRt.TimeInCurrentState += dt;
+
                 double playbackSpeed = 1.0;
                 if (!string.IsNullOrEmpty(Definition.PlaybackSpeedPropertyName))
                     playbackSpeed = Math.Max(0.0, Math.Min(8.0, GetViewModelNumber(Definition.PlaybackSpeedPropertyName)));
@@ -547,7 +633,15 @@ namespace Kerf.Engine.Animation
                     {
                         Clip clip = Clips[curState.ClipIndex];
                         double stateSpeed = (Math.Abs(curState.Speed) < 0.0001) ? 1.0 : curState.Speed;
-                        LoopMode loopMode = !curState.Loop ? LoopMode.OneShot : clip.LoopMode;
+                        LoopMode loopMode;
+                        if (!curState.Loop)
+                        {
+                            loopMode = LoopMode.OneShot;
+                        }
+                        else
+                        {
+                            loopMode = (clip.LoopMode == LoopMode.PingPong) ? LoopMode.PingPong : LoopMode.Loop;
+                        }
                         layerRt.CurTime.Advance(dt * stateSpeed, clip.Duration, loopMode);
                         needsRedraw = true;
                     }
@@ -567,7 +661,15 @@ namespace Kerf.Engine.Animation
                         {
                             Clip clip = Clips[toState.ClipIndex];
                             double toStateSpeed = (Math.Abs(toState.Speed) < 0.0001) ? 1.0 : toState.Speed;
-                            LoopMode toLoopMode = !toState.Loop ? LoopMode.OneShot : clip.LoopMode;
+                            LoopMode toLoopMode;
+                            if (!toState.Loop)
+                            {
+                                toLoopMode = LoopMode.OneShot;
+                            }
+                            else
+                            {
+                                toLoopMode = (clip.LoopMode == LoopMode.PingPong) ? LoopMode.PingPong : LoopMode.Loop;
+                            }
                             layerRt.ActiveTransition.ToTime.Advance(dt * toStateSpeed, clip.Duration, toLoopMode);
                         }
                     }
@@ -584,7 +686,7 @@ namespace Kerf.Engine.Animation
                     }
 
                     int activeToState = (layerRt.ActiveTransition != null) ? layerRt.ActiveTransition.ToState : -1;
-                    StateTransition nextTrans = FindValidTransition(layerDef, layerRt.CurrentState, layerRt.CurTime.Time, activeToState);
+                    StateTransition nextTrans = FindValidTransition(layerDef, layerRt.CurrentState, layerRt.CurTime.Time, activeToState, layerRt);
                     if (nextTrans != null)
                     {
                         // Do not interrupt if already blending to the exact same target state
@@ -627,9 +729,12 @@ namespace Kerf.Engine.Animation
                         if (duration <= 0.0)
                         {
                             // Instant zero-duration transition: complete immediately and allow chain resolution
+                            layerRt.PreviousState = layerRt.CurrentState;
                             layerRt.CurrentState = toState;
                             layerRt.CurTime = new ClipInstance(toState);
                             layerRt.ActiveTransition = null;
+                            layerRt.TimeInCurrentState = 0.0;
+                            layerRt.InputVersionAtStateEntry = _inputVersion;
 
                             if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                             {
@@ -680,9 +785,12 @@ namespace Kerf.Engine.Animation
                     {
                         int toState = layerRt.ActiveTransition.ToState;
                         ClipInstance toTime = layerRt.ActiveTransition.ToTime;
+                        layerRt.PreviousState = layerRt.CurrentState;
                         layerRt.CurrentState = toState;
                         layerRt.CurTime = toTime;
                         layerRt.ActiveTransition = null;
+                        layerRt.TimeInCurrentState = 0.0;
+                        layerRt.InputVersionAtStateEntry = _inputVersion;
 
                         if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                         {

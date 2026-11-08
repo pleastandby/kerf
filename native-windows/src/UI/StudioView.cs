@@ -5501,6 +5501,31 @@ namespace Kerf.UI
                         string firstId = firstInput != null ? firstInput.InputId : null;
                         string firstName = firstInput != null ? firstInput.Name : null;
                         double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                        if (firstInput != null && firstInput.Kind == InputKind.Bool && layer != null && layer.Transitions != null)
+                        {
+                            for (int ti = 0; ti < layer.Transitions.Count; ti++)
+                            {
+                                var opp = layer.Transitions[ti];
+                                if (opp != null && opp.FromState == trans.ToState && opp.ToState == trans.FromState && opp.ConditionGroups != null)
+                                {
+                                    for (int gi = 0; gi < opp.ConditionGroups.Count; gi++)
+                                    {
+                                        var grp = opp.ConditionGroups[gi];
+                                        if (grp != null && grp.Conditions != null)
+                                        {
+                                            for (int ci = 0; ci < grp.Conditions.Count; ci++)
+                                            {
+                                                if (grp.Conditions[ci] != null && grp.Conditions[ci].Value > 0.5)
+                                                {
+                                                    defaultCondVal = 0.0;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         newGroups[groupIndex].Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, defaultCondVal, true) { PropertyName = firstName });
                         var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
                         {
@@ -5547,6 +5572,31 @@ namespace Kerf.UI
                 string firstId = firstInput != null ? firstInput.InputId : null;
                 string firstName = firstInput != null ? firstInput.Name : null;
                 double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                if (firstInput != null && firstInput.Kind == InputKind.Bool && layer != null && layer.Transitions != null)
+                {
+                    for (int ti = 0; ti < layer.Transitions.Count; ti++)
+                    {
+                        var opp = layer.Transitions[ti];
+                        if (opp != null && opp.FromState == trans.ToState && opp.ToState == trans.FromState && opp.ConditionGroups != null)
+                        {
+                            for (int gi = 0; gi < opp.ConditionGroups.Count; gi++)
+                            {
+                                var grp = opp.ConditionGroups[gi];
+                                if (grp != null && grp.Conditions != null)
+                                {
+                                    for (int ci = 0; ci < grp.Conditions.Count; ci++)
+                                    {
+                                        if (grp.Conditions[ci] != null && grp.Conditions[ci].Value > 0.5)
+                                        {
+                                            defaultCondVal = 0.0;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 newGroup.Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, defaultCondVal, true) { PropertyName = firstName });
                 newGroups.Add(newGroup);
                 var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
@@ -5705,8 +5755,24 @@ namespace Kerf.UI
                 string firstInpId = firstInp != null ? firstInp.InputId : null;
                 string firstInpName = firstInp != null ? firstInp.Name : null;
                 ActionKind defaultAction = (firstInp != null && firstInp.Kind == InputKind.Bool) ? ActionKind.SetBool : (firstInp != null && firstInp.Kind == InputKind.Number ? ActionKind.SetNumber : ActionKind.Fire);
-                double defaultParam = (firstInp != null && firstInp.Kind == InputKind.Bool) ? 1.0 : 0.0;
-                PointerEventKind defaultEvent = (firstInp != null && firstInp.Kind == InputKind.Bool) ? PointerEventKind.Enter : PointerEventKind.Click;
+
+                // If Bool input, check if PointerEnter already exists on this target to create the complementary PointerExit
+                bool hasEnter = false;
+                if (smDef.Listeners != null)
+                {
+                    for (int li = 0; li < smDef.Listeners.Count; li++)
+                    {
+                        var l = smDef.Listeners[li];
+                        if (l != null && l.TargetNodeId == targetId && (l.Kind == PointerEventKind.Enter || l.Kind == PointerEventKind.PointerEnter))
+                        {
+                            hasEnter = true;
+                            break;
+                        }
+                    }
+                }
+
+                PointerEventKind defaultEvent = (firstInp != null && firstInp.Kind == InputKind.Bool) ? (hasEnter ? PointerEventKind.Exit : PointerEventKind.Enter) : PointerEventKind.Click;
+                double defaultParam = (firstInp != null && firstInp.Kind == InputKind.Bool && defaultEvent == PointerEventKind.Exit) ? 0.0 : ((firstInp != null && firstInp.Kind == InputKind.Bool) ? 1.0 : 0.0);
                 var newListener = new NodeListener(targetId, defaultEvent);
                 newListener.Actions.Add(new ListenerAction(defaultAction, 0, defaultParam) { InputId = firstInpId, PropertyName = firstInpName });
                 var addCmd = new AddListenerCommand(smDef, newListener, () =>
@@ -5863,6 +5929,20 @@ namespace Kerf.UI
                         var oldSnap = new NodeListenerSnapshot(listener);
                         var newSnap = new NodeListenerSnapshot(listener);
                         newSnap.Kind = newKind;
+                        if (newKind == PointerEventKind.Exit || newKind == PointerEventKind.PointerExit)
+                        {
+                            if (newSnap.Actions != null && newSnap.Actions.Count > 0 && newSnap.Actions[0].Kind == ActionKind.SetBool)
+                            {
+                                newSnap.Actions[0].Parameter = 0.0;
+                            }
+                        }
+                        else if (newKind == PointerEventKind.Enter || newKind == PointerEventKind.PointerEnter)
+                        {
+                            if (newSnap.Actions != null && newSnap.Actions.Count > 0 && newSnap.Actions[0].Kind == ActionKind.SetBool)
+                            {
+                                newSnap.Actions[0].Parameter = 1.0;
+                            }
+                        }
                         var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
                         {
                             RefreshPropertyInspector();
@@ -10400,6 +10480,20 @@ namespace Kerf.UI
         public void HandleCanvasMouseDown(Point screenPt, MouseButton button)
         {
             HandleCanvasMouseDown(screenPt, button, 1);
+        }
+
+        public void HandleCanvasMouseLeave()
+        {
+            if (_currentStudioMode == StudioMode.Animate && _timelineController != null && _timelineController.IsPlaying)
+            {
+                var sm = _timelineController.ActiveStateMachine;
+                var page = Document != null ? Document.GetActivePage() : null;
+                if (sm != null && _sceneGraph != null && _interactiveEventDispatcher != null)
+                {
+                    _interactiveEventDispatcher.OnPointerMove(sm, _sceneGraph, new Point(-999999, -999999), page);
+                    TriggerStateMachineStep(continuePlayback: true);
+                }
+            }
         }
 
         public void HandleCanvasMouseMove(Point screenPt)
@@ -16741,22 +16835,24 @@ namespace Kerf.UI
                     speedBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { commitSpeed(); Keyboard.ClearFocus(); } };
                     sp.Children.Add(CreateTransitionFormRow("Speed", speedBox));
 
-                    // Looping Toggle
-                    var loopCheck = new CheckBox
+                    // Playback Behaviour (Loop, Once, PingPong)
+                    var loopCombo = CreateModernComboBox(26);
+                    loopCombo.Items.Add(new ComboBoxItem { Content = "Loop (Continuous)", Tag = LoopMode.Loop });
+                    loopCombo.Items.Add(new ComboBoxItem { Content = "Once (Hold at end)", Tag = LoopMode.OneShot });
+                    loopCombo.Items.Add(new ComboBoxItem { Content = "PingPong (Back & forth)", Tag = LoopMode.PingPong });
+                    loopCombo.SelectedIndex = state.LoopMode == LoopMode.Loop ? 0 : (state.LoopMode == LoopMode.PingPong ? 2 : 1);
+                    loopCombo.SelectionChanged += (s, e) =>
                     {
-                        Content = "Looping Animation",
-                        IsChecked = state.Loop,
-                        Foreground = Brushes.White,
-                        FontSize = 11,
-                        Margin = new Thickness(0, 4, 0, 10),
-                        Cursor = Cursors.Hand
+                        var selItem = loopCombo.SelectedItem as ComboBoxItem;
+                        if (selItem != null && selItem.Tag is LoopMode)
+                        {
+                            var mode = (LoopMode)selItem.Tag;
+                            state.LoopMode = mode;
+                            state.Loop = (mode != LoopMode.OneShot);
+                            if (History != null) History.MarkDirty();
+                        }
                     };
-                    loopCheck.Click += (s, e) =>
-                    {
-                        state.Loop = loopCheck.IsChecked == true;
-                        if (History != null) History.MarkDirty();
-                    };
-                    sp.Children.Add(loopCheck);
+                    sp.Children.Add(CreateTransitionFormRow("Playback", loopCombo));
                 }
 
                 // Delete State Button (for non-Entry states)
@@ -17381,6 +17477,31 @@ namespace Kerf.UI
                             string firstId = firstInput != null ? firstInput.InputId : null;
                             string firstName = firstInput != null ? firstInput.Name : null;
                             double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                            if (firstInput != null && firstInput.Kind == InputKind.Bool && layer != null && layer.Transitions != null)
+                            {
+                                for (int ti = 0; ti < layer.Transitions.Count; ti++)
+                                {
+                                    var opp = layer.Transitions[ti];
+                                    if (opp != null && opp.FromState == trans.ToState && opp.ToState == trans.FromState && opp.ConditionGroups != null)
+                                    {
+                                        for (int gi = 0; gi < opp.ConditionGroups.Count; gi++)
+                                        {
+                                            var grp = opp.ConditionGroups[gi];
+                                            if (grp != null && grp.Conditions != null)
+                                            {
+                                                for (int ci = 0; ci < grp.Conditions.Count; ci++)
+                                                {
+                                                    if (grp.Conditions[ci] != null && grp.Conditions[ci].Value > 0.5)
+                                                    {
+                                                        defaultCondVal = 0.0;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             newGroups[groupIndex].Conditions.Add(new TransitionCondition(firstId, ConditionOp.Eq, defaultCondVal, true) { PropertyName = firstName });
                             var cmd = new ModifyConditionGroupsCommand(trans, oldGroups, newGroups, () =>
                             {
@@ -17426,6 +17547,31 @@ namespace Kerf.UI
                     {
                         var firstInp = sm.Definition.Inputs[0];
                         double defaultCondVal = (firstInp != null && firstInp.Kind == InputKind.Bool) ? 1.0 : 0.0;
+                        if (firstInp != null && firstInp.Kind == InputKind.Bool && layer != null && layer.Transitions != null)
+                        {
+                            for (int ti = 0; ti < layer.Transitions.Count; ti++)
+                            {
+                                var opp = layer.Transitions[ti];
+                                if (opp != null && opp.FromState == trans.ToState && opp.ToState == trans.FromState && opp.ConditionGroups != null)
+                                {
+                                    for (int gi = 0; gi < opp.ConditionGroups.Count; gi++)
+                                    {
+                                        var grp = opp.ConditionGroups[gi];
+                                        if (grp != null && grp.Conditions != null)
+                                        {
+                                            for (int ci = 0; ci < grp.Conditions.Count; ci++)
+                                            {
+                                                if (grp.Conditions[ci] != null && grp.Conditions[ci].Value > 0.5)
+                                                {
+                                                    defaultCondVal = 0.0;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         newGrp.Conditions.Add(new TransitionCondition(firstInp.InputId, ConditionOp.Eq, defaultCondVal, true) { PropertyName = firstInp.Name });
                     }
                     newGroups.Add(newGrp);
@@ -18399,6 +18545,23 @@ namespace Kerf.UI
             boolValBox.Items.Add(new ComboBoxItem { Content = "Toggle (Flip)", Tag = -1.0 });
             boolValBox.Items.Add(new ComboBoxItem { Content = "Reset to Default", Tag = -2.0 });
             boolValBox.SelectedIndex = 0;
+
+            eventBox.SelectionChanged += (s, e) =>
+            {
+                var eventItem = eventBox.SelectedItem as ComboBoxItem;
+                if (eventItem != null && eventItem.Tag is PointerEventKind)
+                {
+                    var k = (PointerEventKind)eventItem.Tag;
+                    if (k == PointerEventKind.Exit || k == PointerEventKind.PointerExit)
+                    {
+                        if (boolValBox.Items.Count > 1) boolValBox.SelectedIndex = 1; // Set False
+                    }
+                    else if (k == PointerEventKind.Enter || k == PointerEventKind.PointerEnter)
+                    {
+                        if (boolValBox.Items.Count > 0) boolValBox.SelectedIndex = 0; // Set True
+                    }
+                }
+            };
 
             var numActionBox = CreateModernComboBox(30);
             numActionBox.Items.Add(new ComboBoxItem { Content = "Set Value", Tag = 0 });
@@ -20262,32 +20425,104 @@ namespace Kerf.UI
         private void AddReverseTransition(MachineLayer layer, StateTransition transition)
         {
             if (layer == null || transition == null) return;
-            if (transition.Conditions == null || transition.Conditions.Count != 1)
+            var sm = _timelineController != null ? _timelineController.ActiveStateMachine : null;
+
+            int revFrom = transition.ToState;
+            int revTo = transition.FromState;
+            for (int t = 0; t < layer.Transitions.Count; t++)
             {
-                MessageBox.Show("A reverse link needs one condition that can be inverted. Add a single input condition, then create the reverse link.", "State Machine", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
+                var curT = layer.Transitions[t];
+                if (curT != null && curT.FromState == revFrom && curT.ToState == revTo)
+                {
+                    _selectedGraphTransition = curT;
+                    _selectedGraphTransitionLayer = layer;
+                    BuildStateMachineStatesGraph();
+                    RefreshStateMachineInspector();
+                    return;
+                }
             }
+
             var reverse = new StateTransition(transition.ToState, transition.FromState, transition.Duration)
             {
                 Interpolation = transition.Interpolation, X1 = transition.X1, Y1 = transition.Y1, X2 = transition.X2, Y2 = transition.Y2,
                 Interrupt = transition.Interrupt, ExitTime = null
             };
-            if (transition.Conditions != null)
+
+            if (transition.ConditionGroups != null && transition.ConditionGroups.Count > 0 && transition.Conditions.Count > 0)
             {
-                foreach (var condition in transition.Conditions)
+                reverse.ConditionGroups = new List<ConditionGroup>();
+                for (int g = 0; g < transition.ConditionGroups.Count; g++)
                 {
-                    if (condition == null) continue;
-                    reverse.Conditions.Add(new TransitionCondition(condition.InputIndex, InvertCondition(condition.Op), condition.Value)
+                    var fGrp = transition.ConditionGroups[g];
+                    if (fGrp == null || fGrp.Conditions == null) continue;
+                    var rGrp = new ConditionGroup();
+                    for (int c = 0; c < fGrp.Conditions.Count; c++)
                     {
-                        PropertyName = condition.PropertyName, TextValue = condition.TextValue
-                    });
+                        var cond = fGrp.Conditions[c];
+                        if (cond == null) continue;
+
+                        MachineInput boundInput = null;
+                        if (sm != null && sm.Definition != null && sm.Definition.Inputs != null)
+                        {
+                            if (!string.IsNullOrEmpty(cond.InputId)) boundInput = sm.Definition.FindInputById(cond.InputId);
+                            if (boundInput == null && !string.IsNullOrEmpty(cond.PropertyName)) boundInput = sm.Definition.FindInputById(cond.PropertyName);
+                            if (boundInput == null && cond.InputIndex >= 0 && cond.InputIndex < sm.Definition.Inputs.Count) boundInput = sm.Definition.Inputs[cond.InputIndex];
+                        }
+
+                        ConditionOp revOp;
+                        double revVal;
+                        if (boundInput != null && boundInput.Kind == InputKind.Bool)
+                        {
+                            revOp = ConditionOp.Eq;
+                            revVal = (cond.Value > 0.5) ? 0.0 : 1.0;
+                        }
+                        else
+                        {
+                            revOp = InvertCondition(cond.Op);
+                            revVal = cond.Value;
+                        }
+
+                        rGrp.Conditions.Add(new TransitionCondition(cond.InputIndex, revOp, revVal)
+                        {
+                            InputId = cond.InputId,
+                            PropertyName = cond.PropertyName,
+                            TextValue = cond.TextValue
+                        });
+                    }
+                    if (rGrp.Conditions.Count > 0) reverse.ConditionGroups.Add(rGrp);
                 }
             }
+            else if (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0)
+            {
+                MachineInput firstBool = null;
+                for (int i = 0; i < sm.Definition.Inputs.Count; i++)
+                {
+                    if (sm.Definition.Inputs[i] != null && sm.Definition.Inputs[i].Kind == InputKind.Bool)
+                    {
+                        firstBool = sm.Definition.Inputs[i];
+                        break;
+                    }
+                }
+                if (firstBool != null)
+                {
+                    transition.ConditionGroups.Clear();
+                    var fGrp = new ConditionGroup();
+                    fGrp.Conditions.Add(new TransitionCondition(firstBool.InputId, ConditionOp.Eq, 1.0, true) { PropertyName = firstBool.Name });
+                    transition.ConditionGroups.Add(fGrp);
+
+                    reverse.ConditionGroups.Clear();
+                    var rGrp = new ConditionGroup();
+                    rGrp.Conditions.Add(new TransitionCondition(firstBool.InputId, ConditionOp.Eq, 0.0, true) { PropertyName = firstBool.Name });
+                    reverse.ConditionGroups.Add(rGrp);
+                }
+            }
+
             layer.AddTransition(reverse);
             _selectedGraphTransition = reverse;
             _selectedGraphTransitionLayer = layer;
             History.MarkDirty();
             BuildStateMachineStatesGraph();
+            RefreshStateMachineInspector();
         }
 
         private static ConditionOp InvertCondition(ConditionOp operation)
@@ -20401,6 +20636,45 @@ namespace Kerf.UI
                 _lastGraphCurrentState != lr.CurrentState ||
                 _lastGraphTransitionTarget != transitionTarget)
                 BuildStateMachineStatesGraph();
+
+            if (_stateMachineInputsStack != null && sm.Definition.Inputs != null)
+            {
+                for (int ci = 0; ci < _stateMachineInputsStack.Children.Count; ci++)
+                {
+                    var card = _stateMachineInputsStack.Children[ci] as Border;
+                    if (card != null && card.Tag is string)
+                    {
+                        string inName = (string)card.Tag;
+                        var inp = sm.Definition.FindInputById(inName);
+                        if (inp != null && inp.Kind == InputKind.Bool)
+                        {
+                            var cardStack = card.Child as StackPanel;
+                            if (cardStack != null && cardStack.Children.Count > 0)
+                            {
+                                var headerDock = cardStack.Children[0] as DockPanel;
+                                if (headerDock != null)
+                                {
+                                    for (int hi = 0; hi < headerDock.Children.Count; hi++)
+                                    {
+                                        var badge = headerDock.Children[hi] as Border;
+                                        if (badge != null && badge.Child is TextBlock)
+                                        {
+                                            var tb = (TextBlock)badge.Child;
+                                            if (tb.Text.StartsWith("⏻"))
+                                            {
+                                                bool isVal = inp.Value > 0.5;
+                                                tb.Text = isVal ? "⏻ ON" : "⏻ OFF";
+                                                badge.Background = isVal ? new SolidColorBrush(Color.FromRgb(16, 185, 129)) : new SolidColorBrush(Color.FromRgb(37, 99, 235));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         private void TriggerStateMachineStep(bool continuePlayback = false)
@@ -23354,6 +23628,7 @@ namespace Kerf.UI
             IsManipulationEnabled = true;
             ManipulationDelta += (s, e) => _studio.HandleCanvasManipulationDelta(e);
             SizeChanged += (s, e) => _studio.RefreshCanvas();
+            MouseLeave += (s, e) => _studio.HandleCanvasMouseLeave();
         }
 
         protected override int VisualChildrenCount

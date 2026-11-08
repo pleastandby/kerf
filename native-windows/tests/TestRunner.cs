@@ -99,6 +99,7 @@ namespace Kerf.Tests
             RunTest("Non-Destructive StateMachineValidator Listener Diagnostics", TestStateMachineValidatorListenerDiagnostics);
             RunTest("Interactive Listeners, State Machine Runtime & Transition Execution", TestInteractiveListenersAndStateMachineRuntimeExecution);
             RunTest("Continuous Playback, Input Gating & Interactive Pointer Transitions", TestContinuousPlaybackAndInputDrivenTransitions);
+            RunTest("Auto-Unhover on PointerExit, Cycle Guard & Continuous State Looping", TestAutoUnhoverCycleGuardAndStateLooping);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -8479,6 +8480,102 @@ namespace Kerf.Tests
 
             timelineCtrl.Step(0.25);
             Assert(runtime.LayerRuntimes[0].CurrentState == sIdle, "State returned to Idle after pointer exit");
+        }
+
+        private static void TestAutoUnhoverCycleGuardAndStateLooping()
+        {
+            // 1. Test Auto-unhover when no explicit PointerExit listener is configured
+            var smDef = new StateMachineDefinition("AutoUnhoverTest");
+            int inHover = smDef.AddInput(MachineInput.Bool("isHovering", false));
+
+            var layer = new MachineLayer("BaseLayer");
+            int sEntry = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int sIdle = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0) { Loop = true });
+            int sHover = layer.AddState(new MachineState(2, "Hover", StateKind.Animation, 1) { Loop = true });
+
+            layer.AddTransition(new StateTransition(sEntry, sIdle, 0.0));
+            layer.AddTransition(new StateTransition(sIdle, sHover, 0.2).WithCondition(new TransitionCondition(inHover, ConditionOp.Eq, 1.0)));
+            layer.AddTransition(new StateTransition(sHover, sIdle, 0.2).WithCondition(new TransitionCondition(inHover, ConditionOp.Eq, 0.0)));
+            smDef.AddLayer(layer);
+
+            // User only configured ONE listener: PointerEnter -> True (no PointerExit listener)
+            uint cardId = 42u;
+            var lEnter = new NodeListener(cardId, PointerEventKind.Enter);
+            lEnter.Actions.Add(new ListenerAction(ActionKind.SetBool, inHover) { Parameter = 1.0, PropertyName = "isHovering" });
+            smDef.AddListener(lEnter);
+
+            var clipIdle = new Clip(1u, "Idle", 2.0, 60.0, LoopMode.OneShot);
+            var clipHover = new Clip(2u, "Hover", 2.0, 60.0, LoopMode.OneShot); // Clip was created as OneShot
+            var clips = new List<Clip> { clipIdle, clipHover };
+
+            var runtime = new StateMachineRuntime(smDef, clips);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            runtime.Update(0.016, pose); // Resolve Entry -> Idle
+            Assert(runtime.LayerRuntimes[0].CurrentState == sIdle, "Initial state is Idle");
+
+            // Mouse enters card
+            runtime.OnPointerEvent(cardId, PointerEventKind.Enter);
+            Assert(smDef.Inputs[inHover].Value == 1.0, "PointerEnter sets isHovering to True");
+            runtime.Update(0.016, pose);
+            Assert(runtime.LayerRuntimes[0].ActiveTransition != null && runtime.LayerRuntimes[0].ActiveTransition.ToState == sHover, "Transitioning to Hover on Enter");
+            runtime.Update(0.25, pose);
+            Assert(runtime.LayerRuntimes[0].CurrentState == sHover, "Arrived at Hover state");
+
+            // Mouse exits card - verify auto-unhover resets isHovering to 0.0 even without explicit Exit listener!
+            runtime.OnPointerEvent(cardId, PointerEventKind.Exit);
+            Assert(smDef.Inputs[inHover].Value == 0.0, "PointerExit automatically resets isHovering to False via auto-unhover");
+
+            runtime.Update(0.016, pose);
+            Assert(runtime.LayerRuntimes[0].ActiveTransition != null && runtime.LayerRuntimes[0].ActiveTransition.ToState == sIdle, "Transitioning back to Idle on Exit");
+            runtime.Update(0.25, pose);
+            Assert(runtime.LayerRuntimes[0].CurrentState == sIdle, "Successfully returned to Idle on PointerExit");
+
+            // 2. Test Continuous State Looping when state has Loop = true, even though clip has LoopMode.OneShot
+            // Hover state has Loop = true, but clipHover has LoopMode.OneShot.
+            // When Hover state plays for 5.0 seconds (more than 2.0s clip duration),
+            // it must NOT stop at 2.0s; it must loop!
+            smDef.Inputs[inHover].Value = 1.0;
+            runtime.NotifyInputChanged();
+            runtime.Update(0.016, pose);
+            runtime.Update(0.25, pose);
+            Assert(runtime.LayerRuntimes[0].CurrentState == sHover, "In Hover state for looping test");
+
+            // Advance by 3.5 seconds in increments
+            for (int step = 0; step < 70; step++)
+            {
+                runtime.Update(0.05, pose);
+            }
+            // If it clamped at 2.0s, CurTime.Time would be exactly 2.0s.
+            // Since it loops (modulo 2.0s), 3.5s elapsed % 2.0s should be ~1.5s, definitely not stuck at 2.0s!
+            double curTimeInClip = runtime.LayerRuntimes[0].CurTime.Time;
+            Assert(curTimeInClip < 1.99, string.Format("Animation state with Loop=true does not freeze at last frame (CurTime={0:F2}s, duration=2.0s)", curTimeInClip));
+
+            // 3. Test Cycle Oscillation Guard
+            // Create a layer where two states both have transitions evaluating to True simultaneously
+            var cycleDef = new StateMachineDefinition("CycleTest");
+            int cycleIn = cycleDef.AddInput(MachineInput.Bool("cond", false));
+            var cycleLayer = new MachineLayer("CycleLayer");
+            int cEntry = cycleLayer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int cA = cycleLayer.AddState(new MachineState(1, "A", StateKind.Animation, 0));
+            int cB = cycleLayer.AddState(new MachineState(2, "B", StateKind.Animation, 0));
+            cycleLayer.AddTransition(new StateTransition(cEntry, cA, 0.0));
+            // Both transitions require cond == 0.0 (both true when cond is false!)
+            cycleLayer.AddTransition(new StateTransition(cA, cB, 0.05).WithCondition(new TransitionCondition(cycleIn, ConditionOp.Eq, 0.0)));
+            cycleLayer.AddTransition(new StateTransition(cB, cA, 0.05).WithCondition(new TransitionCondition(cycleIn, ConditionOp.Eq, 0.0)));
+            cycleDef.AddLayer(cycleLayer);
+
+            var cycleRuntime = new StateMachineRuntime(cycleDef, clips);
+            cycleRuntime.Update(0.016, pose); // Enters cA
+            Assert(cycleRuntime.LayerRuntimes[0].CurrentState == cA, "Cycle test starts in cA");
+
+            // Transition from cA to cB begins
+            cycleRuntime.Update(0.06, pose);
+            Assert(cycleRuntime.LayerRuntimes[0].CurrentState == cB, "Arrives at cB");
+
+            // In the next frame, because inputs have NOT changed, cycle guard prevents bouncing back immediately to cA!
+            cycleRuntime.Update(0.016, pose);
+            Assert(cycleRuntime.LayerRuntimes[0].ActiveTransition == null, "Cycle guard prevents immediate ping-pong bounce back when inputs have not changed");
+            Assert(cycleRuntime.LayerRuntimes[0].CurrentState == cB, "Remains stably in cB without oscillating");
         }
     }
 }

@@ -315,6 +315,20 @@ namespace Kerf.Engine.Animation
         public double GraphY { get; set; }
         public double Speed { get; set; }
         public bool Loop { get; set; }
+        private LoopMode _loopMode;
+        public LoopMode LoopMode
+        {
+            get
+            {
+                if (!Loop) return LoopMode.OneShot;
+                return _loopMode;
+            }
+            set
+            {
+                _loopMode = value;
+                Loop = (value != LoopMode.OneShot);
+            }
+        }
         public List<Blend1DItem> Blend1DItems { get; set; }
         public List<BlendDirectItem> BlendDirectItems { get; set; }
 
@@ -338,6 +352,7 @@ namespace Kerf.Engine.Animation
             GraphY = -1.0;
             Speed = 1.0;
             Loop = true;
+            _loopMode = LoopMode.Loop;
             Blend1DItems = new List<Blend1DItem>();
             BlendDirectItems = new List<BlendDirectItem>();
         }
