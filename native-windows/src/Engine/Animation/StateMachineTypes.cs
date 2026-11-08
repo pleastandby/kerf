@@ -646,7 +646,19 @@ namespace Kerf.Engine.Animation
         Up = 1,
         Move = 2,
         Enter = 3,
-        Exit = 4
+        Exit = 4,
+        Click = 5,
+        Tap = 6,
+        DragStart = 7,
+        Drag = 8,
+        DragEnd = 9,
+
+        // Aliases matching specs
+        PointerDown = 0,
+        PointerUp = 1,
+        PointerMove = 2,
+        PointerEnter = 3,
+        PointerExit = 4
     }
 
     public enum ActionKind
@@ -657,13 +669,19 @@ namespace Kerf.Engine.Animation
         SetViewModelBool = 3,
         SetViewModelNumber = 4,
         FireViewModelTrigger = 5,
-        SetViewModelText = 6
+        SetViewModelText = 6,
+        ToggleBool = 7,
+        Reset = 8,
+
+        // Alias
+        FireTrigger = 2
     }
 
     public class ListenerAction
     {
         public ActionKind Kind { get; set; }
         public int InputIndex { get; set; }
+        public string InputId { get; set; }
         public string PropertyName { get; set; }
         public string TextValue { get; set; }
         public double Parameter { get; set; }
@@ -674,6 +692,7 @@ namespace Kerf.Engine.Animation
         {
             Kind = kind;
             InputIndex = inputIndex;
+            InputId = null;
             PropertyName = null;
             TextValue = null;
             Parameter = param;
@@ -684,21 +703,59 @@ namespace Kerf.Engine.Animation
         {
             PropertyName = propertyName;
         }
+
+        public ListenerAction Clone()
+        {
+            var act = new ListenerAction(Kind, InputIndex, Parameter);
+            act.InputId = InputId;
+            act.PropertyName = PropertyName;
+            act.TextValue = TextValue;
+            return act;
+        }
     }
 
     public class NodeListener
     {
+        public string ListenerId { get; set; }
         public uint TargetNodeId { get; set; }
         public PointerEventKind Kind { get; set; }
+        public bool Enabled { get; set; }
         public List<ListenerAction> Actions { get; set; }
 
         public NodeListener() : this(0, PointerEventKind.Down) { }
 
         public NodeListener(uint targetNodeId, PointerEventKind kind)
         {
+            ListenerId = "sm_lst_" + Guid.NewGuid().ToString("N");
             TargetNodeId = targetNodeId;
             Kind = kind;
+            Enabled = true;
             Actions = new List<ListenerAction>();
+        }
+
+        public NodeListener(uint targetNodeId, PointerEventKind kind, string listenerId, bool enabled)
+        {
+            ListenerId = !string.IsNullOrEmpty(listenerId) ? listenerId : ("sm_lst_" + Guid.NewGuid().ToString("N"));
+            TargetNodeId = targetNodeId;
+            Kind = kind;
+            Enabled = enabled;
+            Actions = new List<ListenerAction>();
+        }
+
+        public NodeListener Clone()
+        {
+            var copy = new NodeListener(TargetNodeId, Kind, ListenerId, Enabled);
+            if (Actions != null)
+            {
+                for (int i = 0; i < Actions.Count; i++)
+                {
+                    if (Actions[i] != null)
+                    {
+                        copy.Actions.Add(Actions[i].Clone());
+                    }
+                }
+            }
+            return copy;
         }
     }
 

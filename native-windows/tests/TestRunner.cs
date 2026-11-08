@@ -93,6 +93,7 @@ namespace Kerf.Tests
             RunTest("Interactive State Machine Refinement: Clean Slate, Ports, Single-Wire Badges & Canvas Deletion", TestInteractiveStateMachineEngineRefinement);
             RunTest("State Machine Batch Transitions, Easing Presets, Multiselect & Clip Renaming", TestStateMachineBatchTransitionsPresetsMultiselectAndClipRenaming);
             RunTest("State Machine Persistence & Smooth Rest-Pose Transition Blending", TestStateMachinePersistenceAndSmoothTransitionBlending);
+            RunTest("Interactive Listeners & Centralized Event Dispatcher", TestInteractiveListenersAndCentralizedEventDispatcher);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -7282,6 +7283,137 @@ namespace Kerf.Tests
             runtime.Update(0.25, runPose);
             Assert(!runtime.HasActiveTransitions(), "Transition finished and cleared at 0.5s");
             Assert(runtime.LayerRuntimes[0].CurrentState == 2, "Layer successfully in Hover state (2)");
+        }
+
+        private static void TestInteractiveListenersAndCentralizedEventDispatcher()
+        {
+            // 1. Enum verification
+            Assert((int)PointerEventKind.Click == 5, "PointerEventKind.Click is 5");
+            Assert((int)PointerEventKind.Tap == 6, "PointerEventKind.Tap is 6");
+            Assert((int)PointerEventKind.DragStart == 7, "PointerEventKind.DragStart is 7");
+            Assert((int)PointerEventKind.Drag == 8, "PointerEventKind.Drag is 8");
+            Assert((int)PointerEventKind.DragEnd == 9, "PointerEventKind.DragEnd is 9");
+            Assert((int)PointerEventKind.PointerDown == 0, "PointerEventKind.PointerDown alias is 0");
+            Assert((int)PointerEventKind.PointerUp == 1, "PointerEventKind.PointerUp alias is 1");
+            Assert((int)PointerEventKind.PointerMove == 2, "PointerEventKind.PointerMove alias is 2");
+            Assert((int)PointerEventKind.PointerEnter == 3, "PointerEventKind.PointerEnter alias is 3");
+            Assert((int)PointerEventKind.PointerExit == 4, "PointerEventKind.PointerExit alias is 4");
+
+            Assert((int)ActionKind.ToggleBool == 7, "ActionKind.ToggleBool is 7");
+            Assert((int)ActionKind.Reset == 8, "ActionKind.Reset is 8");
+            Assert((int)ActionKind.FireTrigger == 2, "ActionKind.FireTrigger alias is 2");
+
+            // 2. NodeListener model and ListenerId GUID / Enabled defaults
+            var listener = new NodeListener(101u, PointerEventKind.Click);
+            Assert(!string.IsNullOrEmpty(listener.ListenerId) && listener.ListenerId.StartsWith("sm_lst_"), "NodeListener initializes ListenerId GUID sm_lst_*");
+            Assert(listener.Enabled == true, "NodeListener defaults to Enabled = true");
+            Assert(listener.TargetNodeId == 101u, "TargetNodeId matches");
+            Assert(listener.Kind == PointerEventKind.Click, "Kind matches Click");
+
+            var action1 = new ListenerAction(ActionKind.ToggleBool, 0);
+            action1.InputId = "input_bool_1";
+            listener.Actions.Add(action1);
+
+            var clonedListener = listener.Clone();
+            Assert(clonedListener.ListenerId == listener.ListenerId, "Clone preserves ListenerId");
+            Assert(clonedListener.Enabled == listener.Enabled, "Clone preserves Enabled");
+            Assert(clonedListener.Actions.Count == 1, "Clone copies actions");
+            Assert(clonedListener.Actions[0].InputId == "input_bool_1", "Clone deep-copies action InputId");
+
+            // 3. StateMachineRuntime.OnPointerEvent actions (ToggleBool, Reset, Enabled check)
+            var smDef = new StateMachineDefinition();
+            var inBool = MachineInput.Bool("isHovered", false, "input_bool_1");
+            var inNum = MachineInput.Number("score", 10.0, "input_num_1");
+            var inTrig = MachineInput.Trigger("fireTrig", "input_trig_1");
+            smDef.Inputs.Add(inBool);
+            smDef.Inputs.Add(inNum);
+            smDef.Inputs.Add(inTrig);
+
+            var toggleListener = new NodeListener(200u, PointerEventKind.Click);
+            toggleListener.Actions.Add(new ListenerAction(ActionKind.ToggleBool, 0));
+            smDef.AddListener(toggleListener);
+
+            var resetListener = new NodeListener(200u, PointerEventKind.Tap);
+            resetListener.Actions.Add(new ListenerAction(ActionKind.Reset, 1));
+            smDef.AddListener(resetListener);
+
+            var trigListener = new NodeListener(200u, PointerEventKind.Down);
+            trigListener.Actions.Add(new ListenerAction(ActionKind.FireTrigger, 2));
+            smDef.AddListener(trigListener);
+
+            var runtime = new StateMachineRuntime(smDef, new List<Clip>());
+
+            // Trigger toggle: false -> true
+            runtime.OnPointerEvent(200u, PointerEventKind.Click);
+            Assert(inBool.Value > 0.5, "ToggleBool toggles false to true");
+
+            // Toggle again: true -> false
+            runtime.OnPointerEvent(200u, PointerEventKind.Click);
+            Assert(inBool.Value <= 0.5, "ToggleBool toggles true to false");
+
+            // When disabled, toggle does NOT execute
+            toggleListener.Enabled = false;
+            runtime.OnPointerEvent(200u, PointerEventKind.Click);
+            Assert(inBool.Value <= 0.5, "Disabled listener does not execute ToggleBool");
+            toggleListener.Enabled = true;
+
+            // FireTrigger
+            Assert(!inTrig.Fired, "Trigger not fired initially");
+            runtime.OnPointerEvent(200u, PointerEventKind.Down);
+            Assert(inTrig.Fired, "ActionKind.FireTrigger fires trigger");
+
+            // Reset action
+            inNum.Value = 99.0;
+            runtime.OnPointerEvent(200u, PointerEventKind.Tap);
+            Assert(Math.Abs(inNum.Value - 10.0) < 0.001, "ActionKind.Reset restores InitialValue");
+
+            // 4. InteractiveEventDispatcher hit routing and gesture lifecycle
+            var page = new Page();
+            var btnNode = new LayerNode
+            {
+                Id = "interactive_btn",
+                Name = "Interactive Button",
+                Type = ElementType.Rectangle,
+                X = 50,
+                Y = 50,
+                Width = 100,
+                Height = 60,
+                IsVisible = true
+            };
+            page.Layers.Add(btnNode);
+            uint btnId = PropertyBinder.GetNumericNodeId(btnNode.Id);
+
+            var sceneGraph = new RetainedSceneGraph(new GpuRenderer());
+            sceneGraph.Synchronize(page);
+
+            var dispatcher = new InteractiveEventDispatcher();
+
+            // Hover enter
+            dispatcher.OnPointerMove(runtime, sceneGraph, new Point(70, 70));
+            Assert(dispatcher.LastHoverNodeId == btnId, "Dispatcher tracks hover enter on button");
+
+            // Hover exit
+            dispatcher.OnPointerMove(runtime, sceneGraph, new Point(10, 10));
+            Assert(dispatcher.LastHoverNodeId == 0u, "Dispatcher tracks hover exit away from button");
+
+            // Click gesture: PointerDown + PointerUp without move
+            dispatcher.OnPointerDown(runtime, sceneGraph, new Point(70, 70));
+            Assert(dispatcher.PointerDownNodeId == btnId, "PointerDown records down node ID");
+            Assert(!dispatcher.IsDragging, "Not dragging yet");
+
+            dispatcher.OnPointerUp(runtime, sceneGraph, new Point(70, 70));
+            Assert(dispatcher.PointerDownNodeId == 0u, "PointerUp clears pointer down node ID");
+
+            // Drag gesture: PointerDown + PointerMove > 4px
+            dispatcher.OnPointerDown(runtime, sceneGraph, new Point(70, 70));
+            dispatcher.OnPointerMove(runtime, sceneGraph, new Point(76, 70)); // dx = 6 > 4
+            Assert(dispatcher.IsDragging, "Dispatcher transitions to dragging when moving > 4px");
+
+            dispatcher.OnPointerUp(runtime, sceneGraph, new Point(76, 70));
+            Assert(!dispatcher.IsDragging, "PointerUp ends drag state");
+
+            dispatcher.Reset();
+            Assert(dispatcher.LastHoverNodeId == 0u && dispatcher.PointerDownNodeId == 0u && !dispatcher.IsDragging, "Reset clears all dispatcher state");
         }
     }
 }

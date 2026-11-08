@@ -279,12 +279,12 @@ namespace Kerf.Engine.Animation
 
         public void OnPointerEvent(uint targetNodeId, PointerEventKind kind)
         {
-            if (Definition.Listeners == null) return;
+            if (Definition == null || Definition.Listeners == null) return;
             List<ListenerAction> actionsToRun = new List<ListenerAction>();
             for (int i = 0; i < Definition.Listeners.Count; i++)
             {
                 NodeListener listener = Definition.Listeners[i];
-                if (listener != null && (listener.TargetNodeId == targetNodeId || listener.TargetNodeId == 0) && listener.Kind == kind && listener.Actions != null)
+                if (listener != null && listener.Enabled && (listener.TargetNodeId == targetNodeId || listener.TargetNodeId == 0) && listener.Kind == kind && listener.Actions != null)
                 {
                     actionsToRun.AddRange(listener.Actions);
                 }
@@ -294,25 +294,62 @@ namespace Kerf.Engine.Animation
             {
                 ListenerAction action = actionsToRun[a];
                 if (action == null) continue;
+                int inputIdx = action.InputIndex;
+                if (inputIdx < 0 && !string.IsNullOrEmpty(action.InputId) && Definition != null)
+                {
+                    inputIdx = Definition.GetInputIndex(action.InputId);
+                }
+
                 switch (action.Kind)
                 {
                     case ActionKind.SetBool:
-                        if (action.InputIndex >= 0 && action.InputIndex < Definition.Inputs.Count)
-                            SetBool(action.InputIndex, action.Parameter > 0.5);
+                        if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+                            SetBool(inputIdx, action.Parameter > 0.5);
                         else if (!string.IsNullOrEmpty(action.PropertyName))
                             SetBool(action.PropertyName, action.Parameter > 0.5);
                         break;
+                    case ActionKind.ToggleBool:
+                        if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null && Definition.Inputs[inputIdx].Kind == InputKind.Bool)
+                        {
+                            SetBool(inputIdx, Definition.Inputs[inputIdx].Value <= 0.5);
+                        }
+                        else if (!string.IsNullOrEmpty(action.PropertyName) && Definition != null)
+                        {
+                            var inp = Definition.FindInputById(action.PropertyName);
+                            if (inp != null && inp.Kind == InputKind.Bool)
+                            {
+                                SetBool(inp.InputId, inp.Value <= 0.5);
+                            }
+                        }
+                        break;
                     case ActionKind.SetNumber:
-                        if (action.InputIndex >= 0 && action.InputIndex < Definition.Inputs.Count)
-                            SetNumber(action.InputIndex, action.Parameter);
+                        if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+                            SetNumber(inputIdx, action.Parameter);
                         else if (!string.IsNullOrEmpty(action.PropertyName))
                             SetNumber(action.PropertyName, action.Parameter);
                         break;
-                    case ActionKind.Fire:
-                        if (action.InputIndex >= 0 && action.InputIndex < Definition.Inputs.Count)
-                            FireTrigger(action.InputIndex);
+                    case ActionKind.Fire: // ActionKind.FireTrigger is an alias (= 2)
+                        if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
+                            FireTrigger(inputIdx);
                         else if (!string.IsNullOrEmpty(action.PropertyName))
                             FireTrigger(action.PropertyName);
+                        break;
+                    case ActionKind.Reset:
+                        if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count && Definition.Inputs[inputIdx] != null)
+                        {
+                            var inp = Definition.Inputs[inputIdx];
+                            inp.Value = inp.InitialValue;
+                            inp.Fired = false;
+                        }
+                        else if (!string.IsNullOrEmpty(action.PropertyName) && Definition != null)
+                        {
+                            var inp = Definition.FindInputById(action.PropertyName);
+                            if (inp != null)
+                            {
+                                inp.Value = inp.InitialValue;
+                                inp.Fired = false;
+                            }
+                        }
                         break;
                     case ActionKind.SetViewModelBool:
                         SetViewModelBool(action.PropertyName, action.Parameter > 0.5);

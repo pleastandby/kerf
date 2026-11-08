@@ -55,6 +55,7 @@ namespace Kerf.Engine
             Children = new List<SceneVisualNode>();
             IsDirty = true;
             IsVisibleInViewport = true;
+            WorldBounds = modelNode != null ? modelNode.GetBounds() : Rect.Empty;
         }
 
         public void Invalidate()
@@ -492,7 +493,7 @@ namespace Kerf.Engine
             if (!vNode.ModelNode.IsVisible || vNode.ModelNode.IsLocked) return null;
 
             Point localPt = CanvasToLocalPoint(vNode.ModelNode, point);
-            var bounds = vNode.WorldBounds;
+            var bounds = vNode.WorldBounds.IsEmpty && vNode.ModelNode != null ? vNode.ModelNode.GetBounds() : vNode.WorldBounds;
             // Respect container clipping: if container clips content and point is outside, children cannot be hit
             if (vNode.ModelNode.ClipContent && !bounds.Contains(localPt)) return null;
 
