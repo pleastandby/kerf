@@ -137,8 +137,11 @@ namespace Kerf.Engine.Animation
         public const string INVALID_CLIP_REF = "INVALID_CLIP_REF";
         public const string TYPE_MISMATCH = "TYPE_MISMATCH";
         public const string DUPLICATE_ID = "DUPLICATE_ID";
+        public const string LISTENER_TYPE_MISMATCH = "LISTENER_TYPE_MISMATCH";
+        public const string LISTENER_UNBOUND_INPUT = "LISTENER_UNBOUND_INPUT";
+        public const string LISTENER_MISSING_TARGET = "LISTENER_MISSING_TARGET";
 
-        public static StateMachineValidationResult Validate(StateMachineDefinition def, IList<Clip> clips)
+        public static StateMachineValidationResult Validate(StateMachineDefinition def, IList<Clip> clips, ICollection<uint> validNodeIds = null)
         {
             StateMachineValidationResult result = new StateMachineValidationResult();
             if (def == null)
@@ -431,6 +434,121 @@ namespace Kerf.Engine.Animation
                             result.Issues.Add(new ValidationIssue(UNREACHABLE_STATE,
                                 string.Format("State '{0}' (Kind={1}) cannot be reached from Entry or Any states.", st.Name, st.Kind),
                                 ValidationSeverity.Warning, st.NodeId));
+                        }
+                    }
+                }
+            }
+
+            // 3. Validate Listeners
+            if (def.Listeners != null)
+            {
+                for (int l = 0; l < def.Listeners.Count; l++)
+                {
+                    NodeListener listener = def.Listeners[l];
+                    if (listener == null) continue;
+
+                    // LISTENER_MISSING_TARGET: target node ID does not exist in scene graph / document
+                    if (validNodeIds != null && validNodeIds.Count > 0 && listener.TargetNodeId != 0)
+                    {
+                        if (!validNodeIds.Contains(listener.TargetNodeId))
+                        {
+                            result.Issues.Add(new ValidationIssue(
+                                LISTENER_MISSING_TARGET,
+                                string.Format("Listener '{0}' targets node ID {1}, which does not exist in document or scene graph.", listener.ListenerId, listener.TargetNodeId),
+                                ValidationSeverity.Warning));
+                        }
+                    }
+
+                    if (listener.Actions == null) continue;
+
+                    for (int a = 0; a < listener.Actions.Count; a++)
+                    {
+                        ListenerAction action = listener.Actions[a];
+                        if (action == null) continue;
+
+                        // ViewModel actions target ViewModel properties, not MachineInputs
+                        if (action.Kind == ActionKind.SetViewModelBool ||
+                            action.Kind == ActionKind.SetViewModelNumber ||
+                            action.Kind == ActionKind.FireViewModelTrigger ||
+                            action.Kind == ActionKind.SetViewModelText)
+                        {
+                            continue;
+                        }
+
+                        // Resolve bound MachineInput
+                        MachineInput boundInput = null;
+                        if (def.Inputs != null)
+                        {
+                            if (!string.IsNullOrEmpty(action.InputId))
+                            {
+                                boundInput = def.FindInputById(action.InputId);
+                            }
+                            if (boundInput == null && !string.IsNullOrEmpty(action.PropertyName))
+                            {
+                                boundInput = def.FindInputById(action.PropertyName);
+                            }
+                            if (boundInput == null && action.InputIndex >= 0 && action.InputIndex < def.Inputs.Count)
+                            {
+                                boundInput = def.Inputs[action.InputIndex];
+                            }
+                        }
+
+                        // LISTENER_UNBOUND_INPUT: referenced input not found in Definition.Inputs
+                        if (boundInput == null)
+                        {
+                            result.Issues.Add(new ValidationIssue(
+                                LISTENER_UNBOUND_INPUT,
+                                string.Format("Listener '{0}' action {1} references missing or unbound input (Index={2}, InputId='{3}', PropertyName='{4}').",
+                                    listener.ListenerId, action.Kind, action.InputIndex, action.InputId, action.PropertyName),
+                                ValidationSeverity.Warning,
+                                null,
+                                null,
+                                !string.IsNullOrEmpty(action.InputId) ? action.InputId : action.PropertyName));
+                            continue;
+                        }
+
+                        // LISTENER_TYPE_MISMATCH: action kind conflicts with bound input type
+                        if (action.Kind == ActionKind.SetBool || action.Kind == ActionKind.ToggleBool)
+                        {
+                            if (boundInput.Kind != InputKind.Bool)
+                            {
+                                result.Issues.Add(new ValidationIssue(
+                                    LISTENER_TYPE_MISMATCH,
+                                    string.Format("Listener '{0}' action {1} targets input '{2}' of incompatible kind {3} (expected Bool).",
+                                        listener.ListenerId, action.Kind, boundInput.Name, boundInput.Kind),
+                                    ValidationSeverity.Error,
+                                    null,
+                                    null,
+                                    boundInput.InputId));
+                            }
+                        }
+                        else if (action.Kind == ActionKind.SetNumber)
+                        {
+                            if (boundInput.Kind != InputKind.Number)
+                            {
+                                result.Issues.Add(new ValidationIssue(
+                                    LISTENER_TYPE_MISMATCH,
+                                    string.Format("Listener '{0}' action SetNumber targets input '{1}' of incompatible kind {2} (expected Number).",
+                                        listener.ListenerId, boundInput.Name, boundInput.Kind),
+                                    ValidationSeverity.Error,
+                                    null,
+                                    null,
+                                    boundInput.InputId));
+                            }
+                        }
+                        else if (action.Kind == ActionKind.Fire) // ActionKind.FireTrigger is an alias (= 2)
+                        {
+                            if (boundInput.Kind != InputKind.Trigger)
+                            {
+                                result.Issues.Add(new ValidationIssue(
+                                    LISTENER_TYPE_MISMATCH,
+                                    string.Format("Listener '{0}' action FireTrigger targets input '{1}' of incompatible kind {2} (expected Trigger).",
+                                        listener.ListenerId, boundInput.Name, boundInput.Kind),
+                                    ValidationSeverity.Error,
+                                    null,
+                                    null,
+                                    boundInput.InputId));
+                            }
                         }
                     }
                 }

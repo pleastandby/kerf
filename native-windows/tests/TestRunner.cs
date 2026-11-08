@@ -96,6 +96,7 @@ namespace Kerf.Tests
             RunTest("Interactive Listeners & Centralized Event Dispatcher", TestInteractiveListenersAndCentralizedEventDispatcher);
             RunTest("Interrupted Transition Snapshot Blending & RenderTransform Isolation", TestInterruptedTransitionSnapshotBlending);
             RunTest("Deterministic Transition Priority, ExitTime Gating & Clip Playback", TestDeterministicTransitionPriorityExitTimeAndClipAdvancement);
+            RunTest("Non-Destructive StateMachineValidator Listener Diagnostics", TestStateMachineValidatorListenerDiagnostics);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -7759,6 +7760,125 @@ namespace Kerf.Tests
             speedRuntime.Update(0.1, pose);
             Assert(Math.Abs(speedRuntime.LayerRuntimes[0].CurTime.Time - 0.25) < 0.01,
                 string.Format("State speed 2.5x over dt=0.1 advances clip time by 0.25s, got {0}", speedRuntime.LayerRuntimes[0].CurTime.Time));
+        }
+
+        private static void TestStateMachineValidatorListenerDiagnostics()
+        {
+            List<Clip> clips = new List<Clip>();
+            clips.Add(new Clip(0, "Idle", 1.0, 60.0, LoopMode.Loop));
+
+            // 1. Setup clean baseline definition
+            StateMachineDefinition cleanDef = new StateMachineDefinition("CleanSM");
+            int bInput = cleanDef.AddInput(MachineInput.Bool("isHovered", false));
+            int nInput = cleanDef.AddInput(MachineInput.Number("score", 10.0));
+            int tInput = cleanDef.AddInput(MachineInput.Trigger("submit"));
+
+            MachineLayer layer = new MachineLayer("BaseLayer");
+            int sEntry = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int sIdle = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
+            layer.AddTransition(new StateTransition(sEntry, sIdle, 0.0));
+            cleanDef.AddLayer(layer);
+
+            // Valid listeners
+            NodeListener cleanL1 = new NodeListener(101u, PointerEventKind.PointerEnter);
+            cleanL1.Actions.Add(new ListenerAction(ActionKind.SetBool, bInput) { Parameter = 1.0 });
+            cleanDef.AddListener(cleanL1);
+
+            NodeListener cleanL2 = new NodeListener(101u, PointerEventKind.PointerDown);
+            cleanL2.Actions.Add(new ListenerAction(ActionKind.SetNumber, nInput) { Parameter = 42.0 });
+            cleanDef.AddListener(cleanL2);
+
+            NodeListener cleanL3 = new NodeListener(101u, PointerEventKind.Click);
+            cleanL3.Actions.Add(new ListenerAction(ActionKind.Fire, tInput));
+            cleanDef.AddListener(cleanL3);
+
+            HashSet<uint> sceneNodeIds = new HashSet<uint>();
+            sceneNodeIds.Add(101u);
+
+            var cleanResult = StateMachineValidator.Validate(cleanDef, clips, sceneNodeIds);
+            Assert(cleanResult.IsValid, "Clean definition with valid listeners must pass validation");
+            Assert(!cleanResult.HasErrors, "Clean definition has 0 errors");
+            Assert(!cleanResult.HasWarnings, "Clean definition has 0 warnings");
+
+            // 2. Test LISTENER_TYPE_MISMATCH (Error)
+            StateMachineDefinition typeMismatchDef = new StateMachineDefinition("MismatchSM");
+            int numOnly = typeMismatchDef.AddInput(MachineInput.Number("speed", 5.0));
+            int boolOnly = typeMismatchDef.AddInput(MachineInput.Bool("active", false));
+
+            MachineLayer mmLayer = new MachineLayer("Layer");
+            int mmEntry = mmLayer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int mmIdle = mmLayer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
+            mmLayer.AddTransition(new StateTransition(mmEntry, mmIdle, 0.0));
+            typeMismatchDef.AddLayer(mmLayer);
+
+            // Mismatch 1: SetBool targeting Number input
+            NodeListener badL1 = new NodeListener(101u, PointerEventKind.Click);
+            badL1.Actions.Add(new ListenerAction(ActionKind.SetBool, numOnly) { Parameter = 1.0 });
+            typeMismatchDef.AddListener(badL1);
+
+            // Mismatch 2: SetNumber targeting Bool input
+            NodeListener badL2 = new NodeListener(101u, PointerEventKind.PointerDown);
+            badL2.Actions.Add(new ListenerAction(ActionKind.SetNumber, boolOnly) { Parameter = 3.14 });
+            typeMismatchDef.AddListener(badL2);
+
+            // Mismatch 3: FireTrigger targeting Number input
+            NodeListener badL3 = new NodeListener(101u, PointerEventKind.PointerUp);
+            badL3.Actions.Add(new ListenerAction(ActionKind.Fire, numOnly));
+            typeMismatchDef.AddListener(badL3);
+
+            var mismatchResult = StateMachineValidator.Validate(typeMismatchDef, clips, sceneNodeIds);
+            Assert(mismatchResult.HasErrors, "Type mismatch definition must report errors");
+            Assert(mismatchResult.HasCode(StateMachineValidator.LISTENER_TYPE_MISMATCH), "Reports LISTENER_TYPE_MISMATCH");
+
+            int mismatchCount = 0;
+            for (int i = 0; i < mismatchResult.Issues.Count; i++)
+            {
+                if (mismatchResult.Issues[i] != null && mismatchResult.Issues[i].IssueCode == StateMachineValidator.LISTENER_TYPE_MISMATCH)
+                {
+                    mismatchCount++;
+                    Assert(mismatchResult.Issues[i].Severity == ValidationSeverity.Error, "LISTENER_TYPE_MISMATCH severity is Error");
+                }
+            }
+            Assert(mismatchCount == 3, string.Format("Expected 3 LISTENER_TYPE_MISMATCH errors, got {0}", mismatchCount));
+
+            // 3. Test LISTENER_UNBOUND_INPUT (Warning)
+            StateMachineDefinition unboundDef = new StateMachineDefinition("UnboundSM");
+            MachineLayer ubLayer = new MachineLayer("Layer");
+            int ubEntry = ubLayer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int ubIdle = ubLayer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
+            ubLayer.AddTransition(new StateTransition(ubEntry, ubIdle, 0.0));
+            unboundDef.AddLayer(ubLayer);
+
+            NodeListener unboundL = new NodeListener(101u, PointerEventKind.Click);
+            unboundL.Actions.Add(new ListenerAction(ActionKind.SetBool, -1) { InputId = "non_existent_input_id" });
+            unboundDef.AddListener(unboundL);
+
+            var unboundResult = StateMachineValidator.Validate(unboundDef, clips, sceneNodeIds);
+            Assert(unboundResult.HasWarnings, "Unbound input references must report warnings");
+            Assert(unboundResult.HasCode(StateMachineValidator.LISTENER_UNBOUND_INPUT), "Reports LISTENER_UNBOUND_INPUT");
+
+            // 4. Test LISTENER_MISSING_TARGET (Warning)
+            StateMachineDefinition missingTargetDef = new StateMachineDefinition("MissingTargetSM");
+            int mtInput = missingTargetDef.AddInput(MachineInput.Bool("flag", false));
+            MachineLayer mtLayer = new MachineLayer("Layer");
+            int mtEntry = mtLayer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int mtIdle = mtLayer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
+            mtLayer.AddTransition(new StateTransition(mtEntry, mtIdle, 0.0));
+            missingTargetDef.AddLayer(mtLayer);
+
+            NodeListener missingTargetL = new NodeListener(9999u, PointerEventKind.PointerEnter); // 9999 not in sceneNodeIds
+            missingTargetL.Actions.Add(new ListenerAction(ActionKind.SetBool, mtInput));
+            missingTargetDef.AddListener(missingTargetL);
+
+            var targetResult = StateMachineValidator.Validate(missingTargetDef, clips, sceneNodeIds);
+            Assert(targetResult.HasWarnings, "Missing target node must report warning");
+            Assert(targetResult.HasCode(StateMachineValidator.LISTENER_MISSING_TARGET), "Reports LISTENER_MISSING_TARGET");
+
+            // 5. Enforce Non-Destructive Validation Contract:
+            // Definition structures MUST remain completely unmodified
+            Assert(missingTargetDef.Listeners.Count == 1, "Listeners list count preserved without deletions");
+            Assert(missingTargetDef.Listeners[0].Actions.Count == 1, "Listener actions list preserved without deletions");
+            Assert(missingTargetDef.Inputs.Count == 1, "Inputs preserved");
         }
     }
 }
