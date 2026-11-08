@@ -2739,6 +2739,75 @@ namespace Kerf.Engine
         }
     }
 
+    public class BatchModifyTransitionsCommand : ICommand
+    {
+        public string Description
+        {
+            get { return string.Format("Modify {0} Transition(s)", _records.Count); }
+        }
+
+        private struct Record
+        {
+            public StateTransition Transition;
+            public TransitionSnapshot OldSnapshot;
+            public TransitionSnapshot NewSnapshot;
+        }
+
+        private readonly List<Record> _records;
+        private readonly Action _onChanged;
+
+        public BatchModifyTransitionsCommand(IEnumerable<KeyValuePair<StateTransition, KeyValuePair<TransitionSnapshot, TransitionSnapshot>>> entries, Action onChanged = null)
+        {
+            _records = new List<Record>();
+            _onChanged = onChanged;
+            if (entries != null)
+            {
+                foreach (var kvp in entries)
+                {
+                    if (kvp.Key == null) continue;
+                    _records.Add(new Record
+                    {
+                        Transition = kvp.Key,
+                        OldSnapshot = kvp.Value.Key != null ? kvp.Value.Key.Clone() : null,
+                        NewSnapshot = kvp.Value.Value != null ? kvp.Value.Value.Clone() : null
+                    });
+                }
+            }
+        }
+
+        private void Apply(bool forward)
+        {
+            for (int i = 0; i < _records.Count; i++)
+            {
+                var r = _records[i];
+                var s = forward ? r.NewSnapshot : r.OldSnapshot;
+                if (r.Transition == null || s == null) continue;
+                r.Transition.Duration = s.Duration;
+                r.Transition.ExitTime = s.ExitTime;
+                r.Transition.Interrupt = s.Interrupt;
+                r.Transition.PauseSourceWhenExiting = s.PauseSourceWhenExiting;
+                r.Transition.AllowExitDuringTransition = s.AllowExitDuringTransition;
+                r.Transition.Interpolation = s.Interpolation;
+                r.Transition.X1 = s.X1;
+                r.Transition.Y1 = s.Y1;
+                r.Transition.X2 = s.X2;
+                r.Transition.Y2 = s.Y2;
+            }
+        }
+
+        public void Execute()
+        {
+            Apply(true);
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            Apply(false);
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
     public class CreateInputCommand : ICommand
     {
         public string Description

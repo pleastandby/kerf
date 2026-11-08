@@ -272,7 +272,7 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < Definition.Listeners.Count; i++)
             {
                 NodeListener listener = Definition.Listeners[i];
-                if (listener != null && listener.TargetNodeId == targetNodeId && listener.Kind == kind && listener.Actions != null)
+                if (listener != null && (listener.TargetNodeId == targetNodeId || listener.TargetNodeId == 0) && listener.Kind == kind && listener.Actions != null)
                 {
                     actionsToRun.AddRange(listener.Actions);
                 }
@@ -285,13 +285,22 @@ namespace Kerf.Engine.Animation
                 switch (action.Kind)
                 {
                     case ActionKind.SetBool:
-                        SetBool(action.InputIndex, action.Parameter > 0.5);
+                        if (action.InputIndex >= 0 && action.InputIndex < Definition.Inputs.Count)
+                            SetBool(action.InputIndex, action.Parameter > 0.5);
+                        else if (!string.IsNullOrEmpty(action.PropertyName))
+                            SetBool(action.PropertyName, action.Parameter > 0.5);
                         break;
                     case ActionKind.SetNumber:
-                        SetNumber(action.InputIndex, action.Parameter);
+                        if (action.InputIndex >= 0 && action.InputIndex < Definition.Inputs.Count)
+                            SetNumber(action.InputIndex, action.Parameter);
+                        else if (!string.IsNullOrEmpty(action.PropertyName))
+                            SetNumber(action.PropertyName, action.Parameter);
                         break;
                     case ActionKind.Fire:
-                        FireTrigger(action.InputIndex);
+                        if (action.InputIndex >= 0 && action.InputIndex < Definition.Inputs.Count)
+                            FireTrigger(action.InputIndex);
+                        else if (!string.IsNullOrEmpty(action.PropertyName))
+                            FireTrigger(action.PropertyName);
                         break;
                     case ActionKind.SetViewModelBool:
                         SetViewModelBool(action.PropertyName, action.Parameter > 0.5);

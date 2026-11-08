@@ -110,3 +110,13 @@ Successfully executed Plan 06-04, delivering clean slate initial state machines,
    - Verified DurationMs, PauseSourceWhenExiting, AllowExitDuringTransition, Caption, and StateType property reflections and snapshot roundtrips.
    - Verified transactional deletion and restoration of states and transitions.
    - Full test suite passed: **63 Passed, 0 Failed**.
+
+8. **Animation Prompt, Context Menu, Canvas Deselection, Transition Marquee Multiselect & Easing Presets:**
+   - **Clip Creation Dialog (`ShowCreateAnimationClipDialog`):** Interactive modal prompt before adding a clip with `State Name`, `Behaviour` (`Loop`, `Once (OneShot)`, `PingPong`), and `Duration (s)`.
+   - **Context Menu & Renaming (`ShowAnimationClipContextMenu`):** Right-clicking an animation card opens context menu with `✎ Rename Animation...`, `▶ Open in Timeline`, `+ Add as State to Canvas`, and `✕ Delete Animation`. Inline double-click and pencil icon also allow immediate renaming with live canvas synchronization.
+   - **Empty Canvas Click Deselect:** Clicking background empty space on canvas or scroll viewer immediately deselects all selected states and transitions via `ClearGraphSelection()`.
+   - **Marquee Selection of Transitions:** Dragging a selection rectangle intersects cubic Bézier wires and badges, adding transitions (including bidirectional forward/reverse pairs) to multi-selection.
+   - **Multi-Transition Inspector (`BuildMultiTransitionRightPanelInspector`):** Batch editing Duration (ms), Exit time, Pause source when exiting, and Allow exit during transition across all selected transitions with atomic undo/redo via `BatchModifyTransitionsCommand`.
+   - **Transition Interpolation Presets:** Fixed presets application so clicking any of the 6 quick presets (`Hold`, `Linear`, `Ease In Out`, `Ease Out`, `Ease In`, `Spring`) or 21 presets from `Presets [21]` immediately applies easing curves to all selected transitions.
+   - **Automated Verification Test #64:** Added `TestStateMachineBatchTransitionsPresetsMultiselectAndClipRenaming`. All **64 tests pass cleanly, 0 failures**.
+

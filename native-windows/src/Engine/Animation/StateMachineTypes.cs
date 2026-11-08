@@ -700,6 +700,22 @@ namespace Kerf.Engine.Animation
         }
     }
 
+    public class MachineFocusTarget
+    {
+        public uint TargetNodeId { get; set; }
+        public string TargetName { get; set; }
+        public string Mode { get; set; }
+
+        public MachineFocusTarget() : this(0, "Canvas", "Click") { }
+
+        public MachineFocusTarget(uint targetNodeId, string targetName, string mode)
+        {
+            TargetNodeId = targetNodeId;
+            TargetName = targetName ?? "Target";
+            Mode = mode ?? "Click";
+        }
+    }
+
     public enum ViewModelPropertyKind
     {
         Boolean = 0,
@@ -852,6 +868,7 @@ namespace Kerf.Engine.Animation
         public List<ViewModelPropertyDefinition> ViewModelProperties { get; set; }
         public List<MachineLayer> Layers { get; set; }
         public List<NodeListener> Listeners { get; set; }
+        public List<MachineFocusTarget> FocusTargets { get; set; }
 
         public StateMachineDefinition() : this("StateMachine") { }
 
@@ -864,6 +881,7 @@ namespace Kerf.Engine.Animation
             ViewModelProperties = new List<ViewModelPropertyDefinition>();
             Layers = new List<MachineLayer>();
             Listeners = new List<NodeListener>();
+            FocusTargets = new List<MachineFocusTarget>();
         }
 
         public int AddInput(MachineInput input)

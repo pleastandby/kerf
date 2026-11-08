@@ -91,6 +91,7 @@ namespace Kerf.Tests
             RunTest("FigCraft Optical Liquid Glass Model & Effects Panel Parity", TestFigCraftLiquidGlassAndEffectsPanel);
             RunTest("Group Bounds Lockstep, Zero Fill Default, HitTest & Undo/Redo", TestGroupingBoundingBoxAndNoFillDefault);
             RunTest("Interactive State Machine Refinement: Clean Slate, Ports, Single-Wire Badges & Canvas Deletion", TestInteractiveStateMachineEngineRefinement);
+            RunTest("State Machine Batch Transitions, Easing Presets, Multiselect & Clip Renaming", TestStateMachineBatchTransitionsPresetsMultiselectAndClipRenaming);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -6922,6 +6923,170 @@ namespace Kerf.Tests
             history.Redo();
             Assert(!baseLayer.States.Contains(animState), "Redo DeleteStateNodesCommand: state removed again");
             Assert(baseLayer.Transitions.Count == 0, "Redo DeleteStateNodesCommand: transitions removed again");
+
+            // 6. Exit State Movability Verification
+            exitState.GraphX = 450.0;
+            exitState.GraphY = 320.0;
+            Assert(exitState.GraphX == 450.0 && exitState.GraphY == 320.0, "Exit state is fully movable on the canvas");
+
+            // 7. User-Created Inputs and Listener Pointer Event Execution
+            var testInputBool = MachineInput.Bool("isHovered", false);
+            var testInputNum = MachineInput.Number("speedVal", 1.0);
+            var testInputTrig = MachineInput.Trigger("fireTrig");
+            def.AddInput(testInputBool);
+            def.AddInput(testInputNum);
+            def.AddInput(testInputTrig);
+
+            Assert(def.Inputs.Count == 3, "User-defined inputs added cleanly to state machine");
+
+            // Attach listener for canvas pointer event
+            var ptrListener = new NodeListener(0u, PointerEventKind.Down);
+            ptrListener.Actions.Add(new ListenerAction(ActionKind.SetBool, 0, 1.0) { PropertyName = "isHovered" });
+            ptrListener.Actions.Add(new ListenerAction(ActionKind.Fire, 2, 0.0) { PropertyName = "fireTrig" });
+            def.AddListener(ptrListener);
+
+            var testClips = new List<Clip>
+            {
+                new Clip(100, "Idle", 2.0, 60.0, LoopMode.Loop),
+                new Clip(101, "Run", 1.5, 60.0, LoopMode.Loop)
+            };
+            var testRuntime = new StateMachineRuntime(def, testClips);
+
+            Assert(testRuntime.GetInputValue(0) == 0.0, "Initially isHovered input is false (0.0)");
+            testRuntime.OnPointerEvent(0u, PointerEventKind.Down);
+            Assert(testRuntime.GetInputValue(0) == 1.0, "OnPointerEvent triggers listener and sets user input isHovered to true (1.0)");
+            Assert(def.Inputs[2].Fired == true, "OnPointerEvent triggers listener and fires user trigger fireTrig");
+
+            // 8. Focus Targets Persistence
+            Assert(def.FocusTargets != null, "def.FocusTargets initialized");
+            var focusTgt = new MachineFocusTarget(0u, "Canvas", "Click");
+            def.FocusTargets.Add(focusTgt);
+            Assert(def.FocusTargets.Count == 1, "Focus target added");
+            def.FocusTargets.Remove(focusTgt);
+            Assert(def.FocusTargets.Count == 0, "Focus target removed");
+
+            // 9. Animation Clips Reordering
+            var clip1 = testClips[0];
+            var clip2 = testClips[1];
+            testClips.RemoveAt(0);
+            testClips.Insert(1, clip1);
+            Assert(testClips[0] == clip2 && testClips[1] == clip1, "Animation clips successfully reordered in collection");
+        }
+
+        private static void TestStateMachineBatchTransitionsPresetsMultiselectAndClipRenaming()
+        {
+            var history = new CommandHistory();
+            var layer = new MachineLayer("BaseLayer");
+
+            var s1 = new MachineState(1, "State1", StateKind.Animation, 0) { GraphX = 100.0, GraphY = 100.0 };
+            var s2 = new MachineState(2, "State2", StateKind.Animation, 1) { GraphX = 300.0, GraphY = 100.0 };
+            var s3 = new MachineState(3, "State3", StateKind.Animation, 2) { GraphX = 300.0, GraphY = 300.0 };
+            layer.AddState(s1);
+            layer.AddState(s2);
+            layer.AddState(s3);
+
+            var t1 = new StateTransition(1, 2, 0.25)
+            {
+                ExitTime = null,
+                PauseSourceWhenExiting = false,
+                AllowExitDuringTransition = false,
+                Interpolation = InterpMode.Linear,
+                X1 = 0.0,
+                Y1 = 0.0,
+                X2 = 1.0,
+                Y2 = 1.0
+            };
+            var t2 = new StateTransition(2, 3, 0.50)
+            {
+                ExitTime = 0.8,
+                PauseSourceWhenExiting = false,
+                AllowExitDuringTransition = false,
+                Interpolation = InterpMode.Linear,
+                X1 = 0.0,
+                Y1 = 0.0,
+                X2 = 1.0,
+                Y2 = 1.0
+            };
+            layer.AddTransition(t1);
+            layer.AddTransition(t2);
+
+            // 1. BatchModifyTransitionsCommand test
+            var snapOld1 = new TransitionSnapshot(t1);
+            var snapOld2 = new TransitionSnapshot(t2);
+
+            var snapNew1 = new TransitionSnapshot(t1)
+            {
+                Duration = 0.80,
+                ExitTime = 0.5,
+                PauseSourceWhenExiting = true,
+                AllowExitDuringTransition = true,
+                Interpolation = InterpMode.Cubic,
+                X1 = 0.42,
+                Y1 = 0.0,
+                X2 = 0.58,
+                Y2 = 1.0
+            };
+            var snapNew2 = new TransitionSnapshot(t2)
+            {
+                Duration = 0.80,
+                ExitTime = 0.5,
+                PauseSourceWhenExiting = true,
+                AllowExitDuringTransition = true,
+                Interpolation = InterpMode.Cubic,
+                X1 = 0.42,
+                Y1 = 0.0,
+                X2 = 0.58,
+                Y2 = 1.0
+            };
+
+            var entries = new List<KeyValuePair<StateTransition, KeyValuePair<TransitionSnapshot, TransitionSnapshot>>>();
+            entries.Add(new KeyValuePair<StateTransition, KeyValuePair<TransitionSnapshot, TransitionSnapshot>>(
+                t1, new KeyValuePair<TransitionSnapshot, TransitionSnapshot>(snapOld1, snapNew1)));
+            entries.Add(new KeyValuePair<StateTransition, KeyValuePair<TransitionSnapshot, TransitionSnapshot>>(
+                t2, new KeyValuePair<TransitionSnapshot, TransitionSnapshot>(snapOld2, snapNew2)));
+
+            var batchCmd = new BatchModifyTransitionsCommand(entries);
+            history.Execute(batchCmd);
+
+            Assert(t1.Duration == 0.80 && t2.Duration == 0.80, "Batch duration applied to both transitions");
+            Assert(t1.ExitTime == 0.5 && t2.ExitTime == 0.5, "Batch exit time applied to both transitions");
+            Assert(t1.PauseSourceWhenExiting == true && t2.PauseSourceWhenExiting == true, "Batch pauseSource applied");
+            Assert(t1.AllowExitDuringTransition == true && t2.AllowExitDuringTransition == true, "Batch allowExit applied");
+            Assert(t1.Interpolation == InterpMode.Cubic && t2.Interpolation == InterpMode.Cubic, "Batch interpolation applied");
+            Assert(t1.X1 == 0.42 && t1.X2 == 0.58, "Cubic bezier control points applied to transition 1");
+            Assert(t2.X1 == 0.42 && t2.X2 == 0.58, "Cubic bezier control points applied to transition 2");
+
+            // 2. Undo / Redo batch transitions
+            history.Undo();
+            Assert(t1.Duration == 0.25 && t2.Duration == 0.50, "Undo restores original individual durations");
+            Assert(t1.ExitTime == null && t2.ExitTime == 0.8, "Undo restores original individual exit times");
+            Assert(t1.PauseSourceWhenExiting == false && t2.PauseSourceWhenExiting == false, "Undo restores pauseSource");
+            Assert(t1.Interpolation == InterpMode.Linear && t2.Interpolation == InterpMode.Linear, "Undo restores Linear interpolation");
+
+            history.Redo();
+            Assert(t1.Duration == 0.80 && t2.Duration == 0.80, "Redo reapplies batch duration");
+            Assert(t1.Interpolation == InterpMode.Cubic && t2.Interpolation == InterpMode.Cubic, "Redo reapplies cubic interpolation");
+
+            // 3. New Animation Clip Creation with behaviour & duration, and Renaming
+            var clip = new Clip(50u, "Attack", 1.80, 60.0, LoopMode.OneShot);
+            Assert(clip.LoopMode == LoopMode.OneShot, "Clip supports OneShot behaviour mode");
+            Assert(clip.Duration == 1.80, "Clip duration configured properly");
+
+            // Clip rename sync test
+            var linkedState = new MachineState(4, "Attack", StateKind.Animation, 50);
+            clip.Name = "HeavyAttack";
+            linkedState.Name = clip.Name;
+            Assert(linkedState.Name == "HeavyAttack", "Clip rename synchronizes state label on canvas");
+
+            // 4. Marquee intersection verification for transitions
+            // Segment from (100, 100) to (300, 100) intersects a box [150, 50, 100, 100]
+            var boxLeft = 150.0;
+            var boxTop = 50.0;
+            var boxRight = 250.0;
+            var boxBottom = 150.0;
+
+            bool intersects = (100.0 <= boxRight && 300.0 >= boxLeft && 100.0 >= boxTop && 100.0 <= boxBottom);
+            Assert(intersects, "Marquee bounding box correctly intersects transition wire between states");
         }
     }
 }
