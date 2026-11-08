@@ -95,6 +95,7 @@ namespace Kerf.Tests
             RunTest("State Machine Persistence & Smooth Rest-Pose Transition Blending", TestStateMachinePersistenceAndSmoothTransitionBlending);
             RunTest("Interactive Listeners & Centralized Event Dispatcher", TestInteractiveListenersAndCentralizedEventDispatcher);
             RunTest("Interrupted Transition Snapshot Blending & RenderTransform Isolation", TestInterruptedTransitionSnapshotBlending);
+            RunTest("Deterministic Transition Priority, ExitTime Gating & Clip Playback", TestDeterministicTransitionPriorityExitTimeAndClipAdvancement);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -7632,6 +7633,132 @@ namespace Kerf.Tests
             Assert(testLayer.RenderTransform != null, "RenderTransform allocated");
             Assert(Math.Abs(testLayer.RenderTransform.TranslationX - (400.0 - 50.0)) < 0.01, "RenderTransform TranslationX holds animated offset");
             Assert(Math.Abs(testLayer.Opacity - 0.0) < 0.01, "Layer visual Opacity updated from pose");
+        }
+
+        private static void TestDeterministicTransitionPriorityExitTimeAndClipAdvancement()
+        {
+            // =========================================================================
+            // 1. Transition Priority Resolution per D-05
+            // =========================================================================
+            List<Clip> clips = new List<Clip>();
+            Clip c0 = new Clip(0, "Clip0", 2.0, 60.0, LoopMode.Loop);
+            Clip c1 = new Clip(1, "Clip1", 2.0, 60.0, LoopMode.Loop);
+            Clip c2 = new Clip(2, "Clip2", 2.0, 60.0, LoopMode.Loop);
+            clips.Add(c0);
+            clips.Add(c1);
+            clips.Add(c2);
+
+            StateMachineDefinition priorityDef = new StateMachineDefinition("PriorityMachine");
+            int boolTrigger = priorityDef.AddInput(MachineInput.Bool("fireAll", false));
+
+            MachineLayer prioLayer = new MachineLayer("PrioLayer");
+            int stateA = prioLayer.AddState(new MachineState(0, "StateA", StateKind.Animation, 0));
+            int stateB = prioLayer.AddState(new MachineState(1, "StateB", StateKind.Animation, 1));
+            int stateC = prioLayer.AddState(new MachineState(2, "StateC", StateKind.Animation, 2));
+            int stateAny = prioLayer.AddState(new MachineState(3, "AnyState", StateKind.Any, -1));
+
+            // Outgoing transition from current state A -> B (Condition: boolTrigger == 1.0)
+            StateTransition transFromCurrent = new StateTransition(stateA, stateB, 0.5);
+            transFromCurrent.WithCondition(new TransitionCondition(boolTrigger, ConditionOp.Eq, 1.0));
+
+            // Outgoing transition from Any state -> C (Condition: boolTrigger == 1.0)
+            StateTransition transFromAny = new StateTransition(stateAny, stateC, 0.5);
+            transFromAny.WithCondition(new TransitionCondition(boolTrigger, ConditionOp.Eq, 1.0));
+
+            // Even if AnyState transition is added FIRST in layer.Transitions:
+            prioLayer.AddTransition(transFromAny);
+            prioLayer.AddTransition(transFromCurrent);
+            priorityDef.AddLayer(prioLayer);
+
+            StateMachineRuntime prioRuntime = new StateMachineRuntime(priorityDef, clips);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            prioRuntime.Update(0.0, pose);
+            Assert(prioRuntime.LayerRuntimes[0].CurrentState == stateA, "Initial state is StateA");
+
+            // Trigger both conditions simultaneously
+            prioRuntime.SetBool(boolTrigger, true);
+            prioRuntime.Update(0.016, pose);
+
+            // Per D-05: current state transitions MUST be chosen over AnyState transitions
+            Assert(prioRuntime.LayerRuntimes[0].ActiveTransition != null, "Transition triggered");
+            Assert(prioRuntime.LayerRuntimes[0].ActiveTransition.ToState == stateB,
+                "Current state transition (A -> B) takes priority over AnyState transition (Any -> C) per D-05");
+
+            // =========================================================================
+            // 2. ExitTime Normalized Threshold Gating per RUNTIME-01
+            // =========================================================================
+            StateMachineDefinition exitDef = new StateMachineDefinition("ExitTimeMachine");
+            MachineLayer exitLayer = new MachineLayer("ExitLayer");
+            int eA = exitLayer.AddState(new MachineState(0, "FromState", StateKind.Animation, 0)); // Clip 0: Duration = 2.0s
+            int eB = exitLayer.AddState(new MachineState(1, "ToState", StateKind.Animation, 1));
+
+            // Transition with ExitTime = 0.8 (requires 80% normalized time through clip = 1.6s)
+            StateTransition exitTrans = new StateTransition(eA, eB, 0.2);
+            exitTrans.ExitTime = 0.8;
+            exitLayer.AddTransition(exitTrans);
+            exitDef.AddLayer(exitLayer);
+
+            StateMachineRuntime exitRuntime = new StateMachineRuntime(exitDef, clips);
+            exitRuntime.Update(0.0, pose);
+            Assert(exitRuntime.LayerRuntimes[0].CurrentState == eA, "Starts in FromState");
+            Assert(exitRuntime.LayerRuntimes[0].ActiveTransition == null, "No transition active yet");
+
+            // Advance 0.5s: progress = 0.5s / 2.0s = 0.25 (< 0.80)
+            exitRuntime.Update(0.5, pose);
+            Assert(exitRuntime.LayerRuntimes[0].ActiveTransition == null, "ExitTime 0.8 blocks transition at progress 0.25");
+
+            // Advance another 0.5s: total 1.0s, progress = 1.0s / 2.0s = 0.50 (< 0.80)
+            exitRuntime.Update(0.5, pose);
+            Assert(exitRuntime.LayerRuntimes[0].ActiveTransition == null, "ExitTime 0.8 blocks transition at progress 0.50");
+
+            // Advance 0.65s: total 1.65s, progress = 1.65s / 2.0s = 0.825 (>= 0.80)
+            exitRuntime.Update(0.65, pose);
+            Assert(exitRuntime.LayerRuntimes[0].ActiveTransition != null, "ExitTime threshold (0.80) reached at progress 0.825 -> transition fires automatically");
+            Assert(exitRuntime.LayerRuntimes[0].ActiveTransition.ToState == eB, "Transition targets eB");
+
+            // =========================================================================
+            // 3. Clip Playback Advancement, Speeds & Loop Modes per TRANS-EXEC-01
+            // =========================================================================
+            ClipInstance instOneShot = new ClipInstance(0);
+            instOneShot.Speed = 1.0;
+            // Advance OneShot
+            bool done1 = instOneShot.Advance(0.6, 1.0, LoopMode.OneShot);
+            Assert(Math.Abs(instOneShot.Time - 0.6) < 0.001 && !done1, "OneShot advances to 0.6");
+            bool done2 = instOneShot.Advance(0.6, 1.0, LoopMode.OneShot);
+            Assert(Math.Abs(instOneShot.Time - 1.0) < 0.001 && done2, "OneShot clamps at duration 1.0 and marks completed");
+
+            // Advance Loop
+            ClipInstance instLoop = new ClipInstance(0);
+            instLoop.Speed = 1.0;
+            instLoop.Advance(0.6, 1.0, LoopMode.Loop);
+            Assert(Math.Abs(instLoop.Time - 0.6) < 0.001, "Loop advances to 0.6");
+            instLoop.Advance(0.6, 1.0, LoopMode.Loop);
+            Assert(Math.Abs(instLoop.Time - 0.2) < 0.001, "Loop wraps to 0.2 after duration 1.0");
+
+            // Advance PingPong
+            ClipInstance instPingPong = new ClipInstance(0);
+            instPingPong.Speed = 1.0;
+            instPingPong.Advance(0.6, 1.0, LoopMode.PingPong);
+            Assert(Math.Abs(instPingPong.Time - 0.6) < 0.001 && instPingPong.Direction == 1, "PingPong advances forward to 0.6");
+            instPingPong.Advance(0.6, 1.0, LoopMode.PingPong);
+            Assert(Math.Abs(instPingPong.Time - 0.8) < 0.001 && instPingPong.Direction == -1, "PingPong bounces at 1.0 and reverses to 0.8 (Direction = -1)");
+            instPingPong.Advance(0.3, 1.0, LoopMode.PingPong);
+            Assert(Math.Abs(instPingPong.Time - 0.5) < 0.001 && instPingPong.Direction == -1, "PingPong continues in reverse to 0.5");
+            instPingPong.Advance(0.6, 1.0, LoopMode.PingPong);
+            Assert(Math.Abs(instPingPong.Time - 0.1) < 0.001 && instPingPong.Direction == 1, "PingPong bounces at 0.0 and moves forward to 0.1 (Direction = 1)");
+
+            // State Speed Multiplier
+            StateMachineDefinition speedDef = new StateMachineDefinition("SpeedMachine");
+            MachineLayer speedLayer = new MachineLayer("SpeedLayer");
+            MachineState fastState = new MachineState(0, "FastState", StateKind.Animation, 0);
+            fastState.Speed = 2.5; // 2.5x speed
+            speedLayer.AddState(fastState);
+            speedDef.AddLayer(speedLayer);
+
+            StateMachineRuntime speedRuntime = new StateMachineRuntime(speedDef, clips);
+            speedRuntime.Update(0.1, pose);
+            Assert(Math.Abs(speedRuntime.LayerRuntimes[0].CurTime.Time - 0.25) < 0.01,
+                string.Format("State speed 2.5x over dt=0.1 advances clip time by 0.25s, got {0}", speedRuntime.LayerRuntimes[0].CurTime.Time));
         }
     }
 }

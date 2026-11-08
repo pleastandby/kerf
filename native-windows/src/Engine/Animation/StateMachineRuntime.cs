@@ -405,22 +405,38 @@ namespace Kerf.Engine.Animation
                 }
             }
 
-            // Ordered candidate search: transitions from current state first, then Any state
+            // Ordered candidate search per D-05:
+            // 1. Outgoing transitions from current state in declaration order
+            // 2. Outgoing transitions from Any state in declaration order (fallback)
             List<StateTransition> candidates = new List<StateTransition>();
             for (int t = 0; t < layer.Transitions.Count; t++)
             {
-                if (layer.Transitions[t].FromState == currentState)
+                StateTransition trans = layer.Transitions[t];
+                if (trans == null) continue;
+                int fromIdx = trans.FromState;
+                if (fromIdx < 0 && !string.IsNullOrEmpty(trans.FromStateId))
                 {
-                    candidates.Add(layer.Transitions[t]);
+                    fromIdx = layer.GetStateIndex(trans.FromStateId);
+                }
+                if (fromIdx == currentState)
+                {
+                    candidates.Add(trans);
                 }
             }
             if (anyStateIdx >= 0)
             {
                 for (int t = 0; t < layer.Transitions.Count; t++)
                 {
-                    if (layer.Transitions[t].FromState == anyStateIdx)
+                    StateTransition trans = layer.Transitions[t];
+                    if (trans == null) continue;
+                    int fromIdx = trans.FromState;
+                    if (fromIdx < 0 && !string.IsNullOrEmpty(trans.FromStateId))
                     {
-                        candidates.Add(layer.Transitions[t]);
+                        fromIdx = layer.GetStateIndex(trans.FromStateId);
+                    }
+                    if (fromIdx == anyStateIdx)
+                    {
+                        candidates.Add(trans);
                     }
                 }
             }
@@ -430,16 +446,29 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < candidates.Count; i++)
             {
                 StateTransition trans = candidates[i];
-                if (trans.ToState < 0 || trans.ToState >= layer.States.Count) continue;
+                if (trans == null) continue;
+
+                int toIdx = trans.ToState;
+                if (toIdx < 0 && !string.IsNullOrEmpty(trans.ToStateId))
+                {
+                    toIdx = layer.GetStateIndex(trans.ToStateId);
+                }
+                if (toIdx < 0 || toIdx >= layer.States.Count) continue;
+
+                int fromIdx = trans.FromState;
+                if (fromIdx < 0 && !string.IsNullOrEmpty(trans.FromStateId))
+                {
+                    fromIdx = layer.GetStateIndex(trans.FromStateId);
+                }
 
                 // Avoid self-restart loop if from Any to current
-                if (anyStateIdx >= 0 && trans.FromState == anyStateIdx && trans.ToState == currentState)
+                if (anyStateIdx >= 0 && fromIdx == anyStateIdx && toIdx == currentState)
                 {
                     continue;
                 }
 
                 // If currently transitioning, do not interrupt with the same target state
-                if (activeTransitionToState >= 0 && trans.ToState == activeTransitionToState)
+                if (activeTransitionToState >= 0 && toIdx == activeTransitionToState)
                 {
                     continue;
                 }
@@ -482,8 +511,9 @@ namespace Kerf.Engine.Animation
                     if (curState.Kind == StateKind.Animation && curState.ClipIndex >= 0 && curState.ClipIndex < Clips.Count)
                     {
                         Clip clip = Clips[curState.ClipIndex];
-                        double stateSpeed = (curState.Speed > 0.0 || curState.Speed < 0.0) ? curState.Speed : 1.0;
-                        layerRt.CurTime.Advance(dt * stateSpeed, clip.Duration, curState.Loop ? clip.LoopMode : LoopMode.OneShot);
+                        double stateSpeed = (Math.Abs(curState.Speed) < 0.0001) ? 1.0 : curState.Speed;
+                        LoopMode loopMode = !curState.Loop ? LoopMode.OneShot : clip.LoopMode;
+                        layerRt.CurTime.Advance(dt * stateSpeed, clip.Duration, loopMode);
                         needsRedraw = true;
                     }
                 }
@@ -501,8 +531,9 @@ namespace Kerf.Engine.Animation
                         if (toState.Kind == StateKind.Animation && toState.ClipIndex >= 0 && toState.ClipIndex < Clips.Count)
                         {
                             Clip clip = Clips[toState.ClipIndex];
-                            double toStateSpeed = (toState.Speed > 0.0 || toState.Speed < 0.0) ? toState.Speed : 1.0;
-                            layerRt.ActiveTransition.ToTime.Advance(dt * toStateSpeed, clip.Duration, toState.Loop ? clip.LoopMode : LoopMode.OneShot);
+                            double toStateSpeed = (Math.Abs(toState.Speed) < 0.0001) ? 1.0 : toState.Speed;
+                            LoopMode toLoopMode = !toState.Loop ? LoopMode.OneShot : clip.LoopMode;
+                            layerRt.ActiveTransition.ToTime.Advance(dt * toStateSpeed, clip.Duration, toLoopMode);
                         }
                     }
                 }
