@@ -14106,7 +14106,7 @@ namespace Kerf.UI
             };
             _timelineLoopText = new TextBlock
             {
-                Text = "🔁 Loop: All",
+                Text = "🔁 Loop: Once",
                 FontSize = 11,
                 Foreground = Brushes.White
             };
@@ -15887,7 +15887,7 @@ namespace Kerf.UI
             if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
             if (Document.Animation.Clips.Count == 0)
             {
-                var clip = new Clip(100, "Default Animation", Math.Max(0.1, _timelineController.Duration), _timelineController.Fps, LoopMode.Loop);
+                var clip = new Clip(100, "Default Animation", Math.Max(0.1, _timelineController.Duration), _timelineController.Fps, LoopMode.OneShot);
                 Document.Animation.Clips.Add(clip);
                 _timelineController.ActiveClip = clip;
             }
@@ -16940,7 +16940,7 @@ namespace Kerf.UI
             if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
             if (Document.Animation.Clips.Count == 0)
             {
-                var defaultClip = new Clip(100, "Default Animation", Math.Max(0.1, _timelineController != null ? _timelineController.Duration : 2.0), 60.0, LoopMode.Loop);
+                var defaultClip = new Clip(100, "Default Animation", Math.Max(0.1, _timelineController != null ? _timelineController.Duration : 2.0), 60.0, LoopMode.OneShot);
                 Document.Animation.Clips.Add(defaultClip);
                 if (_timelineController != null) _timelineController.ActiveClip = defaultClip;
             }
@@ -17102,7 +17102,7 @@ namespace Kerf.UI
                     clips.RemoveAt(clipIdx);
                     if (clips.Count == 0)
                     {
-                        var newClip = new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.Loop);
+                        var newClip = new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.OneShot);
                         clips.Add(newClip);
                     }
                     if (_timelineController != null && _timelineController.ActiveClip == clip)
@@ -19846,20 +19846,20 @@ namespace Kerf.UI
         private void CycleTimelineLoopMode()
         {
             if (_timelineController == null) EnsureTimelineControllerInitialized();
-            if (_timelineController.LoopMode == LoopMode.Loop)
+            if (_timelineController.LoopMode == LoopMode.OneShot)
             {
-                _timelineController.LoopMode = LoopMode.OneShot;
-                _timelineLoopText.Text = "🔁 Loop: Once";
+                _timelineController.LoopMode = LoopMode.Loop;
+                _timelineLoopText.Text = "🔁 Loop: All";
             }
-            else if (_timelineController.LoopMode == LoopMode.OneShot)
+            else if (_timelineController.LoopMode == LoopMode.Loop)
             {
                 _timelineController.LoopMode = LoopMode.PingPong;
                 _timelineLoopText.Text = "🔁 Loop: PingPong";
             }
             else
             {
-                _timelineController.LoopMode = LoopMode.Loop;
-                _timelineLoopText.Text = "🔁 Loop: All";
+                _timelineController.LoopMode = LoopMode.OneShot;
+                _timelineLoopText.Text = "🔁 Loop: Once";
             }
             if (_timelineController.ActiveClip != null)
             {
@@ -20452,8 +20452,8 @@ namespace Kerf.UI
                 Foreground = Brushes.White,
                 FontSize = 11
             };
-            loopCombo.Items.Add(new ComboBoxItem { Content = "Loop (Repeat continuously)", Tag = LoopMode.Loop });
             loopCombo.Items.Add(new ComboBoxItem { Content = "Once (Play to end and hold)", Tag = LoopMode.OneShot });
+            loopCombo.Items.Add(new ComboBoxItem { Content = "Loop (Repeat continuously)", Tag = LoopMode.Loop });
             loopCombo.Items.Add(new ComboBoxItem { Content = "PingPong (Back and forth)", Tag = LoopMode.PingPong });
             loopCombo.SelectedIndex = 0;
             root.Children.Add(loopCombo);
@@ -20486,7 +20486,7 @@ namespace Kerf.UI
                 string cName = nameBox.Text.Trim();
                 if (string.IsNullOrEmpty(cName)) cName = defaultName;
 
-                LoopMode mode = LoopMode.Loop;
+                LoopMode mode = LoopMode.OneShot;
                 var selItem = loopCombo.SelectedItem as ComboBoxItem;
                 if (selItem != null && selItem.Tag is LoopMode)
                     mode = (LoopMode)selItem.Tag;
@@ -20707,7 +20707,7 @@ namespace Kerf.UI
                         clips.RemoveAt(clipIndex);
                         if (clips.Count == 0)
                         {
-                            clips.Add(new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.Loop));
+                            clips.Add(new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.OneShot));
                         }
                         if (_timelineController != null && _timelineController.ActiveClip == clip)
                         {
@@ -20752,7 +20752,11 @@ namespace Kerf.UI
         {
             if (_timelineController != null) _timelineController.Pause();
             if (_timelinePlayBtnText != null) _timelinePlayBtnText.Text = "▶ Play";
-            if (_animationTimer != null) _animationTimer.Stop();
+            bool keepTimer = _timelineController != null &&
+                             _timelineController.UseStateMachine &&
+                             _interactiveCanvasEnabled &&
+                             _currentStudioMode == StudioMode.Animate;
+            if (!keepTimer && _animationTimer != null) _animationTimer.Stop();
         }
 
         public void StopAnimationPlayback()
@@ -20779,13 +20783,13 @@ namespace Kerf.UI
                 {
                     if (_timelineController != null)
                     {
-                        bool isTimelinePlaying = _timelineController.IsPlaying;
+                        bool wasPlaying = _timelineController.IsPlaying;
                         bool smHasTransitions = _timelineController.UseStateMachine &&
                                                 _timelineController.ActiveStateMachine != null &&
                                                 _timelineController.ActiveStateMachine.HasActiveTransitions();
                         bool isPreviewActive = _timelineController.UseStateMachine && _interactiveCanvasEnabled && _currentStudioMode == StudioMode.Animate;
 
-                        if (isTimelinePlaying || smHasTransitions || isPreviewActive)
+                        if (wasPlaying || smHasTransitions || isPreviewActive)
                         {
                             DateTime now = DateTime.UtcNow;
                             double dt = _lastAnimationTickUtc == DateTime.MinValue
@@ -20793,15 +20797,25 @@ namespace Kerf.UI
                                 : Math.Max(0.0, Math.Min(0.1, (now - _lastAnimationTickUtc).TotalSeconds));
                             _lastAnimationTickUtc = now;
                             _timelineController.Step(dt);
+
+                            if (wasPlaying && !_timelineController.IsPlaying)
+                            {
+                                PauseAnimation();
+                            }
+
                             if (_timelineController.UseStateMachine)
                                 UpdateStateMachineStatusUI();
-                            UpdateTimelineTimeReadout();
-                            UpdateTimelineScrubberPosition();
-                            RefreshTimelineCanvas();
+
+                            if (wasPlaying)
+                            {
+                                UpdateTimelineTimeReadout();
+                                UpdateTimelineScrubberPosition();
+                                RefreshTimelineCanvas();
+                            }
                         }
                         else
                         {
-                            if (isTimelinePlaying)
+                            if (wasPlaying)
                             {
                                 PauseAnimation();
                             }
@@ -21078,7 +21092,7 @@ namespace Kerf.UI
                 return;
             }
 
-            var defaultClip = new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.Loop);
+            var defaultClip = new Clip(100, "Default Animation", 2.0, 60.0, LoopMode.OneShot);
             // Start with an empty clip: no animations applied before the user explicitly creates keyframes
             defaultClip.Tracks.Clear();
 

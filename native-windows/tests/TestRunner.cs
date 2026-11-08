@@ -7088,6 +7088,36 @@ namespace Kerf.Tests
 
             bool intersects = (100.0 <= boxRight && 300.0 >= boxLeft && 100.0 >= boxTop && 100.0 <= boxBottom);
             Assert(intersects, "Marquee bounding box correctly intersects transition wire between states");
+
+            // 5. Timeline Finite Playback & Idle Step Protection
+            var ctrl = new AnimationTimelineController(2.0, 60.0);
+            ctrl.ActiveClip = clip;
+            Assert(ctrl.LoopMode == LoopMode.OneShot, "Default timeline loop mode is OneShot (finite)");
+            Assert(!ctrl.IsPlaying, "Timeline is not playing initially");
+
+            // Idle step (preview or state machine tick while paused) must not advance CurrentTime
+            ctrl.Step(0.5);
+            Assert(ctrl.CurrentTime == 0.0, "Timeline does not advance CurrentTime when IsPlaying is false");
+
+            // Start playback
+            ctrl.Play();
+            Assert(ctrl.IsPlaying, "Timeline begins playback");
+            ctrl.Step(1.0);
+            Assert(Math.Abs(ctrl.CurrentTime - 1.0) < 1e-4, "Timeline advances to 1.0s during playback");
+
+            // Step past duration: must stop at Duration (1.80s) and set IsPlaying to false
+            ctrl.Step(1.5);
+            Assert(Math.Abs(ctrl.CurrentTime - 1.80) < 1e-4, "Timeline stops cleanly at duration 1.80s");
+            Assert(!ctrl.IsPlaying, "Timeline playback automatically terminates after one-shot completion");
+
+            // Additional ticks after completion must not loop or drift
+            ctrl.Step(0.5);
+            Assert(Math.Abs(ctrl.CurrentTime - 1.80) < 1e-4, "Timeline remains halted at duration and does not loop indefinitely");
+
+            // Calling Play() when at the end restarts from 0.0
+            ctrl.Play();
+            Assert(ctrl.CurrentTime == 0.0, "Playing at the end rewinds to 0.0s for clean replay");
+            Assert(ctrl.IsPlaying, "Timeline is playing after replay trigger");
         }
 
         private static void TestStateMachinePersistenceAndSmoothTransitionBlending()
