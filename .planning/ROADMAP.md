@@ -141,12 +141,12 @@ Plans:
   4. Real animation playback executes assigned clips with speed and looping, blending outgoing and incoming state transforms non-destructively.
   5. Interactive Preview Mode provides real-time state visualization, input toggles/scrubbers, active transition progress feedback, and clean lifecycle management.
   6. Automated verification tests pass covering pointer listeners, trigger firing, conditional transitions, state blending, and clean lifecycle.
-**Plans**: 3 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] 07-01: Centralized event dispatcher, document object listener model, and listener inspector UI with undo/redo
-- [ ] 07-02: StateMachineRuntime evaluation engine: transition conditions, exit times, clip playback, and non-destructive transform blending
-- [ ] 07-03: Interactive state machine preview mode, live diagnostics feedback, and automated verification tests
+- [ ] 07-01-PLAN.md — Centralized event dispatcher, document object listener model, and Right Inspector UI with undo/redo
+- [ ] 07-02-PLAN.md — StateMachineRuntime execution engine: transition conditions, exit times, clip playback, and snapshot crossfade blending
+- [ ] 07-03-PLAN.md — Simulation playback gating, early-return pointer dispatch, and comprehensive Test #66 verification
 
 ---
 
