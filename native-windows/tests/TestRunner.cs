@@ -94,6 +94,7 @@ namespace Kerf.Tests
             RunTest("State Machine Batch Transitions, Easing Presets, Multiselect & Clip Renaming", TestStateMachineBatchTransitionsPresetsMultiselectAndClipRenaming);
             RunTest("State Machine Persistence & Smooth Rest-Pose Transition Blending", TestStateMachinePersistenceAndSmoothTransitionBlending);
             RunTest("Interactive Listeners & Centralized Event Dispatcher", TestInteractiveListenersAndCentralizedEventDispatcher);
+            RunTest("Interrupted Transition Snapshot Blending & RenderTransform Isolation", TestInterruptedTransitionSnapshotBlending);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -7487,6 +7488,150 @@ namespace Kerf.Tests
             // Redo modify
             modCmd.Execute();
             Assert(l3.TargetNodeId == 999u && l3.Enabled == false && l3.Actions.Count == 1, "ModifyListenerCommand re-executed cleanly");
+        }
+
+        private static void TestInterruptedTransitionSnapshotBlending()
+        {
+            // 1. Setup clips with animated Node 55 X and Opacity
+            List<Clip> clips = new List<Clip>();
+
+            // Clip A: X = 100, Opacity = 1.0
+            Clip clipA = new Clip(0, "ClipA", 1.0, 60.0, LoopMode.Loop);
+            Track trAX = new Track(55u, (ushort)PropKey.X);
+            trAX.AddKeyframe(Keyframe.Linear(0.0, 100.0));
+            clipA.AddTrack(trAX);
+            Track trAOp = new Track(55u, (ushort)PropKey.Opacity);
+            trAOp.AddKeyframe(Keyframe.Linear(0.0, 1.0));
+            clipA.AddTrack(trAOp);
+            clips.Add(clipA);
+
+            // Clip B: X = 200, Opacity = 0.5
+            Clip clipB = new Clip(1, "ClipB", 1.0, 60.0, LoopMode.Loop);
+            Track trBX = new Track(55u, (ushort)PropKey.X);
+            trBX.AddKeyframe(Keyframe.Linear(0.0, 200.0));
+            clipB.AddTrack(trBX);
+            Track trBOp = new Track(55u, (ushort)PropKey.Opacity);
+            trBOp.AddKeyframe(Keyframe.Linear(0.0, 0.5));
+            clipB.AddTrack(trBOp);
+            clips.Add(clipB);
+
+            // Clip C: X = 400, Opacity = 0.0
+            Clip clipC = new Clip(2, "ClipC", 1.0, 60.0, LoopMode.Loop);
+            Track trCX = new Track(55u, (ushort)PropKey.X);
+            trCX.AddKeyframe(Keyframe.Linear(0.0, 400.0));
+            clipC.AddTrack(trCX);
+            Track trCOp = new Track(55u, (ushort)PropKey.Opacity);
+            trCOp.AddKeyframe(Keyframe.Linear(0.0, 0.0));
+            clipC.AddTrack(trCOp);
+            clips.Add(clipC);
+
+            // 2. Setup state machine
+            StateMachineDefinition smDef = new StateMachineDefinition("SnapshotMachine");
+            int boolGoB = smDef.AddInput(MachineInput.Bool("goB", false));
+            int boolGoC = smDef.AddInput(MachineInput.Bool("goC", false));
+
+            MachineLayer layer = new MachineLayer("MainLayer");
+            int sA = layer.AddState(new MachineState(0, "StateA", StateKind.Animation, 0));
+            int sB = layer.AddState(new MachineState(1, "StateB", StateKind.Animation, 1));
+            int sC = layer.AddState(new MachineState(2, "StateC", StateKind.Animation, 2));
+
+            // Trans A -> B: 1.0s Linear
+            StateTransition transAB = new StateTransition(sA, sB, 1.0);
+            transAB.Interpolation = InterpMode.Linear;
+            transAB.Interrupt = true;
+            transAB.WithCondition(new TransitionCondition(boolGoB, ConditionOp.Eq, 1.0));
+            layer.AddTransition(transAB);
+
+            // Trans A -> C: 0.5s Linear (Interruption transition)
+            StateTransition transAC = new StateTransition(sA, sC, 0.5);
+            transAC.Interpolation = InterpMode.Linear;
+            transAC.Interrupt = true;
+            transAC.WithCondition(new TransitionCondition(boolGoC, ConditionOp.Eq, 1.0));
+            layer.AddTransition(transAC);
+
+            smDef.AddLayer(layer);
+
+            StateMachineRuntime runtime = new StateMachineRuntime(smDef, clips);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+
+            // Initial frame: in State A
+            runtime.Update(0.0, pose);
+            Assert(runtime.LayerRuntimes[0].CurrentState == sA, "Initial state is StateA");
+            Assert(pose.ContainsKey(55u) && Math.Abs(pose[55u][(ushort)PropKey.X] - 100.0) < 0.001, "Initial pose X is 100");
+            Assert(Math.Abs(pose[55u][(ushort)PropKey.Opacity] - 1.0) < 0.001, "Initial pose Opacity is 1.0");
+
+            // Trigger A -> B
+            runtime.SetBool(boolGoB, true);
+            runtime.Update(0.0, pose);
+            Assert(runtime.LayerRuntimes[0].ActiveTransition != null && runtime.LayerRuntimes[0].ActiveTransition.ToState == sB, "Transition to B started");
+
+            // Advance 0.5s (mix = 0.5, halfway to B)
+            runtime.Update(0.5, pose);
+            Assert(runtime.LayerRuntimes[0].ActiveTransition != null, "Transition to B still in flight at 0.5s");
+            double midX = pose[55u][(ushort)PropKey.X];
+            double midOp = pose[55u][(ushort)PropKey.Opacity];
+            Assert(Math.Abs(midX - 150.0) < 0.01, string.Format("Mid-transition X expected 150.0, got {0}", midX));
+            Assert(Math.Abs(midOp - 0.75) < 0.01, string.Format("Mid-transition Opacity expected 0.75, got {0}", midOp));
+
+            // Interrupt mid-blend with transition to C!
+            runtime.SetBool(boolGoB, false);
+            runtime.SetBool(boolGoC, true);
+            runtime.Update(0.0, pose);
+
+            // Assert SnapshotPose was captured
+            var activeTrans = runtime.LayerRuntimes[0].ActiveTransition;
+            Assert(activeTrans != null, "New transition active after interruption");
+            Assert(activeTrans.ToState == sC, "Interrupted transition targets StateC");
+            Assert(activeTrans.SnapshotPose != null, "SnapshotPose captured at moment of interruption per D-04");
+            Assert(activeTrans.SnapshotPose.ContainsKey(55u), "SnapshotPose contains animated node 55");
+
+            double snapX = activeTrans.SnapshotPose[55u][(ushort)PropKey.X];
+            double snapOp = activeTrans.SnapshotPose[55u][(ushort)PropKey.Opacity];
+            Assert(Math.Abs(snapX - 150.0) < 0.01, string.Format("SnapshotPose frozen X expected 150.0, got {0}", snapX));
+            Assert(Math.Abs(snapOp - 0.75) < 0.01, string.Format("SnapshotPose frozen Opacity expected 0.75, got {0}", snapOp));
+
+            // Instantaneous pose at interruption must NOT jump back to A (100) or snap to B (200)
+            double instantX = pose[55u][(ushort)PropKey.X];
+            double instantOp = pose[55u][(ushort)PropKey.Opacity];
+            Assert(Math.Abs(instantX - 150.0) < 0.01, string.Format("Continuous interpolation: pose at interruption expected 150.0, got {0}", instantX));
+            Assert(Math.Abs(instantOp - 0.75) < 0.01, string.Format("Continuous interpolation: pose at interruption expected 0.75, got {0}", instantOp));
+
+            // Advance 0.25s (halfway through the 0.5s transition to C):
+            // Expected blend from snapshot (150, 0.75) to C (400, 0.0) at mix = 0.5:
+            // X = 150 + (400 - 150) * 0.5 = 275.0
+            // Opacity = 0.75 + (0.0 - 0.75) * 0.5 = 0.375
+            runtime.Update(0.25, pose);
+            double blendQuarterX = pose[55u][(ushort)PropKey.X];
+            double blendQuarterOp = pose[55u][(ushort)PropKey.Opacity];
+            Assert(Math.Abs(blendQuarterX - 275.0) < 0.05, string.Format("Interpolating from snapshot: expected X 275.0, got {0}", blendQuarterX));
+            Assert(Math.Abs(blendQuarterOp - 0.375) < 0.05, string.Format("Interpolating from snapshot: expected Opacity 0.375, got {0}", blendQuarterOp));
+
+            // Complete transition to C: advance remaining 0.25s
+            runtime.Update(0.25, pose);
+            Assert(runtime.LayerRuntimes[0].ActiveTransition == null, "Transition to C completed");
+            Assert(runtime.LayerRuntimes[0].CurrentState == sC, "Current state is now StateC");
+            double finalX = pose[55u][(ushort)PropKey.X];
+            double finalOp = pose[55u][(ushort)PropKey.Opacity];
+            Assert(Math.Abs(finalX - 400.0) < 0.01, string.Format("Final state C reached: expected X 400.0, got {0}", finalX));
+            Assert(Math.Abs(finalOp - 0.0) < 0.01, string.Format("Final state C reached: expected Opacity 0.0, got {0}", finalOp));
+
+            // Enforce D-06: Non-destructive application to RenderTransform
+            LayerNode testLayer = new LayerNode
+            {
+                Id = "test-d06-layer",
+                X = 50.0,
+                Y = 50.0,
+                Width = 120.0,
+                Height = 80.0,
+                CornerRadius = 12.0
+            };
+            PropertyBinder.ApplyPoseToLayer(testLayer, 55u, pose);
+            Assert(testLayer.X == 50.0 && testLayer.Y == 50.0, "Layer layout geometry X/Y preserved per D-06");
+            Assert(testLayer.Width == 120.0 && testLayer.Height == 80.0, "Layer layout geometry Width/Height preserved per D-06");
+            Assert(testLayer.CornerRadius == 12.0, "Corner radius preserved per D-06");
+            Assert(testLayer.RenderTransform != null, "RenderTransform allocated");
+            Assert(Math.Abs(testLayer.RenderTransform.TranslationX - (400.0 - 50.0)) < 0.01, "RenderTransform TranslationX holds animated offset");
+            Assert(Math.Abs(testLayer.Opacity - 0.0) < 0.01, "Layer visual Opacity updated from pose");
         }
     }
 }

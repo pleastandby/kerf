@@ -511,7 +511,7 @@ namespace Kerf.Engine.Animation
                 const int MAX_STEPS = 100;
                 for (int step = 0; step < MAX_STEPS; step++)
                 {
-                    if (layerRt.ActiveTransition != null && !layerRt.ActiveTransition.Definition.Interrupt)
+                    if (layerRt.ActiveTransition != null && layerRt.ActiveTransition.Definition != null && !layerRt.ActiveTransition.Definition.Interrupt)
                     {
                         // Current transition cannot be interrupted mid-blend
                         break;
@@ -527,7 +527,7 @@ namespace Kerf.Engine.Animation
                             break;
                         }
 
-                        // Snapshot current pose if interrupting an active transition to prevent visual pops
+                        // Snapshot current pose if interrupting an active transition to prevent visual pops per D-04
                         Dictionary<uint, Dictionary<ushort, double>> snapshot = null;
                         if (layerRt.ActiveTransition != null)
                         {
@@ -547,7 +547,7 @@ namespace Kerf.Engine.Animation
                                 SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose);
                             }
                             double progress = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
-                            double mix = layerRt.ActiveTransition.Definition.EvaluateInterpolation(progress);
+                            double mix = layerRt.ActiveTransition.Definition != null ? layerRt.ActiveTransition.Definition.EvaluateInterpolation(progress) : progress;
                             snapshot = new Dictionary<uint, Dictionary<ushort, double>>();
                             BlendPoses(fromPose, toPose, mix, snapshot, RestPose);
                         }
@@ -606,7 +606,7 @@ namespace Kerf.Engine.Animation
                     }
 
                     double u = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
-                    double mix = layerRt.ActiveTransition.Definition.EvaluateInterpolation(u);
+                    double mix = layerRt.ActiveTransition.Definition != null ? layerRt.ActiveTransition.Definition.EvaluateInterpolation(u) : u;
                     BlendPoses(fromPose, toPose, mix, layerPose, RestPose);
 
                     // Commit to target state when transition duration has completed
