@@ -159,7 +159,8 @@ namespace Kerf.Engine.Animation
 
             if (UseStateMachine && ActiveStateMachine != null)
             {
-                ActiveStateMachine.Update(Math.Abs(dt), _currentPose);
+                double effectiveDt = IsPlaying ? Math.Abs(dt) : 0.0;
+                ActiveStateMachine.Update(effectiveDt, _currentPose);
             }
             else if (ActiveClip != null)
             {

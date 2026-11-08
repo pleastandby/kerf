@@ -19101,6 +19101,12 @@ namespace Kerf.UI
         private void HandleStateGraphKeyDown(object sender, KeyEventArgs e)
         {
             if (e.OriginalSource is TextBox) return;
+            if (e.Key == Key.Space)
+            {
+                ToggleAnimationPlayback();
+                e.Handled = true;
+                return;
+            }
             if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0 && (e.Key == Key.Delete || e.Key == Key.Back))
             {
                 if (_selectedGraphStateIndices.Count > 0 || _selectedGraphStateIndex >= 0)
