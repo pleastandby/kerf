@@ -1,0 +1,53 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": null,
+  "phases": [
+    {
+      "number": "1",
+      "name": "Independent Transform Pipeline & Render Separation",
+      "status": "complete"
+    },
+    {
+      "number": "2",
+      "name": "Independent Transform Architecture and Animation Evaluator",
+      "status": "complete"
+    },
+    {
+      "number": "3",
+      "name": "Timeline and Keyframe Engine Reconstruction",
+      "status": "complete"
+    },
+    {
+      "number": "4",
+      "name": "Easing Engine & Interactive Graph Curve Editor",
+      "status": "complete"
+    },
+    {
+      "number": "5",
+      "name": "Animation Command History & Full Undo/Redo",
+      "status": "complete"
+    },
+    {
+      "number": "6",
+      "name": "Interactive State Machine Engine",
+      "status": "complete"
+    },
+    {
+      "number": "7",
+      "name": "Interactive Listeners, State Machine Runtime and Transition Execution",
+      "status": "in_progress"
+    },
+    {
+      "number": "8",
+      "name": "Verification, Legacy Migration & Safe Deprecation",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 7 of 8 · 75% · executing"
+  },
+  "updated_at": "2026-11-08T09:46:49.125Z"
+}
