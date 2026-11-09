@@ -45,12 +45,13 @@ namespace Kerf.Engine.Animation
                 if (s < 0.0 || s > 1.0) break;
             }
 
-            // 2. Fallback: Bisection for 20 iterations
+            // 2. Fallback: Bisection for 24 iterations
             double low = 0.0;
             double high = 1.0;
-            s = u;
-            for (int i = 0; i < 20; i++)
+            s = 0.5 * (low + high);
+            for (int i = 0; i < 24; i++)
             {
+                s = 0.5 * (low + high);
                 double xVal = CubicBezierEval(s, x1, x2);
                 if (Math.Abs(xVal - u) < 1e-7) break;
                 if (xVal < u)
@@ -61,10 +62,11 @@ namespace Kerf.Engine.Animation
                 {
                     high = s;
                 }
-                s = 0.5 * (low + high);
             }
 
-            return CubicBezierEval(s, y1, y2);
+            double result = CubicBezierEval(s, y1, y2);
+            if (double.IsNaN(result) || double.IsInfinity(result)) return u;
+            return result;
         }
 
         // Standard Easing Presets

@@ -100,6 +100,7 @@ namespace Kerf.Tests
             RunTest("Interactive Listeners, State Machine Runtime & Transition Execution", TestInteractiveListenersAndStateMachineRuntimeExecution);
             RunTest("Continuous Playback, Input Gating & Interactive Pointer Transitions", TestContinuousPlaybackAndInputDrivenTransitions);
             RunTest("Auto-Unhover on PointerExit, Cycle Guard & Continuous State Looping", TestAutoUnhoverCycleGuardAndStateLooping);
+            RunTest("Timeline Keyframe Easing, Evaluation & Playback Isolation", TestTimelineKeyframeEasingAndPlaybackIsolation);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -8576,6 +8577,88 @@ namespace Kerf.Tests
             cycleRuntime.Update(0.016, pose);
             Assert(cycleRuntime.LayerRuntimes[0].ActiveTransition == null, "Cycle guard prevents immediate ping-pong bounce back when inputs have not changed");
             Assert(cycleRuntime.LayerRuntimes[0].CurrentState == cB, "Remains stably in cB without oscillating");
+        }
+
+        private static void TestTimelineKeyframeEasingAndPlaybackIsolation()
+        {
+            // 1. Verify Cubic Bézier keyframe evaluation across a track
+            var track = new Track(100, (ushort)PropKey.ScaleY);
+            var k0 = new Keyframe(0.0, 1.0, InterpMode.Cubic, 0.42, 0.0, 0.58, 1.0); // Ease In Out
+            var k1 = new Keyframe(2.0, 3.0, InterpMode.Cubic, 0.42, 0.0, 0.58, 1.0);
+            track.AddKeyframe(k0);
+            track.AddKeyframe(k1);
+
+            // Midpoint of EaseInOut (at t = 1.0s, u = 0.5) must be exactly 2.0 (halfway between 1.0 and 3.0)
+            double midVal = track.Sample(1.0);
+            Assert(Math.Abs(midVal - 2.0) < 0.01, string.Format("EaseInOut midpoint at t=1.0: expected ~2.0, got {0:F4}", midVal));
+
+            // Early progress (at t = 0.4s, u = 0.2): EaseInOut accelerates slowly, so value must be LESS than linear (1.0 + 0.2 * 2.0 = 1.4)
+            double earlyVal = track.Sample(0.4);
+            Assert(earlyVal < 1.4, string.Format("EaseInOut early progress: expected < 1.4, got {0:F4}", earlyVal));
+
+            // Late progress (at t = 1.6s, u = 0.8): EaseInOut decelerates into target, so value must be GREATER than linear (1.0 + 0.8 * 2.0 = 2.6)
+            double lateVal = track.Sample(1.6);
+            Assert(lateVal > 2.6, string.Format("EaseInOut late progress: expected > 2.6, got {0:F4}", lateVal));
+
+            // 2. Destination keyframe interpolation application
+            // If user selects destination keyframe kDst, incoming segment start kSrc receives matching interpolation
+            var track2 = new Track(101, (ushort)PropKey.X);
+            var kSrc = new Keyframe(0.0, 0.0, InterpMode.Linear);
+            var kDst = new Keyframe(1.0, 100.0, InterpMode.Linear);
+            track2.AddKeyframe(kSrc);
+            track2.AddKeyframe(kDst);
+
+            // Before easing: linear interpolation at t = 0.25 is 25.0
+            Assert(Math.Abs(track2.Sample(0.25) - 25.0) < 1e-4, "Linear track at t=0.25 is 25.0");
+
+            // Simulate applying EaseIn (0.42, 0, 1, 1) when user selects kDst
+            // Destination keyframe segment incoming start is updated:
+            kSrc.Interp = InterpMode.Cubic;
+            kSrc.X1 = 0.42; kSrc.Y1 = 0.0; kSrc.X2 = 1.0; kSrc.Y2 = 1.0;
+            kDst.Interp = InterpMode.Cubic;
+            kDst.X1 = 0.42; kDst.Y1 = 0.0; kDst.X2 = 1.0; kDst.Y2 = 1.0;
+
+            // EaseIn accelerates slowly: at t = 0.25, progress is significantly less than linear 25.0
+            double easeInVal = track2.Sample(0.25);
+            Assert(easeInVal < 20.0, string.Format("EaseIn progress at t=0.25: expected < 20.0, got {0:F4}", easeInVal));
+
+            // 3. Playback and Seek evaluation in AnimationTimelineController
+            var clip = new Clip(1u, "TestClip", 2.0);
+            clip.AddTrack(track);
+            var controller = new AnimationTimelineController(2.0, 60.0);
+            controller.ActiveClip = clip;
+            controller.UseStateMachine = false;
+
+            Dictionary<uint, Dictionary<ushort, double>> capturedPose = null;
+            controller.FrameUpdated += (s, pose) =>
+            {
+                capturedPose = pose;
+            };
+
+            // Seek to 1.0s: must evaluate clip track and capture pose
+            controller.Seek(1.0);
+            Assert(capturedPose != null, "FrameUpdated fired on Seek");
+            Assert(capturedPose.ContainsKey(100), "Captured pose contains node 100");
+            Assert(Math.Abs(capturedPose[100][(ushort)PropKey.ScaleY] - midVal) < 1e-4, "Evaluated pose matches eased track value");
+
+            // Playback step: controller.Step(0.5) advances to 1.5s
+            controller.Play();
+            controller.Step(0.5);
+            Assert(Math.Abs(controller.CurrentTime - 1.5) < 0.01, "Playback step advances CurrentTime");
+            Assert(Math.Abs(capturedPose[100][(ushort)PropKey.ScaleY] - track.Sample(1.5)) < 1e-4, "Playback step evaluates eased track at CurrentTime");
+
+            // 4. Verification that State Machine remains functional and isolated
+            var smDef = new StateMachineDefinition("IsolationTest");
+            var smLayer = new MachineLayer("BaseLayer");
+            int sEntry = smLayer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int sAnim = smLayer.AddState(new MachineState(1, "AnimState", StateKind.Animation, 0));
+            smLayer.AddTransition(new StateTransition(sEntry, sAnim, 0.0));
+            smDef.AddLayer(smLayer);
+
+            var smRuntime = new StateMachineRuntime(smDef, new List<Clip> { clip });
+            var smPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            smRuntime.Update(0.016, smPose);
+            Assert(smRuntime.LayerRuntimes[0].CurrentState == sAnim, "State machine independently transitions to AnimState");
         }
     }
 }

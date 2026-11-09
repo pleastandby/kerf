@@ -324,9 +324,11 @@ namespace Kerf.Engine.Animation
                     return a.Value + (b.Value - a.Value) * u;
                 case InterpMode.Cubic:
                     double eased = CubicBezierEase.Evaluate(u, a.X1, a.Y1, a.X2, a.Y2);
+                    if (double.IsNaN(eased) || double.IsInfinity(eased)) eased = u;
                     return a.Value + (b.Value - a.Value) * eased;
                 case InterpMode.Spring:
                     double springProgress = EasingEngine.EvaluateSpring(t - a.Time, a.Mass, a.Stiffness, a.Damping, a.InitialVelocity);
+                    if (double.IsNaN(springProgress) || double.IsInfinity(springProgress)) springProgress = 1.0;
                     return a.Value + (b.Value - a.Value) * springProgress;
                 default:
                     return a.Value;

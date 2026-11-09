@@ -1658,84 +1658,126 @@ namespace Kerf.UI
             return icon;
         }
 
+        private void ApplyInterpolationToKeyframeSelection(InterpMode mode, double x1, double y1, double x2, double y2, EasingPreset? preset = null, SpringPreset? springPreset = null)
+        {
+            var keysToUpdate = new HashSet<Keyframe>(_selectedTimelineKeyframes);
+            if (_editingInterpolationKeyframe != null) keysToUpdate.Add(_editingInterpolationKeyframe);
+            if (keysToUpdate.Count == 0) return;
+
+            foreach (var keyframe in keysToUpdate)
+            {
+                if (keyframe == null) continue;
+                keyframe.Interp = mode;
+                keyframe.X1 = x1;
+                keyframe.Y1 = y1;
+                keyframe.X2 = x2;
+                keyframe.Y2 = y2;
+                if (preset.HasValue)
+                {
+                    keyframe.Preset = preset.Value;
+                }
+                else if (mode == InterpMode.Linear || mode == InterpMode.Hold)
+                {
+                    keyframe.Preset = EasingPreset.Linear;
+                }
+                else if (mode == InterpMode.Cubic)
+                {
+                    keyframe.Preset = EasingPreset.CustomBezier;
+                }
+
+                if (mode == InterpMode.Spring)
+                {
+                    if (springPreset.HasValue)
+                    {
+                        EasingEngine.ApplySpringPreset(keyframe, springPreset.Value);
+                    }
+                    else if (_editingInterpolationKeyframe != null)
+                    {
+                        keyframe.Mass = _editingInterpolationKeyframe.Mass;
+                        keyframe.Stiffness = _editingInterpolationKeyframe.Stiffness;
+                        keyframe.Damping = _editingInterpolationKeyframe.Damping;
+                        keyframe.InitialVelocity = _editingInterpolationKeyframe.InitialVelocity;
+                    }
+                }
+
+                // If keyframe is on a track, check if it's the destination of an incoming segment (e.g. last key or single selected key)
+                AnimTrack ownerTrack = null;
+                if (_timelineKeyframeOwners.TryGetValue(keyframe, out ownerTrack) ||
+                    (_timelineController != null && _timelineController.ActiveClip != null && _timelineController.ActiveClip.Tracks != null &&
+                     (ownerTrack = _timelineController.ActiveClip.Tracks.FirstOrDefault(t => t != null && t.Keys != null && t.Keys.Contains(keyframe))) != null))
+                {
+                    int kIdx = ownerTrack.Keys.IndexOf(keyframe);
+                    if (kIdx > 0 && (kIdx == ownerTrack.Keys.Count - 1 || keysToUpdate.Count == 1))
+                    {
+                        var prevKey = ownerTrack.Keys[kIdx - 1];
+                        if (prevKey != null)
+                        {
+                            prevKey.Interp = mode;
+                            prevKey.X1 = x1;
+                            prevKey.Y1 = y1;
+                            prevKey.X2 = x2;
+                            prevKey.Y2 = y2;
+                            prevKey.Preset = keyframe.Preset;
+                            if (mode == InterpMode.Spring)
+                            {
+                                prevKey.Mass = keyframe.Mass;
+                                prevKey.Stiffness = keyframe.Stiffness;
+                                prevKey.Damping = keyframe.Damping;
+                                prevKey.InitialVelocity = keyframe.InitialVelocity;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (History != null) History.MarkDirty();
+            SyncRealtimeEvaluator();
+            RefreshTimelineCanvas();
+        }
+
         private void ApplyDefaultInterpolationPreset(int preset)
         {
             _defaultInterpolationPreset = Math.Max(0, Math.Min(5, preset));
+            EasingPreset? ep = null;
+            SpringPreset? sp = null;
             switch (_defaultInterpolationPreset)
             {
                 case 0:
                     _defaultInterpolationMode = InterpMode.Hold;
                     _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 1.0; _defaultInterpolationY2 = 1.0;
-                    if (_editingInterpolationKeyframe != null)
-                    {
-                        _editingInterpolationKeyframe.Interp = InterpMode.Hold;
-                        _editingInterpolationKeyframe.Preset = EasingPreset.Linear;
-                    }
+                    ep = EasingPreset.Linear;
                     break;
                 case 1:
                     _defaultInterpolationMode = InterpMode.Linear;
                     _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 1.0; _defaultInterpolationY2 = 1.0;
-                    if (_editingInterpolationKeyframe != null)
-                    {
-                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, EasingPreset.Linear);
-                    }
+                    ep = EasingPreset.Linear;
                     break;
                 case 2:
                     _defaultInterpolationMode = InterpMode.Cubic;
                     _defaultInterpolationX1 = 0.42; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 0.58; _defaultInterpolationY2 = 1.0;
-                    if (_editingInterpolationKeyframe != null)
-                    {
-                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, EasingPreset.EaseInOut);
-                    }
+                    ep = EasingPreset.EaseInOut;
                     break;
                 case 3:
                     _defaultInterpolationMode = InterpMode.Cubic;
                     _defaultInterpolationX1 = 0.0; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 0.58; _defaultInterpolationY2 = 1.0;
-                    if (_editingInterpolationKeyframe != null)
-                    {
-                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, EasingPreset.EaseOut);
-                    }
+                    ep = EasingPreset.EaseOut;
                     break;
                 case 4:
                     _defaultInterpolationMode = InterpMode.Cubic;
                     _defaultInterpolationX1 = 0.42; _defaultInterpolationY1 = 0.0; _defaultInterpolationX2 = 1.0; _defaultInterpolationY2 = 1.0;
-                    if (_editingInterpolationKeyframe != null)
-                    {
-                        EasingEngine.ApplyPreset(_editingInterpolationKeyframe, EasingPreset.EaseIn);
-                    }
+                    ep = EasingPreset.EaseIn;
                     break;
                 case 5:
                     _defaultInterpolationMode = InterpMode.Spring;
-                    if (_editingInterpolationKeyframe != null)
-                    {
-                        EasingEngine.ApplySpringPreset(_editingInterpolationKeyframe, SpringPreset.Bouncy);
-                    }
+                    sp = SpringPreset.Bouncy;
                     break;
             }
 
-            if (_editingInterpolationKeyframe != null)
+            if (!_isStateMachineMode)
             {
-                foreach (var kf in _selectedTimelineKeyframes)
-                {
-                    if (kf != null && !ReferenceEquals(kf, _editingInterpolationKeyframe))
-                    {
-                        kf.Interp = _defaultInterpolationMode;
-                        kf.X1 = _defaultInterpolationX1;
-                        kf.Y1 = _defaultInterpolationY1;
-                        kf.X2 = _defaultInterpolationX2;
-                        kf.Y2 = _defaultInterpolationY2;
-                        if (_defaultInterpolationMode == InterpMode.Spring)
-                        {
-                            kf.Mass = _editingInterpolationKeyframe.Mass;
-                            kf.Stiffness = _editingInterpolationKeyframe.Stiffness;
-                            kf.Damping = _editingInterpolationKeyframe.Damping;
-                            kf.InitialVelocity = _editingInterpolationKeyframe.InitialVelocity;
-                        }
-                    }
-                }
-                SyncRealtimeEvaluator();
-                if (History != null) History.MarkDirty();
-                RefreshTimelineCanvas();
+                ApplyInterpolationToKeyframeSelection(_defaultInterpolationMode, _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2, ep, sp);
+                UpdateDefaultInterpolationFromSelection();
+                return;
             }
 
             var transTargets = new List<StateTransition>(_selectedGraphTransitions);
@@ -1788,27 +1830,17 @@ namespace Kerf.UI
         {
             double x1, y1, x2, y2;
             EasingEngine.GetPresetControlPoints(preset, out x1, out y1, out x2, out y2);
-            _defaultInterpolationMode = InterpMode.Cubic;
+            _defaultInterpolationMode = (preset == EasingPreset.Linear) ? InterpMode.Linear : InterpMode.Cubic;
             _defaultInterpolationX1 = x1;
             _defaultInterpolationY1 = y1;
             _defaultInterpolationX2 = x2;
             _defaultInterpolationY2 = y2;
 
-            if (_editingInterpolationKeyframe != null)
+            if (!_isStateMachineMode)
             {
-                EasingEngine.ApplyPreset(_editingInterpolationKeyframe, preset);
-
-                foreach (var kf in _selectedTimelineKeyframes)
-                {
-                    if (kf != null && !ReferenceEquals(kf, _editingInterpolationKeyframe))
-                    {
-                        EasingEngine.ApplyPreset(kf, preset);
-                    }
-                }
-
-                SyncRealtimeEvaluator();
-                if (History != null) History.MarkDirty();
-                RefreshTimelineCanvas();
+                ApplyInterpolationToKeyframeSelection(_defaultInterpolationMode, x1, y1, x2, y2, preset: preset);
+                UpdateDefaultInterpolationFromSelection();
+                return;
             }
 
             var transTargets = new List<StateTransition>(_selectedGraphTransitions);
@@ -1860,19 +1892,12 @@ namespace Kerf.UI
         public void ApplySpringPresetToCurrentSelection(SpringPreset preset)
         {
             _defaultInterpolationMode = InterpMode.Spring;
-            if (_editingInterpolationKeyframe != null)
+
+            if (!_isStateMachineMode)
             {
-                EasingEngine.ApplySpringPreset(_editingInterpolationKeyframe, preset);
-                foreach (var kf in _selectedTimelineKeyframes)
-                {
-                    if (kf != null && !ReferenceEquals(kf, _editingInterpolationKeyframe))
-                    {
-                        EasingEngine.ApplySpringPreset(kf, preset);
-                    }
-                }
-                SyncRealtimeEvaluator();
-                if (History != null) History.MarkDirty();
-                RefreshTimelineCanvas();
+                ApplyInterpolationToKeyframeSelection(InterpMode.Spring, 0, 0, 1, 1, springPreset: preset);
+                UpdateDefaultInterpolationFromSelection();
+                return;
             }
 
             var transTargets = new List<StateTransition>(_selectedGraphTransitions);
@@ -1917,70 +1942,103 @@ namespace Kerf.UI
         {
             if (_defaultInterpolationPanel == null) return;
 
-            if (_editingInterpolationKeyframe != null)
+            if (!_isStateMachineMode)
             {
-                var kf = _editingInterpolationKeyframe;
-                _defaultInterpolationMode = kf.Interp;
-                _defaultInterpolationX1 = kf.X1;
-                _defaultInterpolationY1 = kf.Y1;
-                _defaultInterpolationX2 = kf.X2;
-                _defaultInterpolationY2 = kf.Y2;
-
-                if (_defaultInterpolationTitle != null)
-                    _defaultInterpolationTitle.Text = "Keyframe Interpolation";
-
-                if (_defaultInterpolationSubtitle != null)
+                if (_editingInterpolationKeyframe == null && _selectedTimelineKeyframes.Count > 0)
                 {
-                    string propName = _editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Property";
-                    _defaultInterpolationSubtitle.Text = string.Format(CultureInfo.InvariantCulture, "{0} · {1:0.00}s", propName, kf.Time);
+                    _editingInterpolationKeyframe = _selectedTimelineKeyframes.FirstOrDefault();
+                    if (_editingInterpolationKeyframe != null && _editingInterpolationTrack == null)
+                    {
+                        AnimTrack tr;
+                        if (_timelineKeyframeOwners.TryGetValue(_editingInterpolationKeyframe, out tr))
+                            _editingInterpolationTrack = tr;
+                        else if (_timelineController != null && _timelineController.ActiveClip != null && _timelineController.ActiveClip.Tracks != null)
+                            _editingInterpolationTrack = _timelineController.ActiveClip.Tracks.FirstOrDefault(t => t != null && t.Keys != null && t.Keys.Contains(_editingInterpolationKeyframe));
+                    }
                 }
 
-                if (_applyDefaultInterpolationButton != null)
+                if (_editingInterpolationKeyframe != null)
                 {
-                    int selCount = _selectedTimelineKeyframes.Count;
-                    _applyDefaultInterpolationButton.Content = selCount > 1 ? string.Format("Apply to {0} selected keys", selCount) : "Apply to selected keys";
-                    _applyDefaultInterpolationButton.IsEnabled = true;
+                    var kf = _editingInterpolationKeyframe;
+                    _defaultInterpolationMode = kf.Interp;
+                    _defaultInterpolationX1 = kf.X1;
+                    _defaultInterpolationY1 = kf.Y1;
+                    _defaultInterpolationX2 = kf.X2;
+                    _defaultInterpolationY2 = kf.Y2;
+
+                    if (_defaultInterpolationTitle != null)
+                        _defaultInterpolationTitle.Text = "Keyframe Interpolation";
+
+                    if (_defaultInterpolationSubtitle != null)
+                    {
+                        string propName = _editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Property";
+                        _defaultInterpolationSubtitle.Text = string.Format(CultureInfo.InvariantCulture, "{0} · {1:0.00}s", propName, kf.Time);
+                    }
+
+                    if (_applyDefaultInterpolationButton != null)
+                    {
+                        int selCount = _selectedTimelineKeyframes.Count;
+                        _applyDefaultInterpolationButton.Content = selCount > 1 ? string.Format("Apply to {0} selected keys", selCount) : "Apply to selected keys";
+                        _applyDefaultInterpolationButton.IsEnabled = true;
+                    }
                 }
-            }
-            else if (_selectedGraphTransitions.Count > 0 || _selectedGraphTransition != null)
-            {
-                var tr = _selectedGraphTransition ?? _selectedGraphTransitions[0];
-                _defaultInterpolationMode = tr.Interpolation;
-                _defaultInterpolationX1 = tr.X1;
-                _defaultInterpolationY1 = tr.Y1;
-                _defaultInterpolationX2 = tr.X2;
-                _defaultInterpolationY2 = tr.Y2;
-
-                if (_defaultInterpolationTitle != null)
-                    _defaultInterpolationTitle.Text = "Transition Interpolation";
-
-                if (_defaultInterpolationSubtitle != null)
+                else
                 {
-                    if (_selectedGraphTransitions.Count > 1)
-                        _defaultInterpolationSubtitle.Text = string.Format("{0} transitions", _selectedGraphTransitions.Count);
-                    else
-                        _defaultInterpolationSubtitle.Text = TransitionConditionSummary(tr);
-                }
+                    if (_defaultInterpolationTitle != null)
+                        _defaultInterpolationTitle.Text = "Default Interpolation";
 
-                if (_applyDefaultInterpolationButton != null)
-                {
-                    int cnt = _selectedGraphTransitions.Count > 1 ? _selectedGraphTransitions.Count : 1;
-                    _applyDefaultInterpolationButton.Content = cnt > 1 ? string.Format("Apply to {0} transitions", cnt) : "Apply to selected transitions";
-                    _applyDefaultInterpolationButton.IsEnabled = true;
+                    if (_defaultInterpolationSubtitle != null)
+                        _defaultInterpolationSubtitle.Text = "Applies to new keyframes";
+
+                    if (_applyDefaultInterpolationButton != null)
+                    {
+                        _applyDefaultInterpolationButton.Content = "Apply to selection";
+                        _applyDefaultInterpolationButton.IsEnabled = _selectedTimelineKeyframes.Count > 0;
+                    }
                 }
             }
             else
             {
-                if (_defaultInterpolationTitle != null)
-                    _defaultInterpolationTitle.Text = "Default Interpolation";
-
-                if (_defaultInterpolationSubtitle != null)
-                    _defaultInterpolationSubtitle.Text = "Applies to new keyframes";
-
-                if (_applyDefaultInterpolationButton != null)
+                if (_selectedGraphTransitions.Count > 0 || _selectedGraphTransition != null)
                 {
-                    _applyDefaultInterpolationButton.Content = "Apply to selection";
-                    _applyDefaultInterpolationButton.IsEnabled = _selectedTimelineKeyframes.Count > 0;
+                    var tr = _selectedGraphTransition ?? _selectedGraphTransitions[0];
+                    _defaultInterpolationMode = tr.Interpolation;
+                    _defaultInterpolationX1 = tr.X1;
+                    _defaultInterpolationY1 = tr.Y1;
+                    _defaultInterpolationX2 = tr.X2;
+                    _defaultInterpolationY2 = tr.Y2;
+
+                    if (_defaultInterpolationTitle != null)
+                        _defaultInterpolationTitle.Text = "Transition Interpolation";
+
+                    if (_defaultInterpolationSubtitle != null)
+                    {
+                        if (_selectedGraphTransitions.Count > 1)
+                            _defaultInterpolationSubtitle.Text = string.Format("{0} transitions", _selectedGraphTransitions.Count);
+                        else
+                            _defaultInterpolationSubtitle.Text = TransitionConditionSummary(tr);
+                    }
+
+                    if (_applyDefaultInterpolationButton != null)
+                    {
+                        int cnt = _selectedGraphTransitions.Count > 1 ? _selectedGraphTransitions.Count : 1;
+                        _applyDefaultInterpolationButton.Content = cnt > 1 ? string.Format("Apply to {0} transitions", cnt) : "Apply to selected transitions";
+                        _applyDefaultInterpolationButton.IsEnabled = true;
+                    }
+                }
+                else
+                {
+                    if (_defaultInterpolationTitle != null)
+                        _defaultInterpolationTitle.Text = "Transition Interpolation";
+
+                    if (_defaultInterpolationSubtitle != null)
+                        _defaultInterpolationSubtitle.Text = "Select a transition to edit curve";
+
+                    if (_applyDefaultInterpolationButton != null)
+                    {
+                        _applyDefaultInterpolationButton.Content = "Apply to selected transitions";
+                        _applyDefaultInterpolationButton.IsEnabled = false;
+                    }
                 }
             }
 
@@ -2027,24 +2085,19 @@ namespace Kerf.UI
 
         private void ApplyDefaultInterpolationToSelection()
         {
-            bool applied = false;
-            var keyframes = new HashSet<Keyframe>(_selectedTimelineKeyframes);
-            if (_editingInterpolationKeyframe != null) keyframes.Add(_editingInterpolationKeyframe);
-            foreach (var keyframe in keyframes)
+            if (!_isStateMachineMode)
             {
-                keyframe.Interp = _defaultInterpolationMode;
-                keyframe.X1 = _defaultInterpolationX1;
-                keyframe.Y1 = _defaultInterpolationY1;
-                keyframe.X2 = _defaultInterpolationX2;
-                keyframe.Y2 = _defaultInterpolationY2;
-                if (_defaultInterpolationMode == InterpMode.Spring && _editingInterpolationKeyframe != null)
-                {
-                    keyframe.Mass = _editingInterpolationKeyframe.Mass;
-                    keyframe.Stiffness = _editingInterpolationKeyframe.Stiffness;
-                    keyframe.Damping = _editingInterpolationKeyframe.Damping;
-                    keyframe.InitialVelocity = _editingInterpolationKeyframe.InitialVelocity;
-                }
-                applied = true;
+                EasingPreset? ep = null;
+                if (_defaultInterpolationPreset == 0 || _defaultInterpolationPreset == 1) ep = EasingPreset.Linear;
+                else if (_defaultInterpolationPreset == 2) ep = EasingPreset.EaseInOut;
+                else if (_defaultInterpolationPreset == 3) ep = EasingPreset.EaseOut;
+                else if (_defaultInterpolationPreset == 4) ep = EasingPreset.EaseIn;
+                else if (_defaultInterpolationMode == InterpMode.Cubic) ep = EasingPreset.CustomBezier;
+
+                SpringPreset? sp = (_defaultInterpolationMode == InterpMode.Spring) ? (SpringPreset?)SpringPreset.Bouncy : null;
+                ApplyInterpolationToKeyframeSelection(_defaultInterpolationMode, _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2, ep, sp);
+                RefreshInterpolationGraphPanels();
+                return;
             }
 
             var transTargets = new List<StateTransition>(_selectedGraphTransitions);
@@ -2088,16 +2141,10 @@ namespace Kerf.UI
                     }
                     renderCb();
                 }
-                applied = true;
+                if (History != null) History.MarkDirty();
+                BuildStateMachineStatesGraph();
+                TriggerStateMachineStep();
             }
-
-            if (!applied) return;
-            if (History != null) History.MarkDirty();
-            SyncRealtimeEvaluator();
-            RefreshInterpolationGraphPanels();
-            RefreshTimelineCanvas();
-            if (_selectedGraphTransition != null || _selectedGraphTransitions.Count > 0) BuildStateMachineStatesGraph();
-            TriggerStateMachineStep();
         }
 
         private void RefreshDefaultInterpolationPresetButtons()
@@ -2278,42 +2325,24 @@ namespace Kerf.UI
             _defaultInterpolationMode = InterpMode.Cubic;
             _defaultInterpolationPreset = -1;
 
-            if (_editingInterpolationKeyframe != null)
+            if (!_isStateMachineMode)
             {
-                _editingInterpolationKeyframe.Interp = InterpMode.Cubic;
-                _editingInterpolationKeyframe.Preset = EasingPreset.CustomBezier;
-                _editingInterpolationKeyframe.X1 = _defaultInterpolationX1;
-                _editingInterpolationKeyframe.Y1 = _defaultInterpolationY1;
-                _editingInterpolationKeyframe.X2 = _defaultInterpolationX2;
-                _editingInterpolationKeyframe.Y2 = _defaultInterpolationY2;
-
-                foreach (var kf in _selectedTimelineKeyframes)
-                {
-                    if (kf != null && !ReferenceEquals(kf, _editingInterpolationKeyframe))
-                    {
-                        kf.Interp = InterpMode.Cubic;
-                        kf.Preset = EasingPreset.CustomBezier;
-                        kf.X1 = _defaultInterpolationX1;
-                        kf.Y1 = _defaultInterpolationY1;
-                        kf.X2 = _defaultInterpolationX2;
-                        kf.Y2 = _defaultInterpolationY2;
-                    }
-                }
-
-                SyncRealtimeEvaluator();
+                ApplyInterpolationToKeyframeSelection(InterpMode.Cubic, _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2, EasingPreset.CustomBezier);
             }
-
-            var transTargets = new List<StateTransition>(_selectedGraphTransitions);
-            if (_selectedGraphTransition != null && !transTargets.Contains(_selectedGraphTransition))
-                transTargets.Add(_selectedGraphTransition);
-            foreach (var tr in transTargets)
+            else
             {
-                if (tr == null) continue;
-                tr.Interpolation = InterpMode.Cubic;
-                tr.X1 = _defaultInterpolationX1;
-                tr.Y1 = _defaultInterpolationY1;
-                tr.X2 = _defaultInterpolationX2;
-                tr.Y2 = _defaultInterpolationY2;
+                var transTargets = new List<StateTransition>(_selectedGraphTransitions);
+                if (_selectedGraphTransition != null && !transTargets.Contains(_selectedGraphTransition))
+                    transTargets.Add(_selectedGraphTransition);
+                foreach (var tr in transTargets)
+                {
+                    if (tr == null) continue;
+                    tr.Interpolation = InterpMode.Cubic;
+                    tr.X1 = _defaultInterpolationX1;
+                    tr.Y1 = _defaultInterpolationY1;
+                    tr.X2 = _defaultInterpolationX2;
+                    tr.Y2 = _defaultInterpolationY2;
+                }
             }
 
             UpdateDefaultInterpolationPresetSelection();
@@ -2328,7 +2357,15 @@ namespace Kerf.UI
             if (_defaultInterpolationCanvas != null && _defaultInterpolationCanvas.IsMouseCaptured)
                 _defaultInterpolationCanvas.ReleaseMouseCapture();
             if (History != null) History.MarkDirty();
-            RefreshTimelineCanvas();
+            if (!_isStateMachineMode)
+            {
+                SyncRealtimeEvaluator();
+                RefreshTimelineCanvas();
+            }
+            else
+            {
+                TriggerStateMachineStep();
+            }
             e.Handled = true;
         }
 
@@ -15748,16 +15785,55 @@ namespace Kerf.UI
 
         private void FindTimelineInterpolationKey()
         {
-            if (_timelineController == null || _timelineController.ActiveClip == null || _selectedLayers.Count == 0)
+            if (_timelineController == null || _timelineController.ActiveClip == null)
             {
                 _editingInterpolationKeyframe = null;
                 _editingInterpolationTrack = null;
                 return;
             }
+
+            // 1. If keyframe(s) are already selected in timeline, bind to the selection!
+            if (_selectedTimelineKeyframes != null && _selectedTimelineKeyframes.Count > 0)
+            {
+                if (_editingInterpolationKeyframe == null || !_selectedTimelineKeyframes.Contains(_editingInterpolationKeyframe))
+                {
+                    _editingInterpolationKeyframe = _selectedTimelineKeyframes.FirstOrDefault();
+                }
+
+                if (_editingInterpolationKeyframe != null)
+                {
+                    if (_editingInterpolationTrack == null || _editingInterpolationTrack.Keys == null || !_editingInterpolationTrack.Keys.Contains(_editingInterpolationKeyframe))
+                    {
+                        AnimTrack tr;
+                        if (_timelineKeyframeOwners.TryGetValue(_editingInterpolationKeyframe, out tr))
+                        {
+                            _editingInterpolationTrack = tr;
+                        }
+                        else if (_timelineController.ActiveClip.Tracks != null)
+                        {
+                            _editingInterpolationTrack = _timelineController.ActiveClip.Tracks.FirstOrDefault(t => t != null && t.Keys != null && t.Keys.Contains(_editingInterpolationKeyframe));
+                            if (_editingInterpolationTrack != null)
+                                _timelineKeyframeOwners[_editingInterpolationKeyframe] = _editingInterpolationTrack;
+                        }
+                    }
+                    return;
+                }
+            }
+
+            // 2. Fallback: if no keyframe selected, check selected canvas layer
+            if (_selectedLayers == null || _selectedLayers.Count == 0)
+            {
+                _editingInterpolationKeyframe = null;
+                _editingInterpolationTrack = null;
+                return;
+            }
+
             uint selectedId = PropertyBinder.GetNumericNodeId(_selectedLayers[0].Id);
             if (_editingInterpolationKeyframe != null && _editingInterpolationTrack != null &&
-                _editingInterpolationTrack.NodeId == selectedId && _timelineController.ActiveClip.Tracks.Contains(_editingInterpolationTrack) &&
+                _editingInterpolationTrack.NodeId == selectedId && _timelineController.ActiveClip.Tracks != null &&
+                _timelineController.ActiveClip.Tracks.Contains(_editingInterpolationTrack) &&
                 _editingInterpolationTrack.Keys != null && _editingInterpolationTrack.Keys.Contains(_editingInterpolationKeyframe)) return;
+
             _editingInterpolationKeyframe = null;
             _editingInterpolationTrack = null;
             var candidates = new List<Tuple<AnimTrack, Keyframe, double>>();
@@ -20679,6 +20755,7 @@ namespace Kerf.UI
 
         private void TriggerStateMachineStep(bool continuePlayback = false)
         {
+            if (!_isStateMachineMode) return;
             if (_timelineController != null)
             {
                 _timelineController.UseStateMachine = true;
@@ -20729,6 +20806,9 @@ namespace Kerf.UI
             if (_timelineController != null) _timelineController.UseStateMachine = stateMachineMode;
             if (stateMachineMode)
             {
+                _selectedTimelineKeyframes.Clear();
+                _editingInterpolationKeyframe = null;
+                _editingInterpolationTrack = null;
                 if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
                 if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Visible;
                 BuildStateMachineInputsControls();
@@ -20737,11 +20817,16 @@ namespace Kerf.UI
             }
             else
             {
+                _selectedGraphTransition = null;
+                _selectedGraphTransitions.Clear();
+                if (_interactiveEventDispatcher != null) _interactiveEventDispatcher.Reset();
                 if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Collapsed;
                 if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Visible;
                 ApplyGraphEditorVisibility();
                 RefreshTimelineUI();
+                FindTimelineInterpolationKey();
             }
+            UpdateDefaultInterpolationFromSelection();
             UpdateTimelineModeTabs();
             if (_timelineController != null) _timelineController.Seek(_timelineController.CurrentTime);
         }
