@@ -65,3 +65,4 @@
 - JSON schema serialization layout inside `scene.json` and `animations.json`.
 - WPF modal layout and styling for Migration Review Dialog in `StudioView.cs`.
 - Standard zip compression implementation using `System.IO.Compression.ZipArchive`.
+

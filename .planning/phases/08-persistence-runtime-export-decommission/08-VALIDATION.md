@@ -75,3 +75,4 @@ created: "2026-11-09"
 - [x] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** verified 2026-11-09
+
