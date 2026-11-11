@@ -4,8 +4,19 @@ using Kerf.Model;
 
 namespace Kerf.Engine.Animation
 {
+    /// <summary>
+    /// Non-destructive property binder for the Kerf motion engine (Phase 8 / D-05, DECOM-01).
+    /// Binds animated poses strictly to LayerNode.RenderTransform (TranslationX/Y, ScaleX/Y, VisualWidth/Height,
+    /// Rotation, AnchorX/Y) and visual Opacity.
+    /// Never mutates layout geometry (LayerNode.Width, LayerNode.Height, LayerNode.X, LayerNode.Y),
+    /// guaranteeing that Auto Layout bounds, flexbox reflows, and vector geometry remain 100% intact with zero drift.
+    /// </summary>
     public static class PropertyBinder
     {
+        /// <summary>
+        /// 32-bit FNV-1a hash calculation preserved strictly for migration and compact numeric runtime indexing.
+        /// All modern authoring, animation persistence, and external APIs prefer stable string GUIDs.
+        /// </summary>
         public static uint GetNumericNodeId(string id)
         {
             if (string.IsNullOrEmpty(id)) return 0;
@@ -21,6 +32,23 @@ namespace Kerf.Engine.Animation
             }
         }
 
+        /// <summary>
+        /// Convenience overload resolving numeric ID from layer.Id automatically.
+        /// </summary>
+        public static void ApplyPoseToLayer(
+            LayerNode layer,
+            Dictionary<uint, Dictionary<ushort, double>> pose)
+        {
+            if (layer == null || pose == null) return;
+            uint numId = GetNumericNodeId(layer.Id);
+            ApplyPoseToLayer(layer, numId, pose);
+        }
+
+        /// <summary>
+        /// Applies an evaluated animation pose to a layer non-destructively.
+        /// Exclusively writes to layer.RenderTransform and visual properties (Opacity, CornerRadius),
+        /// never mutating design layout bounds (layer.Width, layer.Height, layer.X, layer.Y).
+        /// </summary>
         public static void ApplyPoseToLayer(
             LayerNode layer,
             uint numericNodeId,
@@ -96,13 +124,13 @@ namespace Kerf.Engine.Animation
                 layer.RenderTransform.Rotation = val - layer.Rotation;
             }
 
-            // 4. Visual Opacity (non-destructive to geometry)
+            // 5. Visual Opacity (non-destructive to geometry)
             if (props.TryGetValue((ushort)PropKey.Opacity, out val))
             {
                 layer.Opacity = Math.Max(0.0, Math.Min(1.0, val));
             }
 
-            // 5. CornerRadius
+            // 6. CornerRadius styling (non-destructive to geometry)
             if (props.TryGetValue((ushort)PropKey.CornerRadius, out val))
             {
                 layer.CornerRadius = Math.Max(0.0, val);

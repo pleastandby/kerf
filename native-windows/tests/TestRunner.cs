@@ -108,6 +108,7 @@ namespace Kerf.Tests
             RunTest("Schema v4.0.0 Persistence, GUID Auto-Healing & Orphan Resilience", TestSchemaV4PersistenceAndOrphanMigration);
             RunTest("Native .kfx ZIP Container Export, Dual-Payload & Security Validation", TestNativeKfxZipExportAndSecurityValidation);
             RunTest("Standalone Headless KerfPlayer Runtime SDK & Matrix Evaluation", TestStandaloneHeadlessKerfPlayerRuntime);
+            RunTest("Legacy Animation Decommissioning & Non-Destructive Transforms", TestLegacyAnimationDecommissioningAndNonDestructiveTransforms);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9176,6 +9177,155 @@ namespace Kerf.Tests
 
             player.Destroy();
             Assert(!backend.IsInitialized, "Backend destroyed cleanly");
+        }
+
+        private static void TestLegacyAnimationDecommissioningAndNonDestructiveTransforms()
+        {
+            var page = new Page();
+
+            // 1. Create a nested Auto Layout frame with 3 child elements, padding = 16, gap = 8, width = 400, height = 200
+            var frame = new LayerNode
+            {
+                Id = "parent_autolayout_frame",
+                Type = ElementType.Frame,
+                Name = "Parent AutoLayout Frame",
+                X = 50,
+                Y = 50,
+                Width = 400,
+                Height = 200,
+                AutoLayout = new AutoLayoutData
+                {
+                    Mode = AutoLayoutMode.Horizontal,
+                    PaddingLeft = 16,
+                    PaddingTop = 16,
+                    PaddingRight = 16,
+                    PaddingBottom = 16,
+                    Gap = 8,
+                    SizingH = SizingMode.Fixed,
+                    SizingV = SizingMode.Fixed
+                }
+            };
+            page.Layers.Add(frame);
+
+            var child1 = new LayerNode
+            {
+                Id = "child_layer_1",
+                Type = ElementType.Rectangle,
+                Name = "Item Alpha",
+                Width = 80,
+                Height = 60,
+                ParentId = frame.Id
+            };
+            var child2 = new LayerNode
+            {
+                Id = "child_layer_2",
+                Type = ElementType.Rectangle,
+                Name = "Item Beta",
+                Width = 100,
+                Height = 60,
+                ParentId = frame.Id
+            };
+            var child3 = new LayerNode
+            {
+                Id = "child_layer_3",
+                Type = ElementType.Rectangle,
+                Name = "Item Gamma",
+                Width = 120,
+                Height = 60,
+                ParentId = frame.Id
+            };
+
+            frame.Children.Add(child1);
+            frame.Children.Add(child2);
+            frame.Children.Add(child3);
+
+            // Run AutoLayout reflow to establish canonical layout geometry
+            AutoLayoutEngine.Reflow(frame);
+
+            // Record initial rest positions and bounds
+            double initC1X = child1.X;
+            double initC1Y = child1.Y;
+            double initC2X = child2.X;
+            double initC2Y = child2.Y;
+            double initC3X = child3.X;
+            double initC3Y = child3.Y;
+
+            Assert(frame.Width == 400.0, "Initial frame width is 400");
+            Assert(frame.Height == 200.0, "Initial frame height is 200");
+            Assert(frame.AutoLayout.PaddingLeft == 16.0, "AutoLayout PaddingLeft is 16");
+            Assert(frame.AutoLayout.Gap == 8.0, "AutoLayout Gap is 8");
+            Assert(child1.Width == 80.0 && child1.Height == 60.0, "Child 1 bounds are 80x60");
+            Assert(child2.Width == 100.0 && child2.Height == 60.0, "Child 2 bounds are 100x60");
+            Assert(child3.Width == 120.0 && child3.Height == 60.0, "Child 3 bounds are 120x60");
+
+            // 2. Applying an animated pose scaling the frame by 2.5x and translating by (+100, +50)
+            uint frameId = PropertyBinder.GetNumericNodeId(frame.Id);
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            pose[frameId] = new Dictionary<ushort, double>
+            {
+                { (ushort)PropKey.ScaleX, 2.5 },
+                { (ushort)PropKey.ScaleY, 2.5 },
+                { (ushort)PropKey.X, frame.X + 100.0 }, // Target X = 150 -> TranslationX = 100
+                { (ushort)PropKey.Y, frame.Y + 50.0 }   // Target Y = 100 -> TranslationY = 50
+            };
+
+            PropertyBinder.ApplyPoseToLayer(frame, frameId, pose);
+
+            // 3. Asserting that frame.RenderTransform.ScaleX == 2.5 and frame.RenderTransform.TranslationX == 100
+            Assert(frame.RenderTransform != null, "frame.RenderTransform is non-null after ApplyPoseToLayer");
+            Assert(Math.Abs(frame.RenderTransform.ScaleX - 2.5) < 1e-6, "frame.RenderTransform.ScaleX == 2.5");
+            Assert(Math.Abs(frame.RenderTransform.ScaleY - 2.5) < 1e-6, "frame.RenderTransform.ScaleY == 2.5");
+            Assert(Math.Abs(frame.RenderTransform.TranslationX - 100.0) < 1e-6, "frame.RenderTransform.TranslationX == 100.0");
+            Assert(Math.Abs(frame.RenderTransform.TranslationY - 50.0) < 1e-6, "frame.RenderTransform.TranslationY == 50.0");
+
+            // 4. Asserting that frame.Width == 400 and frame.Height == 200 (100% rest bounds preserved)
+            Assert(frame.Width == 400.0, "frame.Width preserved at 400 (zero layout distortion)");
+            Assert(frame.Height == 200.0, "frame.Height preserved at 200 (zero layout distortion)");
+            Assert(frame.X == 50.0 && frame.Y == 50.0, "frame.X and frame.Y design coordinates preserved at (50, 50)");
+
+            // 5. Asserting that child Auto Layout positions, padding, and gap are completely unaffected by animation
+            Assert(frame.AutoLayout.PaddingLeft == 16.0 && frame.AutoLayout.PaddingTop == 16.0, "Parent AutoLayout padding intact");
+            Assert(frame.AutoLayout.PaddingRight == 16.0 && frame.AutoLayout.PaddingBottom == 16.0, "Parent AutoLayout padding right/bottom intact");
+            Assert(frame.AutoLayout.Gap == 8.0, "Parent AutoLayout gap intact at 8");
+            Assert(child1.Width == 80.0 && child1.Height == 60.0, "Child 1 width/height intact");
+            Assert(child2.Width == 100.0 && child2.Height == 60.0, "Child 2 width/height intact");
+            Assert(child3.Width == 120.0 && child3.Height == 60.0, "Child 3 width/height intact");
+            Assert(child1.X == initC1X && child1.Y == initC1Y, "Child 1 X/Y position unaffected by parent scale/translation");
+            Assert(child2.X == initC2X && child2.Y == initC2Y, "Child 2 X/Y position unaffected by parent scale/translation");
+            Assert(child3.X == initC3X && child3.Y == initC3Y, "Child 3 X/Y position unaffected by parent scale/translation");
+
+            // 6. Test child layer animation pose application
+            uint child2Id = PropertyBinder.GetNumericNodeId(child2.Id);
+            var childPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            childPose[child2Id] = new Dictionary<ushort, double>
+            {
+                { (ushort)PropKey.ScaleX, 1.75 },
+                { (ushort)PropKey.ScaleY, 1.75 },
+                { (ushort)PropKey.Rotation, 45.0 }
+            };
+            PropertyBinder.ApplyPoseToLayer(child2, childPose);
+
+            Assert(child2.RenderTransform != null, "child2.RenderTransform instantiated");
+            Assert(Math.Abs(child2.RenderTransform.ScaleX - 1.75) < 1e-6, "child2.RenderTransform.ScaleX == 1.75");
+            Assert(Math.Abs(child2.RenderTransform.Rotation - 45.0) < 1e-6, "child2.RenderTransform.Rotation == 45.0");
+            Assert(child2.Width == 100.0 && child2.Height == 60.0, "child2 design bounds preserved at 100x60");
+
+            // Reflow should not change any design bounds even while RenderTransform is non-identity
+            AutoLayoutEngine.Reflow(frame);
+            Assert(child2.Width == 100.0 && child2.Height == 60.0, "child2 bounds preserved after AutoLayout reflow");
+            Assert(frame.Width == 400.0 && frame.Height == 200.0, "frame bounds preserved after AutoLayout reflow");
+
+            // 7. Resetting frame.RenderTransform and asserting IsIdentity is true with zero numerical drift
+            frame.RenderTransform.Reset();
+            Assert(frame.RenderTransform.IsIdentity, "frame.RenderTransform.IsIdentity is true after Reset()");
+            child2.RenderTransform.Reset();
+            Assert(child2.RenderTransform.IsIdentity, "child2.RenderTransform.IsIdentity is true after Reset()");
+
+            Assert(frame.Width == 400.0 && frame.Height == 200.0, "Frame design rest bounds completely intact (zero drift)");
+            Assert(frame.X == 50.0 && frame.Y == 50.0, "Frame design coordinates completely intact");
+            Assert(child1.X == initC1X && child1.Y == initC1Y, "Child 1 layout positions completely intact");
+            Assert(child2.X == initC2X && child2.Y == initC2Y, "Child 2 layout positions completely intact");
+            Assert(child3.X == initC3X && child3.Y == initC3Y, "Child 3 layout positions completely intact");
         }
     }
 }
