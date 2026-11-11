@@ -101,6 +101,7 @@ namespace Kerf.Tests
             RunTest("Continuous Playback, Input Gating & Interactive Pointer Transitions", TestContinuousPlaybackAndInputDrivenTransitions);
             RunTest("Auto-Unhover on PointerExit, Cycle Guard & Continuous State Looping", TestAutoUnhoverCycleGuardAndStateLooping);
             RunTest("Timeline Keyframe Easing, Evaluation & Playback Isolation", TestTimelineKeyframeEasingAndPlaybackIsolation);
+            RunTest("Schema v4.0.0 Persistence, GUID Auto-Healing & Orphan Resilience", TestSchemaV4PersistenceAndOrphanMigration);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -8659,6 +8660,134 @@ namespace Kerf.Tests
             var smPose = new Dictionary<uint, Dictionary<ushort, double>>();
             smRuntime.Update(0.016, smPose);
             Assert(smRuntime.LayerRuntimes[0].CurrentState == sAnim, "State machine independently transitions to AnimState");
+        }
+
+        private static void TestSchemaV4PersistenceAndOrphanMigration()
+        {
+            // 1. Schema v4.0.0 round-trip serialization and deserialization
+            var doc = new KerfDocument();
+            Assert(doc.SchemaVersion == "4.0.0", "KerfDocument constructor initializes SchemaVersion to '4.0.0'");
+
+            var activePage = doc.GetActivePage();
+            var layerA = new LayerNode { Id = "layer_alpha_123", Name = "Hero Card", X = 50, Y = 60, Width = 200, Height = 100 };
+            var layerB = new LayerNode { Id = "layer_beta_456", Name = "ActionButton", X = 80, Y = 120, Width = 120, Height = 40 };
+            activePage.Layers.Add(layerA);
+            activePage.Layers.Add(layerB);
+
+            var clip = new Clip(1u, "MainTimeline", 3.0, 60.0);
+            var trackA = new Track(PropertyBinder.GetNumericNodeId(layerA.Id), (ushort)PropKey.X, layerA.Id, "Position X");
+            trackA.AddKeyframe(new Keyframe(0.0, 50.0, InterpMode.Linear));
+            trackA.AddKeyframe(new Keyframe(1.0, 150.0, InterpMode.Cubic, 0.25, 0.1, 0.25, 1.0));
+            clip.AddTrack(trackA);
+            doc.Animation.Clips.Add(clip);
+
+            var sm = doc.Animation.StateMachine;
+            sm.Name = "InteractiveCardMachine";
+            int inputHover = sm.AddInput(MachineInput.Bool("isHovered", false));
+            var layer = new MachineLayer("BaseLayer");
+            int sEntry = layer.AddState(new MachineState(0, "Entry", StateKind.Entry));
+            int sIdle = layer.AddState(new MachineState(1, "Idle", StateKind.Animation, 0));
+            int sHover = layer.AddState(new MachineState(2, "Hovered", StateKind.Animation, 0));
+            layer.AddTransition(new StateTransition(sEntry, sIdle, 0.0));
+            var tToHover = new StateTransition(sIdle, sHover, 0.2)
+                .WithCondition(new TransitionCondition(inputHover, ConditionOp.Eq, 1.0));
+            layer.AddTransition(tToHover);
+            sm.AddLayer(layer);
+
+            var listenerA = new NodeListener(PropertyBinder.GetNumericNodeId(layerA.Id), PointerEventKind.Enter);
+            listenerA.TargetLayerId = layerA.Id;
+            listenerA.Actions.Add(new ListenerAction(ActionKind.SetBool, inputHover, 1.0));
+            sm.AddListener(listenerA);
+
+            string json = DocumentMigrations.SerializeToCanonicalJson(doc);
+            Assert(!string.IsNullOrEmpty(json) && json.Contains("\"SchemaVersion\":\"4.0.0\""), "Serialized JSON contains SchemaVersion 4.0.0");
+
+            MigrationReport roundTripReport;
+            var deserialized = DocumentMigrations.LoadAndMigrate(json, out roundTripReport);
+            Assert(deserialized != null, "Deserialized document is not null");
+            Assert(deserialized.SchemaVersion == "4.0.0", "Deserialized document has SchemaVersion 4.0.0");
+            Assert(roundTripReport.UnresolvedTracksCount == 0, "Round-trip has 0 unresolved tracks");
+            Assert(roundTripReport.UnresolvedListenersCount == 0, "Round-trip has 0 unresolved listeners");
+            Assert(!roundTripReport.RequiresUserReview, "Round-trip report does not require user review");
+            Assert(deserialized.Animation.Clips.Count == 1, "Clips count preserved");
+            Assert(deserialized.Animation.Clips[0].Tracks.Count == 1, "Tracks count preserved");
+            Assert(deserialized.Animation.Clips[0].Tracks[0].TargetNodeId == layerA.Id, "Track TargetNodeId preserved");
+            Assert(deserialized.Animation.Clips[0].Tracks[0].IsActive, "Track IsActive is true");
+
+            // 2. Legacy 32-bit FNV-1a hash auto-healing
+            // Construct a legacy v3.0 document where Track has NodeId hash but TargetNodeId is empty
+            uint layerBHash = PropertyBinder.GetNumericNodeId(layerB.Id);
+            var legacyDoc = new KerfDocument();
+            legacyDoc.SchemaVersion = "3.0.0";
+            var legPage = legacyDoc.GetActivePage();
+            legPage.Layers.Add(new LayerNode { Id = layerB.Id, Name = "ActionButton" });
+
+            var legClip = new Clip(1u, "LegacyClip", 2.0);
+            var legTrack = new Track(layerBHash, (ushort)PropKey.Opacity);
+            legTrack.TargetNodeId = string.Empty; // Legacy documents had empty string TargetNodeId!
+            legTrack.AddKeyframe(new Keyframe(0.0, 1.0, InterpMode.Linear));
+            legClip.AddTrack(legTrack);
+            legacyDoc.Animation.Clips.Add(legClip);
+
+            var legListener = new NodeListener(layerBHash, PointerEventKind.Down);
+            legListener.TargetLayerId = string.Empty; // Legacy listener had only numeric target
+            legacyDoc.Animation.StateMachine.AddListener(legListener);
+
+            string legacyJson = DocumentMigrations.SerializeToCanonicalJson(legacyDoc);
+            MigrationReport legacyReport;
+            var healedDoc = DocumentMigrations.LoadAndMigrate(legacyJson, out legacyReport);
+
+            Assert(healedDoc.SchemaVersion == "4.0.0", "Legacy doc migrated to 4.0.0");
+            Assert(legacyReport.ResolvedTracksCount >= 1, "Legacy track resolved via FNV-1a auto-healing");
+            Assert(healedDoc.Animation.Clips[0].Tracks[0].TargetNodeId == layerB.Id, "Legacy Track TargetNodeId auto-healed to layer GUID");
+            Assert(healedDoc.Animation.Clips[0].Tracks[0].IsActive, "Auto-healed track is active");
+            Assert(healedDoc.Animation.StateMachine.Listeners[0].TargetLayerId == layerB.Id, "Legacy Listener TargetLayerId auto-healed to layer GUID");
+            Assert(healedDoc.Animation.StateMachine.Listeners[0].IsActive, "Auto-healed listener is active");
+            Assert(legacyReport.UnresolvedTracksCount == 0 && legacyReport.UnresolvedListenersCount == 0, "No unresolved items in auto-healing test");
+
+            // 3. Orphaned reference deactivation & non-destructive evaluation resilience
+            // Construct a document referencing a deleted layer "ghost_layer_999"
+            var orphanDoc = new KerfDocument();
+            orphanDoc.SchemaVersion = "3.0.0";
+            var orphPage = orphanDoc.GetActivePage();
+            orphPage.Layers.Add(new LayerNode { Id = "existing_layer", Name = "Existing" });
+
+            var orphClip = new Clip(2u, "OrphanClip", 2.0);
+            var deadTrack = new Track(999999u, (ushort)PropKey.Y, "ghost_layer_999", "Position Y");
+            deadTrack.AddKeyframe(new Keyframe(0.0, 100.0, InterpMode.Linear));
+            orphClip.AddTrack(deadTrack);
+            orphanDoc.Animation.Clips.Add(orphClip);
+
+            var deadListener = new NodeListener(888888u, PointerEventKind.Click);
+            deadListener.TargetLayerId = "ghost_listener_layer_888";
+            deadListener.Actions.Add(new ListenerAction(ActionKind.Fire, 0));
+            orphanDoc.Animation.StateMachine.AddListener(deadListener);
+
+            string orphanJson = DocumentMigrations.SerializeToCanonicalJson(orphanDoc);
+            MigrationReport orphanReport;
+            var migratedOrphanDoc = DocumentMigrations.LoadAndMigrate(orphanJson, out orphanReport);
+
+            Assert(migratedOrphanDoc.SchemaVersion == "4.0.0", "Orphan doc migrated to 4.0.0");
+            Assert(orphanReport.UnresolvedTracksCount == 1, "Report flagged exactly 1 unresolved track");
+            Assert(orphanReport.UnresolvedListenersCount == 1, "Report flagged exactly 1 unresolved listener");
+            Assert(orphanReport.RequiresUserReview, "Report indicates RequiresUserReview == true");
+            Assert(orphanReport.OrphanedItems.Count == 2, "Report contains 2 orphaned items");
+
+            var loadedDeadTrack = migratedOrphanDoc.Animation.Clips[0].Tracks[0];
+            Assert(!loadedDeadTrack.IsActive, "Orphaned track has IsActive = false");
+
+            var loadedDeadListener = migratedOrphanDoc.Animation.StateMachine.Listeners[0];
+            Assert(!loadedDeadListener.IsActive, "Orphaned listener has IsActive = false");
+
+            // Ensure evaluation of clip with inactive track does NOT add properties or throw
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            migratedOrphanDoc.Animation.Clips[0].SampleToPose(0.5, pose);
+            Assert(!pose.ContainsKey(999999u), "Inactive track never writes to evaluated pose");
+
+            // Ensure state machine dispatch ignores inactive listener
+            var runtime = new StateMachineRuntime(migratedOrphanDoc.Animation.StateMachine, migratedOrphanDoc.Animation.Clips);
+            runtime.OnPointerEvent(888888u, PointerEventKind.Click);
+            Assert(runtime.Definition.Inputs.Count == 0 || !runtime.Definition.Inputs[0].Fired, "Inactive listener does not fire action");
         }
     }
 }

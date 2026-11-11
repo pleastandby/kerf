@@ -157,6 +157,8 @@ namespace Kerf.Engine.Animation
 
     public class Track
     {
+        public string Id { get; set; }
+        public bool IsActive { get; set; }
         public uint NodeId { get; set; }
         public string TargetNodeId { get; set; }
         public ushort Prop { get; set; }
@@ -167,6 +169,8 @@ namespace Kerf.Engine.Animation
 
         public Track(uint nodeId, ushort prop, string targetNodeId = null, string propPath = null)
         {
+            Id = Guid.NewGuid().ToString("N");
+            IsActive = true;
             NodeId = nodeId;
             TargetNodeId = targetNodeId ?? string.Empty;
             Prop = prop;
@@ -387,7 +391,7 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < Tracks.Count; i++)
             {
                 Track tr = Tracks[i];
-                if (tr == null) continue;
+                if (tr == null || !tr.IsActive) continue;
                 double val = tr.Sample(t);
 
                 Dictionary<ushort, double> nodeProps;
@@ -518,7 +522,7 @@ namespace Kerf.Engine.Animation
         public AnimationProjectData()
         {
             Clips = new List<Clip>();
-            StateMachine = null;
+            StateMachine = new StateMachineDefinition();
             ActiveClipId = 0;
         }
     }

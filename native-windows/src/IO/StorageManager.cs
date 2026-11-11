@@ -106,13 +106,19 @@ namespace Kerf.IO
 
         public static KerfDocument LoadDocument(string filePath)
         {
+            MigrationReport report;
+            return LoadDocumentWithReport(filePath, out report);
+        }
+
+        public static KerfDocument LoadDocumentWithReport(string filePath, out MigrationReport report)
+        {
             if (!File.Exists(filePath))
             {
                 throw new FileNotFoundException("Document file not found: " + filePath);
             }
 
             string json = File.ReadAllText(filePath, Encoding.UTF8);
-            var doc = DocumentMigrations.MigrateToCanonical(json);
+            var doc = DocumentMigrations.LoadAndMigrate(json, out report);
             AddRecentProject(filePath);
             return doc;
         }

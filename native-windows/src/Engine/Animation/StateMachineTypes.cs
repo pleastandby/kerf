@@ -733,6 +733,8 @@ namespace Kerf.Engine.Animation
     {
         public string ListenerId { get; set; }
         public uint TargetNodeId { get; set; }
+        public string TargetLayerId { get; set; }
+        public bool IsActive { get; set; }
         public PointerEventKind Kind { get; set; }
         public bool Enabled { get; set; }
         public List<ListenerAction> Actions { get; set; }
@@ -743,6 +745,8 @@ namespace Kerf.Engine.Animation
         {
             ListenerId = "sm_lst_" + Guid.NewGuid().ToString("N");
             TargetNodeId = targetNodeId;
+            TargetLayerId = string.Empty;
+            IsActive = true;
             Kind = kind;
             Enabled = true;
             Actions = new List<ListenerAction>();
@@ -752,6 +756,8 @@ namespace Kerf.Engine.Animation
         {
             ListenerId = !string.IsNullOrEmpty(listenerId) ? listenerId : ("sm_lst_" + Guid.NewGuid().ToString("N"));
             TargetNodeId = targetNodeId;
+            TargetLayerId = string.Empty;
+            IsActive = true;
             Kind = kind;
             Enabled = enabled;
             Actions = new List<ListenerAction>();
@@ -760,6 +766,8 @@ namespace Kerf.Engine.Animation
         public NodeListener Clone()
         {
             var copy = new NodeListener(TargetNodeId, Kind, ListenerId, Enabled);
+            copy.TargetLayerId = TargetLayerId;
+            copy.IsActive = IsActive;
             if (Actions != null)
             {
                 for (int i = 0; i < Actions.Count; i++)

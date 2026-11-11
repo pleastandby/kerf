@@ -1375,7 +1375,7 @@ namespace Kerf.Model
         {
             Id = Guid.NewGuid().ToString();
             Name = "Untitled Project";
-            SchemaVersion = "3.0.0";
+            SchemaVersion = "4.0.0";
             CreatedAt = DateTime.UtcNow.Ticks;
             UpdatedAt = DateTime.UtcNow.Ticks;
             Pages = new List<Page>();

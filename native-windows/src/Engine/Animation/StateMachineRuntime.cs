@@ -343,7 +343,7 @@ namespace Kerf.Engine.Animation
             for (int i = 0; i < Definition.Listeners.Count; i++)
             {
                 NodeListener listener = Definition.Listeners[i];
-                if (listener != null && listener.Enabled && listener.Kind == kind && listener.Actions != null)
+                if (listener != null && listener.Enabled && listener.IsActive && listener.Kind == kind && listener.Actions != null)
                 {
                     bool targetMatches = listener.TargetNodeId == 0u ||
                                          (targetNodeIds != null && targetNodeIds.Contains(listener.TargetNodeId));
@@ -361,7 +361,7 @@ namespace Kerf.Engine.Animation
                 for (int i = 0; i < Definition.Listeners.Count; i++)
                 {
                     NodeListener listener = Definition.Listeners[i];
-                    if (listener != null && listener.Enabled && (listener.Kind == PointerEventKind.Enter || listener.Kind == PointerEventKind.PointerEnter) && listener.Actions != null)
+                    if (listener != null && listener.Enabled && listener.IsActive && (listener.Kind == PointerEventKind.Enter || listener.Kind == PointerEventKind.PointerEnter) && listener.Actions != null)
                     {
                         bool targetMatches = listener.TargetNodeId == 0u || targetNodeIds.Contains(listener.TargetNodeId);
                         if (targetMatches)
