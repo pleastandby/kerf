@@ -9403,22 +9403,68 @@ namespace Kerf.Tests
                 Assert(htmlContent.Contains("isHovering?"), "Web player includes state machine inputs");
                 Assert(htmlContent.Contains("requestAnimationFrame"), "Web player includes standalone requestAnimationFrame runner");
 
-                // 4. Test MP4 Video Animation Exporter
+                // 4. Test MP4 Video Animation Exporter (After Effects options)
                 string mp4Path = Path.Combine(tempDir, "animation_clip.mp4");
-                Mp4Exporter.ExportClipToVideo(doc, clip, mp4Path, 30, 1.0);
+                var mp4Opts = new Mp4ExportOptions
+                {
+                    Clip = clip,
+                    Fps = 59.94,
+                    Scale = 1.0,
+                    TargetBitrateMbps = 18.0,
+                    MaxBitrateMbps = 25.0,
+                    BitrateMode = "VBR",
+                    Profile = "High",
+                    KeyframeIntervalFrames = 60,
+                    StartTimeSeconds = 0.0,
+                    EndTimeSeconds = 1.0
+                };
+                Mp4Exporter.ExportClipToVideo(doc, mp4Opts, mp4Path);
                 Assert(File.Exists(mp4Path), "MP4 video file was created");
                 byte[] mp4Bytes = File.ReadAllBytes(mp4Path);
                 Assert(mp4Bytes.Length > 100, "MP4 file has substantial binary content (" + mp4Bytes.Length + " bytes)");
                 string mp4HeaderStr = Encoding.ASCII.GetString(mp4Bytes, 4, 4);
                 Assert(mp4HeaderStr == "ftyp", "MP4 file begins with ISO 'ftyp' atom box");
 
-                // 5. Test ExportDialog format model and enum values
+                // 5. Test Animated GIF Exporter (GIF89a with LZW, Netscape looping & Floyd-Steinberg dithering)
+                string gifPath = Path.Combine(tempDir, "animation.gif");
+                var gifOpts = new GifExportOptions
+                {
+                    Clip = clip,
+                    Fps = 15.0,
+                    Scale = 0.5,
+                    LoopCount = 0,
+                    PreserveTransparency = true,
+                    MaxColors = 128,
+                    ApplyDithering = true,
+                    StartTimeSeconds = 0.0,
+                    EndTimeSeconds = 1.0
+                };
+                GifExporter.ExportClipToGif(doc, gifOpts, gifPath);
+                Assert(File.Exists(gifPath), "Animated GIF file was created");
+                byte[] gifBytes = File.ReadAllBytes(gifPath);
+                Assert(gifBytes.Length > 50, "GIF file has substantial binary content (" + gifBytes.Length + " bytes)");
+                string gifHeader = Encoding.ASCII.GetString(gifBytes, 0, 6);
+                Assert(gifHeader == "GIF89a", "GIF file starts with GIF89a header");
+
+                string gifContentStr = Encoding.ASCII.GetString(gifBytes);
+                Assert(gifContentStr.Contains("NETSCAPE2.0"), "GIF contains NETSCAPE2.0 application extension for looping");
+
+                // Verify with System.Drawing
+                using (var gifImg = System.Drawing.Image.FromFile(gifPath))
+                {
+                    var fDim = new System.Drawing.Imaging.FrameDimension(gifImg.FrameDimensionsList[0]);
+                    int fCount = gifImg.GetFrameCount(fDim);
+                    Assert(fCount > 1, "GIF file contains multiple animated frames (" + fCount + " frames)");
+                }
+
+                // 6. Test ExportDialog format model and enum values
                 Assert((int)Kerf.UI.Dialogs.ExportFormatType.KfxRuntime == 0, "ExportFormatType.KfxRuntime == 0");
                 Assert((int)Kerf.UI.Dialogs.ExportFormatType.Png == 1, "ExportFormatType.Png == 1");
                 Assert((int)Kerf.UI.Dialogs.ExportFormatType.Jpeg == 2, "ExportFormatType.Jpeg == 2");
                 Assert((int)Kerf.UI.Dialogs.ExportFormatType.Svg == 3, "ExportFormatType.Svg == 3");
                 Assert((int)Kerf.UI.Dialogs.ExportFormatType.Pdf == 4, "ExportFormatType.Pdf == 4");
                 Assert((int)Kerf.UI.Dialogs.ExportFormatType.Mp4 == 5, "ExportFormatType.Mp4 == 5");
+                Assert((int)Kerf.UI.Dialogs.ExportFormatType.Gif == 6, "ExportFormatType.Gif == 6");
             }
             finally
             {

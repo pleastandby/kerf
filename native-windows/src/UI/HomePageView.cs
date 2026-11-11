@@ -308,7 +308,7 @@ namespace Kerf.UI
 
             var card3 = CreateMotionFeatureCard(
                 "Unified Export Window",
-                "Dedicated export modal: .kfx packages, standalone HTML5 web player runner, 60fps MP4 video, SVG, PDF, and PNG.",
+                "Dedicated export modal: .kfx packages, standalone HTML5 web player runner, After Effects MP4 video, animated GIF, SVG, PDF, and PNG.",
                 "#F6B322");
             Grid.SetColumn(card3, 2);
             cardsGrid.Children.Add(card3);
