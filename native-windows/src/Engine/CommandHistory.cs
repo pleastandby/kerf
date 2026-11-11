@@ -3293,4 +3293,50 @@ namespace Kerf.Engine
             if (_onChanged != null) _onChanged();
         }
     }
+
+    public class ResolveOrphanedReferencesCommand : ICommand
+    {
+        public string Description { get { return "Resolve Orphaned Animation References"; } }
+        private readonly KerfDocument _doc;
+        private readonly MigrationReport _report;
+        private readonly Dictionary<string, Kerf.UI.Dialogs.OrphanResolution> _resolutions;
+        private readonly string _previousAnimationJson;
+        private readonly Action _onChanged;
+
+        public ResolveOrphanedReferencesCommand(
+            KerfDocument doc,
+            MigrationReport report,
+            IDictionary<string, Kerf.UI.Dialogs.OrphanResolution> resolutions,
+            Action onChanged = null)
+        {
+            _doc = doc;
+            _report = report;
+            _resolutions = resolutions != null
+                ? new Dictionary<string, Kerf.UI.Dialogs.OrphanResolution>(resolutions)
+                : new Dictionary<string, Kerf.UI.Dialogs.OrphanResolution>();
+            _onChanged = onChanged;
+
+            var serializer = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+            _previousAnimationJson = (_doc != null && _doc.Animation != null) ? serializer.Serialize(_doc.Animation) : null;
+        }
+
+        public void Execute()
+        {
+            if (_doc != null && _resolutions != null && _report != null)
+            {
+                Kerf.UI.Dialogs.MigrationReviewDialog.ApplyResolutions(_doc, _report, _resolutions);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_doc != null && !string.IsNullOrEmpty(_previousAnimationJson))
+            {
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                _doc.Animation = serializer.Deserialize<AnimationProjectData>(_previousAnimationJson);
+            }
+            if (_onChanged != null) _onChanged();
+        }
+    }
 }

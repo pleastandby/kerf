@@ -8788,6 +8788,66 @@ namespace Kerf.Tests
             var runtime = new StateMachineRuntime(migratedOrphanDoc.Animation.StateMachine, migratedOrphanDoc.Animation.Clips);
             runtime.OnPointerEvent(888888u, PointerEventKind.Click);
             Assert(runtime.Definition.Inputs.Count == 0 || !runtime.Definition.Inputs[0].Fired, "Inactive listener does not fire action");
+
+            // 4. Test Interactive MigrationReviewDialog Reconciliation API (Keep, Rebind, Purge)
+            var reviewDoc = new KerfDocument();
+            var revPage = reviewDoc.GetActivePage();
+            var realTargetLayer = new LayerNode { Id = "real_layer_777", Name = "Target Card", X = 20, Y = 30 };
+            revPage.Layers.Add(realTargetLayer);
+
+            var revClip = new Clip(3u, "ReconciliationClip", 4.0);
+            var trRebind = new Track(111111u, (ushort)PropKey.X, "missing_layer_1", "Position X");
+            trRebind.AddKeyframe(new Keyframe(0.0, 10.0, InterpMode.Linear));
+            var trPurge = new Track(222222u, (ushort)PropKey.Rotation, "missing_layer_2", "Rotation");
+            trPurge.AddKeyframe(new Keyframe(0.0, 45.0, InterpMode.Linear));
+            var trKeep = new Track(333333u, (ushort)PropKey.Opacity, "missing_layer_3", "Opacity");
+            trKeep.AddKeyframe(new Keyframe(0.0, 0.5, InterpMode.Linear));
+
+            revClip.AddTrack(trRebind);
+            revClip.AddTrack(trPurge);
+            revClip.AddTrack(trKeep);
+            reviewDoc.Animation.Clips.Add(revClip);
+
+            var reviewJson = DocumentMigrations.SerializeToCanonicalJson(reviewDoc);
+            MigrationReport reviewReport;
+            var loadedReviewDoc = DocumentMigrations.LoadAndMigrate(reviewJson, out reviewReport);
+
+            Assert(reviewReport.UnresolvedTracksCount == 3, "Loaded review doc has 3 unresolved tracks");
+            Assert(loadedReviewDoc.Animation.Clips[0].Tracks.Count == 3, "Clip initially has 3 tracks");
+
+            var choices = new Dictionary<string, Kerf.UI.Dialogs.OrphanResolution>();
+            choices[trRebind.Id] = new Kerf.UI.Dialogs.OrphanResolution(Kerf.UI.Dialogs.OrphanResolutionAction.Rebind, realTargetLayer.Id);
+            choices[trPurge.Id] = new Kerf.UI.Dialogs.OrphanResolution(Kerf.UI.Dialogs.OrphanResolutionAction.Purge, string.Empty);
+            choices[trKeep.Id] = new Kerf.UI.Dialogs.OrphanResolution(Kerf.UI.Dialogs.OrphanResolutionAction.Keep, string.Empty);
+
+            // Execute via transactional ResolveOrphanedReferencesCommand
+            var resolveCmd = new ResolveOrphanedReferencesCommand(loadedReviewDoc, reviewReport, choices);
+            resolveCmd.Execute();
+
+            // Verify outcomes after Execute
+            Assert(loadedReviewDoc.Animation.Clips[0].Tracks.Count == 2, "Purged track was removed from clip (2 tracks remaining)");
+
+            var reboundTrack = loadedReviewDoc.Animation.Clips[0].Tracks.FirstOrDefault(t => t.Id == trRebind.Id);
+            Assert(reboundTrack != null, "Rebound track exists in clip");
+            Assert(reboundTrack.TargetNodeId == realTargetLayer.Id, "Rebound track target updated to real layer ID");
+            Assert(reboundTrack.NodeId == PropertyBinder.GetNumericNodeId(realTargetLayer.Id), "Rebound track NodeId updated to matching FNV-1a hash");
+            Assert(reboundTrack.IsActive, "Rebound track IsActive restored to true");
+
+            var purgedTrack = loadedReviewDoc.Animation.Clips[0].Tracks.FirstOrDefault(t => t.Id == trPurge.Id);
+            Assert(purgedTrack == null, "Purged track successfully removed from clip");
+
+            var keptTrack = loadedReviewDoc.Animation.Clips[0].Tracks.FirstOrDefault(t => t.Id == trKeep.Id);
+            Assert(keptTrack != null, "Kept track still exists in clip");
+            Assert(!keptTrack.IsActive, "Kept track remains IsActive = false");
+
+            // 5. Test Transactional Undo / Redo of ResolveOrphanedReferencesCommand
+            resolveCmd.Unexecute();
+            Assert(loadedReviewDoc.Animation.Clips[0].Tracks.Count == 3, "Undo restores purged track to clip (3 tracks)");
+            var restoredPurgeTrack = loadedReviewDoc.Animation.Clips[0].Tracks.FirstOrDefault(t => t.Id == trPurge.Id);
+            Assert(restoredPurgeTrack != null, "Purged track restored on undo");
+
+            resolveCmd.Execute();
+            Assert(loadedReviewDoc.Animation.Clips[0].Tracks.Count == 2, "Redo re-applies purge and rebind (2 tracks)");
         }
     }
 }

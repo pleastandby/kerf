@@ -791,8 +791,20 @@ namespace Kerf.UI
             }
             try
             {
-                var doc = StorageManager.LoadDocument(path);
+                MigrationReport report;
+                var doc = StorageManager.LoadDocumentWithReport(path, out report);
+                if (report != null && report.RequiresUserReview)
+                {
+                    if (Application.Current != null && Application.Current.MainWindow != null)
+                    {
+                        Kerf.UI.Dialogs.MigrationReviewDialog.ShowModalReview(Window.GetWindow(this), doc, report);
+                    }
+                }
                 LoadDocument(doc, path);
+                if (report != null)
+                {
+                    Console.WriteLine(string.Format("Project loaded: {0} tracks resolved, {1} unresolved references reviewed.", report.ResolvedTracksCount, report.UnresolvedTracksCount));
+                }
             }
             catch (Exception ex)
             {
@@ -13099,8 +13111,20 @@ namespace Kerf.UI
             {
                 try
                 {
-                    var doc = StorageManager.LoadDocument(dlg.FileName);
+                    MigrationReport report;
+                    var doc = StorageManager.LoadDocumentWithReport(dlg.FileName, out report);
+                    if (report != null && report.RequiresUserReview)
+                    {
+                        if (Application.Current != null && Application.Current.MainWindow != null)
+                        {
+                            Kerf.UI.Dialogs.MigrationReviewDialog.ShowModalReview(Window.GetWindow(this), doc, report);
+                        }
+                    }
                     LoadDocument(doc, dlg.FileName);
+                    if (report != null)
+                    {
+                        Console.WriteLine(string.Format("Project loaded: {0} tracks resolved, {1} unresolved references reviewed.", report.ResolvedTracksCount, report.UnresolvedTracksCount));
+                    }
                 }
                 catch (Exception ex)
                 {
