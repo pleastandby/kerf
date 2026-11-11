@@ -13,7 +13,7 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 - [x] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [x] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
 - [x] **Phase 7: Interactive Listeners, State Machine Runtime and Transition Execution** - Connect canvas interactions, listeners, state machine inputs, transition conditions, animation clips, and animation evaluator into a coherent execution pipeline.
-- [ ] **Phase 8: Verification, Legacy Migration & Safe Deprecation** - End-to-end integration tests, legacy project file migration, and deprecation of old property binders with 0 regressions.
+- [ ] **Phase 8: Persistence, Runtime Integration, Export and Legacy Decommissioning** - Complete project persistence, schema versioning, native .kfx ZIP export foundation, standalone headless runtime (KerfPlayer), complete legacy code decommissioning, full system integration, and comprehensive automated testing.
 
 ## Phase Details
 
@@ -150,20 +150,23 @@ Plans:
 
 ---
 
-### Phase 8: Verification, Legacy Migration & Safe Deprecation
-**Goal**: Validate end-to-end animation workflows, migrate legacy project files to the new schema, and safely deprecate legacy property binders with zero regressions.
+### Phase 8: Persistence, Runtime Integration, Export and Legacy Decommissioning
+**Goal**: Finalize the reconstructed animation engine with reliable project persistence, schema versioning, native .kfx ZIP export foundation, standalone headless runtime, complete legacy code decommissioning, and comprehensive end-to-end testing with zero regressions.
 **Depends on**: Phase 7
-**Requirements**: MIGR-01, MIGR-02, MIGR-03
+**Requirements**: MIGR-01, MIGR-02, MIGR-03, PERSIST-01, EXPORT-01, RUNTIME-02, DECOM-01
 **Success Criteria** (what must be TRUE):
-  1. Existing project files containing legacy animation data automatically convert into the new clip and track data model.
-  2. Old destructive `PropertyBinder` scaling code is cleanly deprecated and removed without affecting design tools.
-  3. Automated test suite expands to cover transforms, keyframe interpolation, easing mathematics, undo/redo, and state machine transitions.
-  4. 100% test pass rate achieved across all test suites with 0 regressions.
-**Plans**: 2 plans
+  1. Complete serialization and deserialization of all animation data (clips, tracks, keyframes, transforms, Bézier curves, spring parameters, state machines, transitions, compound condition groups, inputs, and listeners) survives save/reload with stable GUIDs.
+  2. Schema versioning and migration review system auto-heals valid references, safely flags and preserves unresolved orphaned references without crashing, and generates migration reports.
+  3. Native `.kfx` export foundation packages a ZIP container with clean separation of runtime payload (`manifest.json`, `scene.json`, `animations.json`, `state-machines.json`, `assets/`) and optional editor `metadata.json`.
+  4. Standalone headless animation runtime (`KerfPlayer`) evaluates poses independently of DOM, React, or WPF UI, supporting pluggable render backends (Canvas 2D, SVG, Direct2D).
+  5. Obsolete animation evaluators, legacy destructive binders, and deprecated timeline code are completely decommissioned; existing test suite is modernized with zero regressions.
+  6. Final deliverable `ANIMATION_ENGINE_FINAL_REPORT.md` is generated detailing architecture, removed legacy systems, runtime API, format specifications, and test results.
+**Plans**: 3 plans
 
 Plans:
-- [ ] 08-01: Build legacy animation data migrator and deprecate obsolete prototype binders.
-- [ ] 08-02: Create automated test suites for the complete animation and state machine engine; verify all tests pass.
+- [ ] 08-01-PLAN.md — Full project persistence (v4.0.0), DocumentMigrations upgrade pipeline, reverse hash-to-GUID mapping, orphaned reference resilience, and interactive WPF MigrationReviewDialog.
+- [ ] 08-02-PLAN.md — Native .kfx ZIP container export/import packaging with dual-payload architecture, zip-slip security validation, and standalone headless KerfPlayer runtime with pluggable IRenderBackend.
+- [ ] 08-03-PLAN.md — Complete legacy animation decommissioning, test modernization across TestRunner.cs (77/77 passing), and final milestone deliverable report.
 
 ---
 
