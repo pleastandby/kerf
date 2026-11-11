@@ -853,9 +853,10 @@ namespace Kerf.Runtime
 
 *All discrete values and claims are grounded in the repository source files.*
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Direct2D Render Backend Surface Binding:**
+   - RESOLVED: In Phase 8, `Direct2DRenderBackend` wraps `GpuRenderer` in Kerf Studio; the headless `NullRenderBackend` is used for automated testing.
    - What we know: `GpuRenderer.cs` currently uses WPF's `DrawingContext` and Direct2D hardware acceleration via `RenderTransform`.
    - What's unclear: Should the standalone desktop Direct2D backend reuse `GpuRenderer` visual primitives or render to an independent `HwndRenderTarget`?
    - Recommendation: In Phase 8, `Direct2DRenderBackend` wraps `GpuRenderer` in Kerf Studio; the headless `NullRenderBackend` is used for automated testing.
