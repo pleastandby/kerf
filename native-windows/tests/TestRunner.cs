@@ -109,6 +109,7 @@ namespace Kerf.Tests
             RunTest("Native .kfx ZIP Container Export, Dual-Payload & Security Validation", TestNativeKfxZipExportAndSecurityValidation);
             RunTest("Standalone Headless KerfPlayer Runtime SDK & Matrix Evaluation", TestStandaloneHeadlessKerfPlayerRuntime);
             RunTest("Legacy Animation Decommissioning & Non-Destructive Transforms", TestLegacyAnimationDecommissioningAndNonDestructiveTransforms);
+            RunTest("Dedicated Export Window, Standalone Web Player, PDF & MP4 Encoders", TestExportWindowStandaloneWebPlayerPdfAndMp4Encoders);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9326,6 +9327,103 @@ namespace Kerf.Tests
             Assert(child1.X == initC1X && child1.Y == initC1Y, "Child 1 layout positions completely intact");
             Assert(child2.X == initC2X && child2.Y == initC2Y, "Child 2 layout positions completely intact");
             Assert(child3.X == initC3X && child3.Y == initC3Y, "Child 3 layout positions completely intact");
+        }
+
+        private static void TestExportWindowStandaloneWebPlayerPdfAndMp4Encoders()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "Kerf_Test78_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+
+            try
+            {
+                // 1. Build document with layers and animation clip
+                var doc = new KerfDocument();
+                doc.Name = "ExportEncoderTestDoc";
+                var page = doc.GetActivePage();
+
+                var card = new LayerNode
+                {
+                    Id = "card_elem_1",
+                    Type = ElementType.Rectangle,
+                    Name = "Card Component",
+                    X = 10,
+                    Y = 20,
+                    Width = 300,
+                    Height = 200,
+                    CornerRadius = 12
+                };
+                card.Fills.Add(Paint.Solid("#46EFB1"));
+                page.Layers.Add(card);
+
+                var clip = new Clip(1, "FadeInClip", 1.0, 60.0, LoopMode.OneShot);
+                var tr = new Track(PropertyBinder.GetNumericNodeId(card.Id), (ushort)PropKey.Opacity, card.Id, "Opacity");
+                tr.AddKeyframe(new Keyframe(0.0, 0.0, InterpMode.Linear));
+                tr.AddKeyframe(new Keyframe(1.0, 1.0, InterpMode.Cubic, 0.25, 0.1, 0.25, 1.0));
+                clip.AddTrack(tr);
+                doc.Animation.Clips.Add(clip);
+
+                var sm = new StateMachineDefinition("InteractiveSM");
+                var inHover = sm.AddInput(MachineInput.Bool("isHovering?", false));
+                var smLayer = new MachineLayer("BaseLayer");
+                var stateIdle = new MachineState(0, "Idle", StateKind.Animation, -1);
+                var stateHover = new MachineState(1, "Hover", StateKind.Animation, 0);
+                int idxIdle = smLayer.AddState(stateIdle);
+                int idxHover = smLayer.AddState(stateHover);
+                var trans = new StateTransition(idxIdle, idxHover, 0.25);
+                var cg = new ConditionGroup();
+                cg.Conditions.Add(new TransitionCondition(inHover, ConditionOp.Eq, 1.0));
+                trans.ConditionGroups.Add(cg);
+                smLayer.AddTransition(trans);
+                sm.Layers.Add(smLayer);
+                doc.Animation.StateMachine = sm;
+
+                // 2. Test PDF Document Exporter
+                string pdfPath = Path.Combine(tempDir, "document_export.pdf");
+                PdfExporter.ExportToFile(page, null, pdfPath, 2.0);
+                Assert(File.Exists(pdfPath), "PDF file was created");
+                byte[] pdfBytes = File.ReadAllBytes(pdfPath);
+                Assert(pdfBytes.Length > 200, "PDF file has substantial content (" + pdfBytes.Length + " bytes)");
+                string pdfHeader = Encoding.ASCII.GetString(pdfBytes, 0, Math.Min(10, pdfBytes.Length));
+                Assert(pdfHeader.StartsWith("%PDF-1.4"), "PDF file contains valid %PDF-1.4 header");
+                string pdfContent = Encoding.ASCII.GetString(pdfBytes);
+                Assert(pdfContent.Contains("/Catalog"), "PDF contains /Catalog dictionary");
+                Assert(pdfContent.Contains("/Pages"), "PDF contains /Pages tree");
+                Assert(pdfContent.Contains("/XObject"), "PDF contains /XObject image resource");
+                Assert(pdfContent.Contains("%%EOF"), "PDF contains %%EOF terminator");
+
+                // 3. Test Standalone HTML5 Web Player Generator
+                string htmlPath = Path.Combine(tempDir, "web_player.html");
+                WebPlayerGenerator.ExportHtmlPlayerToFile(doc, htmlPath, "export_test.kfx");
+                Assert(File.Exists(htmlPath), "Web player HTML file was created");
+                string htmlContent = File.ReadAllText(htmlPath);
+                Assert(htmlContent.Contains("<!DOCTYPE html>"), "Web player contains valid HTML5 doctype");
+                Assert(htmlContent.Contains("kerf-player"), "Web player contains kerf-player class");
+                Assert(htmlContent.Contains("id=\"animCanvas\""), "Web player contains HTML5 canvas");
+                Assert(htmlContent.Contains("function cubicBezier"), "Web player contains standalone cubic Bézier evaluator");
+                Assert(htmlContent.Contains("isHovering?"), "Web player includes state machine inputs");
+                Assert(htmlContent.Contains("requestAnimationFrame"), "Web player includes standalone requestAnimationFrame runner");
+
+                // 4. Test MP4 Video Animation Exporter
+                string mp4Path = Path.Combine(tempDir, "animation_clip.mp4");
+                Mp4Exporter.ExportClipToVideo(doc, clip, mp4Path, 30, 1.0);
+                Assert(File.Exists(mp4Path), "MP4 video file was created");
+                byte[] mp4Bytes = File.ReadAllBytes(mp4Path);
+                Assert(mp4Bytes.Length > 100, "MP4 file has substantial binary content (" + mp4Bytes.Length + " bytes)");
+                string mp4HeaderStr = Encoding.ASCII.GetString(mp4Bytes, 4, 4);
+                Assert(mp4HeaderStr == "ftyp", "MP4 file begins with ISO 'ftyp' atom box");
+
+                // 5. Test ExportDialog format model and enum values
+                Assert((int)Kerf.UI.Dialogs.ExportFormatType.KfxRuntime == 0, "ExportFormatType.KfxRuntime == 0");
+                Assert((int)Kerf.UI.Dialogs.ExportFormatType.Png == 1, "ExportFormatType.Png == 1");
+                Assert((int)Kerf.UI.Dialogs.ExportFormatType.Jpeg == 2, "ExportFormatType.Jpeg == 2");
+                Assert((int)Kerf.UI.Dialogs.ExportFormatType.Svg == 3, "ExportFormatType.Svg == 3");
+                Assert((int)Kerf.UI.Dialogs.ExportFormatType.Pdf == 4, "ExportFormatType.Pdf == 4");
+                Assert((int)Kerf.UI.Dialogs.ExportFormatType.Mp4 == 5, "ExportFormatType.Mp4 == 5");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
         }
     }
 }

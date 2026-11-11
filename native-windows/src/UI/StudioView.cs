@@ -259,6 +259,8 @@ namespace Kerf.UI
         // Selection & Tools
         private ToolType _activeTool = ToolType.Select;
         private readonly List<LayerNode> _selectedLayers = new List<LayerNode>();
+        public int SelectedLayersCount { get { return _selectedLayers != null ? _selectedLayers.Count : 0; } }
+        public IEnumerable<LayerNode> SelectedLayers { get { return _selectedLayers; } }
         private HandleType _activeHandle = HandleType.None;
         private enum AnchorGizmoPart { None, Center, AxisX, AxisY, Planar, RotationRing }
         private AnchorGizmoPart _activeAnchorPart = AnchorGizmoPart.None;
@@ -14110,55 +14112,16 @@ namespace Kerf.UI
 
         private void ShowExportDialog()
         {
-            var page = Document.GetActivePage();
-            if (page == null) return;
-
-            string defaultName = Document.Name;
-            if (_selectedLayers != null && _selectedLayers.Count == 1 && !string.IsNullOrEmpty(_selectedLayers[0].Name))
+            if (Document == null) return;
+            try
             {
-                defaultName = _selectedLayers[0].Name;
+                var dlg = new Dialogs.ExportDialog(Document, this);
+                dlg.Owner = Window.GetWindow(this);
+                dlg.ShowDialog();
             }
-            else if (_selectedLayers != null && _selectedLayers.Count > 1)
+            catch (Exception ex)
             {
-                defaultName = _selectedLayers[0].Name + "_selection";
-            }
-
-            var dlg = new SaveFileDialog
-            {
-                Filter = "PNG Image (*.png)|*.png|Vector SVG (*.svg)|*.svg|JPEG Image (*.jpg)|*.jpg",
-                FileName = defaultName,
-                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
-            };
-
-            if (dlg.ShowDialog() == true)
-            {
-                string ext = IOPath.GetExtension(dlg.FileName).ToLowerInvariant();
-                try
-                {
-                    var targets = (_selectedLayers != null && _selectedLayers.Count > 0)
-                        ? (IEnumerable<LayerNode>)_selectedLayers
-                        : null;
-
-                    if (ext == ".svg")
-                    {
-                        string svg = SvgExporter.ExportPage(page);
-                        File.WriteAllText(dlg.FileName, svg, System.Text.Encoding.UTF8);
-                    }
-                    else if (ext == ".jpg" || ext == ".jpeg")
-                    {
-                        HighQualityImageRenderer.ExportToFile(page, targets, dlg.FileName, RasterFormat.Jpeg, 2.0);
-                    }
-                    else
-                    {
-                        HighQualityImageRenderer.ExportToFile(page, targets, dlg.FileName, RasterFormat.Png, 2.0);
-                    }
-
-                    MessageBox.Show("Exported successfully to: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("Export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                MessageBox.Show("Unable to open Export dialog: " + ex.Message, "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

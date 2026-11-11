@@ -64,6 +64,9 @@ namespace Kerf.UI
             // Welcome Hero Card
             bodyStack.Children.Add(CreateHeroBanner());
 
+            // Motion Runtime Feature Banner
+            bodyStack.Children.Add(CreateMotionFeatureBanner());
+
             // Templates Section
             bodyStack.Children.Add(CreateSectionTitle("Starter Templates"));
             bodyStack.Children.Add(CreateTemplatesRow());
@@ -125,7 +128,7 @@ namespace Kerf.UI
             };
             versionTag.Child = new TextBlock
             {
-                Text = "v3.0.0",
+                Text = "v4.0.0 Motion",
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
                 Foreground = KerfBrand.MintBrush
@@ -214,6 +217,156 @@ namespace Kerf.UI
             stack.Children.Add(sub);
             banner.Child = stack;
             return banner;
+        }
+
+        private FrameworkElement CreateMotionFeatureBanner()
+        {
+            var banner = new Border
+            {
+                Margin = new Thickness(0, 0, 0, 32),
+                Padding = new Thickness(32, 28, 32, 28),
+                CornerRadius = new CornerRadius(16),
+                Background = new LinearGradientBrush(
+                    Color.FromRgb(0x0C, 0x33, 0x38),
+                    Color.FromRgb(0x05, 0x1A, 0x1D),
+                    90),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x1B, 0x7A, 0x82)),
+                BorderThickness = new Thickness(1.2)
+            };
+
+            var stack = new StackPanel();
+
+            var headerStack = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+            var badge = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x46, 0xEF, 0xB1)),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 3, 8, 3),
+                Margin = new Thickness(0, 0, 10, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            badge.Child = new TextBlock
+            {
+                Text = "NEW RUNTIME & .KFX EXPORT",
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x0C, 0x42, 0x47))
+            };
+            var tagText = new TextBlock
+            {
+                Text = "KERF MOTION ENGINE v4.0",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x46, 0xEF, 0xB1)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            headerStack.Children.Add(badge);
+            headerStack.Children.Add(tagText);
+            stack.Children.Add(headerStack);
+
+            var title = new TextBlock
+            {
+                Text = "Interactive State Machines & Standalone .kfx Runtime Export",
+                FontSize = 22,
+                FontWeight = FontWeights.Bold,
+                Foreground = KerfBrand.TextWhiteBrush,
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            stack.Children.Add(title);
+
+            var sub = new TextBlock
+            {
+                Text = "Create rich vector animations with keyframes, Bézier easing curves, and state machines. Export to standalone .kfx packages and embed them anywhere—Web, Desktop, or Mobile—using the zero-overhead Kerf Motion Runtime with interactive inputs and pointer listeners.",
+                FontSize = 13,
+                Foreground = KerfBrand.TextMutedBrush,
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20,
+                MaxWidth = 900,
+                Margin = new Thickness(0, 0, 0, 20),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            stack.Children.Add(sub);
+
+            var cardsGrid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            cardsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            cardsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            cardsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var card1 = CreateMotionFeatureCard(
+                "Standalone .kfx Packages",
+                "ZIP container with scene.json, animations.json, and state-machines.json. Platform-agnostic, embeddable like Rive.",
+                "#46EFB1");
+            Grid.SetColumn(card1, 0);
+            cardsGrid.Children.Add(card1);
+
+            var card2 = CreateMotionFeatureCard(
+                "Interactive State Machine",
+                "Multi-state nodes, Boolean / Number / Trigger inputs, pointer hover/click listeners, and smooth Bézier cross-fading.",
+                "#0A717B");
+            Grid.SetColumn(card2, 1);
+            cardsGrid.Children.Add(card2);
+
+            var card3 = CreateMotionFeatureCard(
+                "Unified Export Window",
+                "Dedicated export modal: .kfx packages, standalone HTML5 web player runner, 60fps MP4 video, SVG, PDF, and PNG.",
+                "#F6B322");
+            Grid.SetColumn(card3, 2);
+            cardsGrid.Children.Add(card3);
+
+            stack.Children.Add(cardsGrid);
+
+            banner.Child = stack;
+            return banner;
+        }
+
+        private FrameworkElement CreateMotionFeatureCard(string title, string desc, string accentHex)
+        {
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(0x60, 0x08, 0x22, 0x26)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(0x80, 0x14, 0x5C, 0x63)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(16, 14, 16, 14),
+                Margin = new Thickness(0, 0, 14, 0)
+            };
+
+            var stack = new StackPanel();
+
+            var topRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+            var dot = new Border
+            {
+                Width = 8,
+                Height = 8,
+                CornerRadius = new CornerRadius(4),
+                Background = new SolidColorBrush(GpuRenderer.ParseHexColor(accentHex, 1.0)),
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var titleBlock = new TextBlock
+            {
+                Text = title,
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            topRow.Children.Add(dot);
+            topRow.Children.Add(titleBlock);
+
+            var descBlock = new TextBlock
+            {
+                Text = desc,
+                FontSize = 11,
+                Foreground = KerfBrand.TextMutedBrush,
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 16
+            };
+
+            stack.Children.Add(topRow);
+            stack.Children.Add(descBlock);
+            card.Child = stack;
+            return card;
         }
 
         private FrameworkElement CreateSectionTitle(string title)
