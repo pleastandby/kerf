@@ -11,9 +11,12 @@ using Kerf.Engine;
 using Kerf.Engine.Animation;
 using Kerf.IO;
 using Kerf.Model;
+using Kerf.Runtime;
+using Kerf.Runtime.Backends;
 using Kerf.Tools;
 using Kerf.UI;
 using Page = Kerf.Model.Page;
+using Point = System.Windows.Point;
 
 namespace Kerf.Tests
 {
@@ -104,6 +107,7 @@ namespace Kerf.Tests
             RunTest("Timeline Keyframe Easing, Evaluation & Playback Isolation", TestTimelineKeyframeEasingAndPlaybackIsolation);
             RunTest("Schema v4.0.0 Persistence, GUID Auto-Healing & Orphan Resilience", TestSchemaV4PersistenceAndOrphanMigration);
             RunTest("Native .kfx ZIP Container Export, Dual-Payload & Security Validation", TestNativeKfxZipExportAndSecurityValidation);
+            RunTest("Standalone Headless KerfPlayer Runtime SDK & Matrix Evaluation", TestStandaloneHeadlessKerfPlayerRuntime);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9039,6 +9043,139 @@ namespace Kerf.Tests
                 }
                 catch { }
             }
+        }
+
+        private static void TestStandaloneHeadlessKerfPlayerRuntime()
+        {
+            var backend = new NullRenderBackend();
+            var player = new KerfPlayer(backend);
+            Assert(!player.IsPlaying, "KerfPlayer initialized in paused state");
+            Assert(backend.IsInitialized, "NullRenderBackend initialized with default dimensions");
+
+            var doc = new KerfDocument();
+            doc.Name = "HeadlessPlayerTestDoc";
+            var page = doc.GetActivePage();
+
+            var rootFrame = new LayerNode
+            {
+                Id = "root_frame",
+                Type = ElementType.Frame,
+                Name = "Frame",
+                X = 0,
+                Y = 0,
+                Width = 800,
+                Height = 600
+            };
+            var buttonLayer = new LayerNode
+            {
+                Id = "button_layer",
+                Type = ElementType.Rectangle,
+                Name = "Button",
+                X = 50,
+                Y = 50,
+                Width = 200,
+                Height = 60,
+                ParentId = rootFrame.Id
+            };
+            rootFrame.Children.Add(buttonLayer);
+            page.Layers.Add(rootFrame);
+
+            // Clip 0: Idle state where button X is 50.0
+            var clipIdle = new Clip(10, "IdleClip", 1.0, 60.0, LoopMode.Loop);
+            var trIdle = new Track(PropertyBinder.GetNumericNodeId(buttonLayer.Id), (ushort)PropKey.X, buttonLayer.Id, "X");
+            trIdle.AddKeyframe(new Keyframe(0.0, 50.0, InterpMode.Linear));
+            clipIdle.AddTrack(trIdle);
+            doc.Animation.Clips.Add(clipIdle);
+
+            // Clip 1: Active state where button X translates to 250.0
+            var clipActive = new Clip(11, "ActiveClip", 1.0, 60.0, LoopMode.Loop);
+            var trActive = new Track(PropertyBinder.GetNumericNodeId(buttonLayer.Id), (ushort)PropKey.X, buttonLayer.Id, "X");
+            trActive.AddKeyframe(new Keyframe(0.0, 250.0, InterpMode.Linear));
+            clipActive.AddTrack(trActive);
+            doc.Animation.Clips.Add(clipActive);
+
+            // State Machine with Idle and Active states
+            var sm = new StateMachineDefinition("ButtonSM");
+            var inputActive = sm.AddInput(MachineInput.Bool("isActive", false));
+            var inputHover = sm.AddInput(MachineInput.Bool("hovered", false));
+
+            var layer = new MachineLayer("BaseLayer");
+            var stIdle = new MachineState(0, "Idle", StateKind.Animation, 0);
+            var stActive = new MachineState(1, "Active", StateKind.Animation, 1);
+            int s0 = layer.AddState(stIdle);
+            int s1 = layer.AddState(stActive);
+
+            // Transition: Idle -> Active on isActive == 1.0
+            var t0 = new StateTransition(s0, s1, 0.0);
+            var cg0 = new ConditionGroup();
+            cg0.Conditions.Add(new TransitionCondition(inputActive, ConditionOp.Eq, 1.0));
+            t0.ConditionGroups.Add(cg0);
+            layer.AddTransition(t0);
+
+            // Transition: Active -> Idle on isActive == 0.0
+            var t1 = new StateTransition(s1, s0, 0.0);
+            var cg1 = new ConditionGroup();
+            cg1.Conditions.Add(new TransitionCondition(inputActive, ConditionOp.Eq, 0.0));
+            t1.ConditionGroups.Add(cg1);
+            layer.AddTransition(t1);
+
+            sm.Layers.Add(layer);
+
+            // Interactive Listener: on PointerEventKind.Enter, set "hovered" to 1.0
+            var listener = new NodeListener(PropertyBinder.GetNumericNodeId(buttonLayer.Id), PointerEventKind.Enter);
+            listener.TargetLayerId = buttonLayer.Id;
+            listener.Actions.Add(new ListenerAction(ActionKind.SetBool, inputHover, 1.0));
+            sm.Listeners.Add(listener);
+
+            doc.Animation.StateMachine = sm;
+
+            // Load document into player
+            player.Load(doc);
+            Assert(player.Runtime.Document == doc, "Document loaded into player runtime");
+
+            string lastReportedState = null;
+            player.StateChanged += (sender, stateName) =>
+            {
+                lastReportedState = stateName;
+            };
+
+            // Start Playback
+            player.Play();
+            Assert(player.IsPlaying, "Player is currently playing");
+
+            // Advance frame: 16ms
+            player.Advance(0.016);
+            Assert(backend.FrameCount == 1, "NullRenderBackend FrameCount is 1 after initial advance");
+            Assert(backend.LastPose != null, "Backend received RenderPose snapshot");
+            Assert(backend.LastPose.LayerWorldMatrices.ContainsKey("button_layer"), "Pose contains button_layer world matrix");
+
+            // Assert initial position
+            var initialMat = backend.LastPose.LayerWorldMatrices["button_layer"];
+            Assert(Math.Abs(initialMat.OffsetX - 50.0) < 1.0, "Initial X position in world matrix is 50.0");
+
+            // Drive input to trigger transition to Active
+            player.SetInput("isActive", 1.0);
+            player.Advance(0.016);
+            Assert(backend.FrameCount == 2, "NullRenderBackend FrameCount is 2 after input change");
+
+            var activeMat = backend.LastPose.LayerWorldMatrices["button_layer"];
+            Assert(Math.Abs(activeMat.OffsetX - 250.0) < 1.0, "Active state X position in world matrix is 250.0 (translated)");
+            Assert(lastReportedState == "Active", "StateChanged event fired for 'Active'");
+
+            // Test DispatchPointerEvent triggers listener
+            Assert(player.Runtime.StateMachine.GetInputValue(inputHover) == 0.0, "Hovered input initially 0.0");
+            player.DispatchPointerEvent("button_layer", PointerEventKind.Enter);
+            Assert(player.Runtime.StateMachine.GetInputValue(inputHover) == 1.0, "PointerEnter listener triggered hovered input to 1.0");
+
+            // Test Pause and Stop
+            player.Pause();
+            Assert(!player.IsPlaying, "Player paused");
+            int frameCountBefore = backend.FrameCount;
+            player.Advance(0.016);
+            Assert(backend.FrameCount == frameCountBefore, "Advance when paused does not trigger backend rendering");
+
+            player.Destroy();
+            Assert(!backend.IsInitialized, "Backend destroyed cleanly");
         }
     }
 }
