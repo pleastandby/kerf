@@ -161,10 +161,10 @@ Plans:
   4. Standalone headless animation runtime (`KerfPlayer`) evaluates poses independently of DOM, React, or WPF UI, supporting pluggable render backends (Canvas 2D, SVG, Direct2D).
   5. Obsolete animation evaluators, legacy destructive binders, and deprecated timeline code are completely decommissioned; existing test suite is modernized with zero regressions.
   6. Final deliverable `ANIMATION_ENGINE_FINAL_REPORT.md` is generated detailing architecture, removed legacy systems, runtime API, format specifications, and test results.
-**Plans**: 3 plans
+**Plans**: 1/3 plans executed
 
 Plans:
-- [ ] 08-01-PLAN.md — Full project persistence (v4.0.0), DocumentMigrations upgrade pipeline, reverse hash-to-GUID mapping, orphaned reference resilience, and interactive WPF MigrationReviewDialog.
+- [x] 08-01-PLAN.md — Full project persistence (v4.0.0), DocumentMigrations upgrade pipeline, reverse hash-to-GUID mapping, orphaned reference resilience, and interactive WPF MigrationReviewDialog.
 - [ ] 08-02-PLAN.md — Native .kfx ZIP container export/import packaging with dual-payload architecture, zip-slip security validation, and standalone headless KerfPlayer runtime with pluggable IRenderBackend.
 - [ ] 08-03-PLAN.md — Complete legacy animation decommissioning, test modernization across TestRunner.cs (77/77 passing), and final milestone deliverable report.
 
@@ -184,7 +184,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 5. Animation Command History & Full Undo/Redo | 2/2 | Complete | 2026-11-06 |
 | 6. Interactive State Machine Engine | 4/4 | Complete | 2026-11-08 |
 | 7. Interactive Listeners, State Machine Runtime and Transition Execution | 3/3 | Complete | 2026-11-08 |
-| 8. Verification, Legacy Migration & Safe Deprecation | 0/2 | Not started | - |
+| 8. Verification, Legacy Migration & Safe Deprecation | 1/3 | In Progress | - |
 
 ---
 *Roadmap defined: 2026-11-05*

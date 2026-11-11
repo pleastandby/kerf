@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
+milestone: v4.0.0
 current_phase: 8
 current_phase_name: Persistence, Runtime Integration, Export and Legacy Decommissioning
 status: ready_to_execute
-stopped_at: Completed Phase 8 Planning and Verification
-last_updated: "2026-11-11T07:38:00.000Z"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-11-11T08:42:31.699Z"
 last_activity: 2026-11-11
 last_activity_desc: Completed Phase 8 planning and verification (3 plans approved)
-state_head: a3140ce6883e306fc6bf3a165cf3f9909ddb30fe
+state_head: 4367c94503f9098a8f2ca16e1cf07aecd223950c
 progress:
   total_phases: 8
   completed_phases: 7
-  total_plans: 22
+  total_plans: 21
   completed_plans: 19
-  percent: 86
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-11-05)
 ## Current Position
 
 Phase: 8 of 8 (Persistence, Runtime Integration, Export and Legacy Decommissioning) — READY TO EXECUTE
-Plan: 0 of 3 in Phase 8
+Plan: 1 of 3 in Phase 8
 Status: Plans approved (3/3 plans verified by plan-checker with zero blockers). Ready for execution.
 Last activity: 2026-11-11 — Completed Phase 8 planning and verification (3 plans approved)
 
@@ -65,6 +65,7 @@ Progress: [█████████░] 88%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 07 P03 | 15m | 3 tasks | 2 files |
+| Phase 08 P01 | 25m | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,9 @@ Recent decisions affecting current work:
 - [Phase 07]: Canvas pointer interactions only trigger listeners during active playback (_timelineController.IsPlaying == true) with early return per D-01.
 - [Phase 07]: When paused, canvas mouse handlers fall through cleanly to standard object selection and design editing with dt = 0.0 per D-01.
 - [Phase 07]: Dispatcher states reset immediately upon pause/stop in PauseAnimation and StopAnimationPlayback.
+- [Phase 08]: Default KerfDocument schema version upgraded to 4.0.0; DocumentMigrations provides automated upgrade with reverse FNV-1a hash auto-healing
+- [Phase 08]: Orphaned animation tracks and state machine listeners default to IsActive = false, preventing runtime crashes while preserving authoring data
+- [Phase 08]: Interactive WPF MigrationReviewDialog empowers users to Keep, Rebind, or Purge unresolved items with full CommandHistory undo/redo support
 
 ### Pending Todos
 
@@ -111,6 +115,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-08T09:47:46.191Z
-Stopped at: Completed 07-03-PLAN.md
+Last session: 2026-11-11T08:42:30.362Z
+Stopped at: Completed 08-01-PLAN.md
 Resume file: None

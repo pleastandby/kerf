@@ -53,9 +53,9 @@ Requirements for the animation engine refactor milestone. Each maps directly to 
 
 ### Verification, Migration & Deprecation
 
-- [ ] **MIGR-01**: Automated migration converting legacy animation data structures to the new engine schema.
-- [ ] **MIGR-02**: Safe deprecation and removal of old destructive property binder code once replacement is verified.
-- [ ] **MIGR-03**: Comprehensive automated unit and integration test suite verifying 100% test pass rate with zero regressions across all 49 existing test cases.
+- [x] **MIGR-01**: Automated migration converting legacy animation data structures to the new engine schema.
+- [x] **MIGR-02**: Safe deprecation and removal of old destructive property binder code once replacement is verified.
+- [x] **MIGR-03**: Comprehensive automated unit and integration test suite verifying 100% test pass rate with zero regressions across all 49 existing test cases.
 
 ## v2 Requirements
 
@@ -109,9 +109,9 @@ Which phases cover which requirements.
 | STATE-04 | Phase 7 | Complete |
 | STATE-05 | Phase 7 | Complete |
 | STATE-06 | Phase 6 | Complete |
-| MIGR-01 | Phase 7 | Pending |
-| MIGR-02 | Phase 7 | Pending |
-| MIGR-03 | Phase 7 | Pending |
+| MIGR-01 | Phase 7 | Complete |
+| MIGR-02 | Phase 7 | Complete |
+| MIGR-03 | Phase 7 | Complete |
 
 **Coverage:**
 - v1 requirements: 28 total
@@ -121,4 +121,3 @@ Which phases cover which requirements.
 ---
 *Requirements defined: 2026-11-05*
 *Last updated: 2026-11-05 after initialization*
-

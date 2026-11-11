@@ -1,7 +1,7 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": null,
+  "milestone": "v4.0.0",
   "phases": [
     {
       "number": "1",
@@ -36,18 +36,18 @@
     {
       "number": "7",
       "name": "Interactive Listeners, State Machine Runtime and Transition Execution",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "8",
       "name": "Verification, Legacy Migration & Safe Deprecation",
-      "status": "pending"
+      "status": "in_progress"
     }
   ],
   "next": {
-    "command": "/gsd-progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 7 of 8 · 75% · executing"
+    "command": "/gsd-progress",
+    "label": "Show progress",
+    "reason": "Unsure of state — showing progress"
   },
-  "updated_at": "2026-11-08T09:46:49.125Z"
+  "updated_at": "2026-11-11T08:41:32.788Z"
 }
