@@ -51,6 +51,12 @@ Requirements for the animation engine refactor milestone. Each maps directly to 
 - [x] **STATE-05**: State blending engine supporting smooth cross-fade interpolation between active clips.
 - [x] **STATE-06**: Interactive UI panel for inspecting, creating, and wiring state machine nodes and transitions.
 
+### Persistence, Runtime & Export
+
+- [x] **PERSIST-01**: Complete schema v4.0.0 project persistence with FNV-1a auto-healing and orphaned reference resilience.
+- [x] **EXPORT-01**: Native .kfx ZIP container export and import packaging with dual-payload architecture and zip-slip directory traversal guards.
+- [x] **RUNTIME-02**: Standalone headless KerfPlayer runtime SDK with pure numeric Matrix3x2 affine transforms and pluggable IRenderBackend.
+
 ### Verification, Migration & Deprecation
 
 - [x] **MIGR-01**: Automated migration converting legacy animation data structures to the new engine schema.
@@ -112,10 +118,13 @@ Which phases cover which requirements.
 | MIGR-01 | Phase 7 | Complete |
 | MIGR-02 | Phase 7 | Complete |
 | MIGR-03 | Phase 7 | Complete |
+| PERSIST-01 | Phase 8 | Complete |
+| EXPORT-01 | Phase 8 | Complete |
+| RUNTIME-02 | Phase 8 | Complete |
 
 **Coverage:**
-- v1 requirements: 28 total
-- Mapped to phases: 28
+- v1 requirements: 31 total
+- Mapped to phases: 31
 - Unmapped: 0 ✓
 
 ---

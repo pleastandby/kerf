@@ -4,16 +4,16 @@ milestone: v4.0.0
 current_phase: 8
 current_phase_name: Persistence, Runtime Integration, Export and Legacy Decommissioning
 status: ready_to_execute
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-11-11T08:42:31.699Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-11-11T09:07:00.000Z"
 last_activity: 2026-11-11
-last_activity_desc: Completed Phase 8 planning and verification (3 plans approved)
-state_head: 4367c94503f9098a8f2ca16e1cf07aecd223950c
+last_activity_desc: Completed Phase 8 Plan 2 (Native .kfx container export/import & headless KerfPlayer runtime)
+state_head: 7d27bf46182c40cf1d0f507ba8e98059e66c61f2
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 21
-  completed_plans: 19
+  completed_plans: 20
 ---
 
 # Project State
@@ -27,19 +27,19 @@ See: `.planning/PROJECT.md` (updated 2026-11-05)
 
 ## Current Position
 
-Phase: 8 of 8 (Persistence, Runtime Integration, Export and Legacy Decommissioning) — READY TO EXECUTE
-Plan: 1 of 3 in Phase 8
-Status: Plans approved (3/3 plans verified by plan-checker with zero blockers). Ready for execution.
-Last activity: 2026-11-11 — Completed Phase 8 planning and verification (3 plans approved)
+Phase: 8 of 8 (Persistence, Runtime Integration, Export and Legacy Decommissioning) — IN PROGRESS
+Plan: 2 of 3 in Phase 8 completed
+Status: Plan 08-02 executed and verified (76/76 tests passing). Ready for Plan 08-03.
+Last activity: 2026-11-11 — Completed Phase 8 Plan 2 (Native .kfx container export/import & headless KerfPlayer runtime)
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 95%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 19
+- Total plans completed: 20
 - Average duration: 17 min
-- Total execution time: 4.87 hours
+- Total execution time: 5.17 hours
 
 **By Phase:**
 
@@ -52,13 +52,12 @@ Progress: [█████████░] 88%
 | 5. Animation Command History & Full Undo/Redo | 2/2 | 30m | 15m |
 | 6. Interactive State Machine Engine | 4/4 | 82m | 20.5m |
 | 7. Interactive Listeners, State Machine Runtime and Transition Execution | 3/3 | 45m | 15m |
-| 8. Verification, Legacy Migration & Safe Deprecation | 0/2 | - | - |
+| 8. Verification, Legacy Migration & Safe Deprecation | 2/3 | 43m | 21.5m |
 
 **Recent Trend:**
-- Plan 07-01: Done (InteractiveEventDispatcher, extended PointerEventKind/ActionKind, NodeListener GUIDs & Enabled, CommandHistory undo/redo commands, Right Inspector Listeners UI)
-- Plan 07-02: Done (Interrupted snapshot blending D-04, graph-order priority D-05, RenderTransform non-destructive isolation D-06, ExitTime gating RUNTIME-01, clip advancement TRANS-EXEC-01, StateMachineValidator listener diagnostics)
-- Plan 07-03: Done (Simulation playback gating D-01, early-return pointer dispatch in StudioView, Spacebar transport, comprehensive Test #70)
-- Trend: Phase 7 Verified (70/70 automated tests passing with zero regressions)
+- Plan 08-01: Done (schema v4.0.0 persistence, reverse FNV-1a auto-healing, orphaned reference resilience, MigrationReviewDialog)
+- Plan 08-02: Done (native .kfx ZIP container export/import, zip-slip & 250MB zip-bomb validation, headless KerfPlayer, Matrix3x2, IRenderBackend)
+- Trend: Phase 8 Verified (76/76 automated tests passing with zero regressions)
 
 **Per-Plan Metrics:**
 
@@ -66,6 +65,7 @@ Progress: [█████████░] 88%
 |------|----------|-------|-------|
 | Phase 07 P03 | 15m | 3 tasks | 2 files |
 | Phase 08 P01 | 25m | 2 tasks | 11 files |
+| Phase 08 P02 | 18m | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -96,6 +96,9 @@ Recent decisions affecting current work:
 - [Phase 08]: Default KerfDocument schema version upgraded to 4.0.0; DocumentMigrations provides automated upgrade with reverse FNV-1a hash auto-healing
 - [Phase 08]: Orphaned animation tracks and state machine listeners default to IsActive = false, preventing runtime crashes while preserving authoring data
 - [Phase 08]: Interactive WPF MigrationReviewDialog empowers users to Keep, Rebind, or Purge unresolved items with full CommandHistory undo/redo support
+- [Phase 08]: D-01 / D-02 Native .kfx ZIP container export and import with dual-payload architecture: runtime payload (manifest.json, scene.json, animations.json, state-machines.json) separated from editor metadata (metadata.json)
+- [Phase 08]: EXPORT-01 KfxSecurityValidator blocks zip-slip directory traversal (.., leading slashes, external destinations) and enforces 250MB decompression bomb protection
+- [Phase 08]: D-04 / RUNTIME-02 Standalone headless KerfPlayer / KerfRuntime evaluation engine with pure numeric Matrix3x2 affine transforms and pluggable IRenderBackend with zero WPF/DOM dependencies
 
 ### Pending Todos
 
@@ -103,7 +106,7 @@ None yet.
 
 ### Blockers/Concerns
 
-None. Existing build and test suite passes 100% (69/69 tests passing).
+None. Existing build and test suite passes 100% (76/76 tests passing).
 
 ## Deferred Items
 
@@ -115,6 +118,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-11T08:42:30.362Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-11-11T09:07:00.000Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
