@@ -13,7 +13,7 @@ This roadmap defines the architectural reconstruction of the Kerf Studio animati
 - [x] **Phase 5: Animation Command History & Full Undo/Redo** - Integrate all timeline and keyframe operations into the centralized `CommandHistory` architecture.
 - [x] **Phase 6: Interactive State Machine Engine** - Full interactive state machine runtime featuring states, transitions, blend curves, inputs (Boolean/Number/Trigger), and canvas event listeners.
 - [x] **Phase 7: Interactive Listeners, State Machine Runtime and Transition Execution** - Connect canvas interactions, listeners, state machine inputs, transition conditions, animation clips, and animation evaluator into a coherent execution pipeline.
-- [ ] **Phase 8: Persistence, Runtime Integration, Export and Legacy Decommissioning** - Complete project persistence, schema versioning, native .kfx ZIP export foundation, standalone headless runtime (KerfPlayer), complete legacy code decommissioning, full system integration, and comprehensive automated testing.
+- [x] **Phase 8: Persistence, Runtime Integration, Export and Legacy Decommissioning** - Complete project persistence, schema versioning, native .kfx ZIP export foundation, standalone headless runtime (KerfPlayer), complete legacy code decommissioning, full system integration, and comprehensive automated testing.
 
 ## Phase Details
 
@@ -161,12 +161,12 @@ Plans:
   4. Standalone headless animation runtime (`KerfPlayer`) evaluates poses independently of DOM, React, or WPF UI, supporting pluggable render backends (Canvas 2D, SVG, Direct2D).
   5. Obsolete animation evaluators, legacy destructive binders, and deprecated timeline code are completely decommissioned; existing test suite is modernized with zero regressions.
   6. Final deliverable `ANIMATION_ENGINE_FINAL_REPORT.md` is generated detailing architecture, removed legacy systems, runtime API, format specifications, and test results.
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans executed
 
 Plans:
 - [x] 08-01-PLAN.md — Full project persistence (v4.0.0), DocumentMigrations upgrade pipeline, reverse hash-to-GUID mapping, orphaned reference resilience, and interactive WPF MigrationReviewDialog.
 - [x] 08-02-PLAN.md — Native .kfx ZIP container export/import packaging with dual-payload architecture, zip-slip security validation, and standalone headless KerfPlayer runtime with pluggable IRenderBackend.
-- [ ] 08-03-PLAN.md — Complete legacy animation decommissioning, test modernization across TestRunner.cs (77/77 passing), and final milestone deliverable report.
+- [x] 08-03-PLAN.md — Complete legacy animation decommissioning, test modernization across TestRunner.cs (77/77 passing), and final milestone deliverable report.
 
 ---
 
@@ -184,7 +184,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 5. Animation Command History & Full Undo/Redo | 2/2 | Complete | 2026-11-06 |
 | 6. Interactive State Machine Engine | 4/4 | Complete | 2026-11-08 |
 | 7. Interactive Listeners, State Machine Runtime and Transition Execution | 3/3 | Complete | 2026-11-08 |
-| 8. Verification, Legacy Migration & Safe Deprecation | 2/3 | In Progress | - |
+| 8. Verification, Legacy Migration & Safe Deprecation | 3/3 | Complete | 2026-11-11 |
 
 ---
 *Roadmap defined: 2026-11-05*

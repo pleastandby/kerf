@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v4.0.0
 current_phase: 8
 current_phase_name: Persistence, Runtime Integration, Export and Legacy Decommissioning
-status: ready_to_execute
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-11-11T09:07:00.000Z"
+status: complete
+stopped_at: Completed 08-03-PLAN.md
+last_updated: "2026-11-11T09:30:00.000Z"
 last_activity: 2026-11-11
-last_activity_desc: Completed Phase 8 Plan 2 (Native .kfx container export/import & headless KerfPlayer runtime)
-state_head: 7d27bf46182c40cf1d0f507ba8e98059e66c61f2
+last_activity_desc: Completed Phase 8 Plan 3 (Legacy animation decommissioning, test modernization 77/77 passing & final report)
+state_head: e18a4c1f690333716c16196315bb943a484be880
 progress:
   total_phases: 8
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 21
-  completed_plans: 20
+  completed_plans: 21
 ---
 
 # Project State
@@ -23,23 +23,23 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-11-05)
 
 **Core value:** An industrial-grade animation engine that operates with non-destructive independent transforms, stable keyframes, visual graph curve editing, transactional undo/redo, and interactive state machines without destabilizing or corrupting the design canvas.
-**Current focus:** Phase 8 Ready to Execute (Persistence, Runtime Integration, Export and Legacy Decommissioning)
+**Current focus:** Phase 8 Complete — Reconstruction Milestone Completed (77/77 tests passing)
 
 ## Current Position
 
-Phase: 8 of 8 (Persistence, Runtime Integration, Export and Legacy Decommissioning) — IN PROGRESS
-Plan: 2 of 3 in Phase 8 completed
-Status: Plan 08-02 executed and verified (76/76 tests passing). Ready for Plan 08-03.
-Last activity: 2026-11-11 — Completed Phase 8 Plan 2 (Native .kfx container export/import & headless KerfPlayer runtime)
+Phase: 8 of 8 (Persistence, Runtime Integration, Export and Legacy Decommissioning) — COMPLETE
+Plan: 3 of 3 in Phase 8 completed
+Status: Plan 08-03 executed and verified (77/77 tests passing). Milestone complete!
+Last activity: 2026-11-11 — Completed Phase 8 Plan 3 (Legacy animation decommissioning, test modernization 77/77 passing & final report)
 
-Progress: [█████████░] 95%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 20
-- Average duration: 17 min
-- Total execution time: 5.17 hours
+- Total plans completed: 21
+- Average duration: 17.5 min
+- Total execution time: 5.52 hours
 
 **By Phase:**
 
@@ -52,12 +52,13 @@ Progress: [█████████░] 95%
 | 5. Animation Command History & Full Undo/Redo | 2/2 | 30m | 15m |
 | 6. Interactive State Machine Engine | 4/4 | 82m | 20.5m |
 | 7. Interactive Listeners, State Machine Runtime and Transition Execution | 3/3 | 45m | 15m |
-| 8. Verification, Legacy Migration & Safe Deprecation | 2/3 | 43m | 21.5m |
+| 8. Verification, Legacy Migration & Safe Deprecation | 3/3 | 64m | 21.3m |
 
 **Recent Trend:**
 - Plan 08-01: Done (schema v4.0.0 persistence, reverse FNV-1a auto-healing, orphaned reference resilience, MigrationReviewDialog)
 - Plan 08-02: Done (native .kfx ZIP container export/import, zip-slip & 250MB zip-bomb validation, headless KerfPlayer, Matrix3x2, IRenderBackend)
-- Trend: Phase 8 Verified (76/76 automated tests passing with zero regressions)
+- Plan 08-03: Done (legacy decommissioning, non-destructive transforms, 77/77 tests passing, ANIMATION_ENGINE_FINAL_REPORT.md)
+- Trend: Milestone Complete (77/77 automated tests passing with zero regressions)
 
 **Per-Plan Metrics:**
 
@@ -66,6 +67,7 @@ Progress: [█████████░] 95%
 | Phase 07 P03 | 15m | 3 tasks | 2 files |
 | Phase 08 P01 | 25m | 2 tasks | 11 files |
 | Phase 08 P02 | 18m | 2 tasks | 12 files |
+| Phase 08 P03 | 21m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -99,6 +101,9 @@ Recent decisions affecting current work:
 - [Phase 08]: D-01 / D-02 Native .kfx ZIP container export and import with dual-payload architecture: runtime payload (manifest.json, scene.json, animations.json, state-machines.json) separated from editor metadata (metadata.json)
 - [Phase 08]: EXPORT-01 KfxSecurityValidator blocks zip-slip directory traversal (.., leading slashes, external destinations) and enforces 250MB decompression bomb protection
 - [Phase 08]: D-04 / RUNTIME-02 Standalone headless KerfPlayer / KerfRuntime evaluation engine with pure numeric Matrix3x2 affine transforms and pluggable IRenderBackend with zero WPF/DOM dependencies
+- [Phase 08]: D-05 Decommission destructive PropertyBinder mutations, routing all animated pose properties strictly to RenderTransform without modifying layer.Width, layer.Height, layer.X, or layer.Y
+- [Phase 08]: D-05 Retain 32-bit FNV-1a hash calculation (GetNumericNodeId) strictly for internal numeric indexing and migration, while public authoring and persistence prioritize stable string GUIDs
+- [Phase 08]: D-06 Author definitive ANIMATION_ENGINE_FINAL_REPORT.md and achieve 77/77 automated tests passing with zero regressions across TestRunner.cs
 
 ### Pending Todos
 
