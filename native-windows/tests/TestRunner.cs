@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Windows;
@@ -102,6 +103,7 @@ namespace Kerf.Tests
             RunTest("Auto-Unhover on PointerExit, Cycle Guard & Continuous State Looping", TestAutoUnhoverCycleGuardAndStateLooping);
             RunTest("Timeline Keyframe Easing, Evaluation & Playback Isolation", TestTimelineKeyframeEasingAndPlaybackIsolation);
             RunTest("Schema v4.0.0 Persistence, GUID Auto-Healing & Orphan Resilience", TestSchemaV4PersistenceAndOrphanMigration);
+            RunTest("Native .kfx ZIP Container Export, Dual-Payload & Security Validation", TestNativeKfxZipExportAndSecurityValidation);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -8848,6 +8850,195 @@ namespace Kerf.Tests
 
             resolveCmd.Execute();
             Assert(loadedReviewDoc.Animation.Clips[0].Tracks.Count == 2, "Redo re-applies purge and rebind (2 tracks)");
+        }
+
+        private static void TestNativeKfxZipExportAndSecurityValidation()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "Kerf_Test75_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+
+            try
+            {
+                // 1. Build a rich test document
+                var doc = new KerfDocument();
+                doc.Name = "KfxSecurityTestDoc";
+
+                var page = doc.GetActivePage();
+                var frame = new LayerNode
+                {
+                    Id = "frame_main",
+                    Type = ElementType.Frame,
+                    Name = "Main Frame",
+                    X = 0,
+                    Y = 0,
+                    Width = 800,
+                    Height = 600
+                };
+                var rect = new LayerNode
+                {
+                    Id = "rect_button",
+                    Type = ElementType.Rectangle,
+                    Name = "Button",
+                    X = 50,
+                    Y = 50,
+                    Width = 200,
+                    Height = 60,
+                    ParentId = frame.Id,
+                    Opacity = 1.0
+                };
+                frame.Children.Add(rect);
+                page.Layers.Add(frame);
+
+                // Add an animation clip with tracks and keyframes
+                var clip = new Clip(1, "HoverClip", 1.5, 60.0, LoopMode.Loop);
+                var trackX = new Track(PropertyBinder.GetNumericNodeId(rect.Id), (ushort)PropKey.X, rect.Id, "X");
+                trackX.AddKeyframe(new Keyframe(0.0, 50.0, InterpMode.Linear));
+                trackX.AddKeyframe(new Keyframe(1.5, 150.0, InterpMode.Cubic, 0.42, 0.0, 0.58, 1.0));
+                clip.AddTrack(trackX);
+                doc.Animation.Clips.Add(clip);
+                doc.Animation.ActiveClipId = 1;
+
+                // Add a state machine
+                var sm = new StateMachineDefinition("InteractiveSM");
+                var inputIsHovered = sm.AddInput(MachineInput.Bool("isHovered", false));
+                var smLayer = new MachineLayer("BaseLayer");
+                var stateIdle = new MachineState(0, "Idle", StateKind.Animation, -1);
+                var stateHover = new MachineState(1, "Hover", StateKind.Animation, 0);
+                int idxIdle = smLayer.AddState(stateIdle);
+                int idxHover = smLayer.AddState(stateHover);
+                var trans = new StateTransition(idxIdle, idxHover, 0.25);
+                var cg = new ConditionGroup();
+                cg.Conditions.Add(new TransitionCondition(inputIsHovered, ConditionOp.Eq, 1.0));
+                trans.ConditionGroups.Add(cg);
+                smLayer.AddTransition(trans);
+                sm.Layers.Add(smLayer);
+                doc.Animation.StateMachine = sm;
+
+                // 2. Export package with editor metadata
+                string fullPackagePath = Path.Combine(tempDir, "test_package.kfx");
+                KfxPackage.ExportPackage(doc, fullPackagePath, true);
+                Assert(File.Exists(fullPackagePath), "Exported .kfx file exists on disk");
+
+                // 3. Inspect internal ZIP entries
+                using (var za = ZipFile.OpenRead(fullPackagePath))
+                {
+                    Assert(za.GetEntry("manifest.json") != null, "manifest.json exists in package");
+                    Assert(za.GetEntry("scene.json") != null, "scene.json exists in package");
+                    Assert(za.GetEntry("animations.json") != null, "animations.json exists in package");
+                    Assert(za.GetEntry("state-machines.json") != null, "state-machines.json exists in package");
+                    Assert(za.GetEntry("metadata.json") != null, "metadata.json exists in package");
+                }
+
+                // 4. Import package with metadata and assert 100% fidelity
+                var importedDoc = KfxPackage.ImportPackage(fullPackagePath);
+                Assert(importedDoc != null, "ImportPackage returned valid KerfDocument");
+                Assert(importedDoc.Name == "KfxSecurityTestDoc", "Document Name preserved in roundtrip");
+                Assert(importedDoc.GetActivePage().Layers.Count == 1, "Active page layer hierarchy preserved (1 root frame)");
+                var importedFrame = importedDoc.GetActivePage().Layers[0];
+                Assert(importedFrame.Id == "frame_main", "Frame ID preserved");
+                Assert(importedFrame.Children.Count == 1, "Child layer preserved");
+                Assert(importedFrame.Children[0].Id == "rect_button", "Child layer ID preserved");
+                Assert(importedDoc.Animation.Clips.Count == 1, "Animation clips preserved");
+                Assert(importedDoc.Animation.Clips[0].Tracks.Count == 1, "Clip tracks preserved");
+                Assert(importedDoc.Animation.Clips[0].Tracks[0].Keys.Count == 2, "Clip track keyframes preserved");
+                Assert(importedDoc.Animation.StateMachine != null, "StateMachine preserved");
+                Assert(importedDoc.Animation.StateMachine.Layers.Count == 1, "StateMachine layers preserved");
+                Assert(importedDoc.Animation.StateMachine.Layers[0].States.Count == 2, "StateMachine states preserved");
+                Assert(importedDoc.Animation.StateMachine.Layers[0].Transitions.Count == 1, "StateMachine transitions preserved");
+
+                // 5. Export runtime-only package without editor metadata
+                string runtimePackagePath = Path.Combine(tempDir, "runtime_package.kfx");
+                KfxPackage.ExportPackage(doc, runtimePackagePath, false);
+                Assert(File.Exists(runtimePackagePath), "Runtime-only package exists");
+
+                using (var za = ZipFile.OpenRead(runtimePackagePath))
+                {
+                    Assert(za.GetEntry("metadata.json") == null, "metadata.json is omitted in runtime-only package");
+                    Assert(za.GetEntry("manifest.json") != null, "manifest.json exists in runtime-only package");
+                    Assert(za.GetEntry("scene.json") != null, "scene.json exists in runtime-only package");
+                }
+
+                // Import runtime-only package without exceptions
+                var runtimeDoc = KfxPackage.ImportPackage(runtimePackagePath);
+                Assert(runtimeDoc != null, "Runtime package loads cleanly without metadata.json");
+                Assert(runtimeDoc.GetActivePage().Layers.Count == 1, "Runtime page contains scene layers");
+                Assert(runtimeDoc.Animation.Clips.Count == 1, "Runtime doc contains animation clips");
+                Assert(runtimeDoc.Animation.StateMachine.Layers.Count == 1, "Runtime doc contains state machine");
+
+                // 6. Security Test: Zip-Slip path traversal vulnerability rejection
+                string zipSlipArchive = Path.Combine(tempDir, "malicious_zipslip.kfx");
+                using (var fs = new FileStream(zipSlipArchive, FileMode.Create))
+                using (var za = new ZipArchive(fs, ZipArchiveMode.Create))
+                {
+                    var entry = za.CreateEntry("../../malicious.txt");
+                    using (var es = entry.Open())
+                    using (var sw = new StreamWriter(es))
+                    {
+                        sw.Write("malicious payload");
+                    }
+                }
+
+                bool zipSlipBlocked = false;
+                try
+                {
+                    KfxSecurityValidator.ValidatePackageSecurity(zipSlipArchive);
+                }
+                catch (InvalidDataException)
+                {
+                    zipSlipBlocked = true;
+                }
+                Assert(zipSlipBlocked, "KfxSecurityValidator blocked zip-slip path traversal (../../malicious.txt)");
+
+                bool extractionPathBlocked = false;
+                try
+                {
+                    KfxSecurityValidator.ValidateExtractionPath(tempDir, "../../malicious.txt");
+                }
+                catch (InvalidDataException)
+                {
+                    extractionPathBlocked = true;
+                }
+                Assert(extractionPathBlocked, "ValidateExtractionPath blocked path traversing outside targetDir");
+
+                // 7. Security Test: Decompression bomb size limit rejection (250MB limit)
+                string zipBombArchive = Path.Combine(tempDir, "zip_bomb.kfx");
+                byte[] zeroBuffer = new byte[1024 * 1024]; // 1MB buffer
+                using (var fs = new FileStream(zipBombArchive, FileMode.Create))
+                using (var za = new ZipArchive(fs, ZipArchiveMode.Create))
+                {
+                    var entry = za.CreateEntry("huge_payload.bin", CompressionLevel.Fastest);
+                    using (var es = entry.Open())
+                    {
+                        // Write 260 MB of zeroes (compresses in ZIP to tiny size, but uncompressed entry.Length is 260MB)
+                        for (int i = 0; i < 260; i++)
+                        {
+                            es.Write(zeroBuffer, 0, zeroBuffer.Length);
+                        }
+                    }
+                }
+
+                bool zipBombBlocked = false;
+                try
+                {
+                    KfxSecurityValidator.ValidatePackageSecurity(zipBombArchive);
+                }
+                catch (InvalidDataException)
+                {
+                    zipBombBlocked = true;
+                }
+                Assert(zipBombBlocked, "KfxSecurityValidator blocked decompression bomb exceeding 250MB");
+            }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(tempDir))
+                    {
+                        Directory.Delete(tempDir, true);
+                    }
+                }
+                catch { }
+            }
         }
     }
 }

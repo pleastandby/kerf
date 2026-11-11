@@ -604,6 +604,8 @@ namespace Kerf.UI
             fileMenu.Items.Add(CreateSubMenuItem("Save _As Anywhere...", "Ctrl+Shift+S", () => SaveAsCurrentDocument()));
             fileMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             fileMenu.Items.Add(CreateSubMenuItem("_Export Document...", "Ctrl+E", () => ShowExportDialog()));
+            fileMenu.Items.Add(CreateSubMenuItem("_Export Runtime Package (.kfx)...", null, () => ShowExportKfxDialog()));
+            fileMenu.Items.Add(CreateSubMenuItem("_Import Animation Package (.kfx)...", null, () => ShowImportKfxDialog()));
             fileMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
 
             var recentMenu = new MenuItem
@@ -14156,6 +14158,60 @@ namespace Kerf.UI
                 catch (Exception ex)
                 {
                     MessageBox.Show("Export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        public void ShowExportKfxDialog()
+        {
+            if (Document == null) return;
+
+            string defaultName = !string.IsNullOrEmpty(Document.Name) ? Document.Name : "animation";
+            var dlg = new SaveFileDialog
+            {
+                Filter = "Kerf Animation Package (*.kfx)|*.kfx",
+                FileName = defaultName + ".kfx",
+                Title = "Export Runtime Package (.kfx)",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            };
+
+            if (dlg.ShowDialog() == true)
+            {
+                try
+                {
+                    KfxPackage.ExportPackage(Document, dlg.FileName, true);
+                    MessageBox.Show("Package exported successfully to: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        public void ShowImportKfxDialog()
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "Kerf Animation Package (*.kfx)|*.kfx",
+                Title = "Import Animation Package (.kfx)",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            };
+
+            if (dlg.ShowDialog() == true)
+            {
+                try
+                {
+                    var importedDoc = KfxPackage.ImportPackage(dlg.FileName);
+                    if (importedDoc != null)
+                    {
+                        LoadDocument(importedDoc, dlg.FileName);
+                        MessageBox.Show("Package imported successfully.", "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Import failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }

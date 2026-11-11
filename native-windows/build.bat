@@ -28,7 +28,7 @@ if not exist "%CSC%" (
 )
 
 echo [*] Compiling Native App: src/**/*.cs -^> %OUT_APP% ...
-"%CSC%" /target:winexe /platform:x64 /optimize+ /win32icon:kerf.ico /out:"%OUT_APP%" /lib:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF /r:System.dll,System.Core.dll,System.Xaml.dll,System.Web.Extensions.dll,PresentationCore.dll,PresentationFramework.dll,WindowsBase.dll /recurse:src\*.cs
+"%CSC%" /target:winexe /platform:x64 /optimize+ /win32icon:kerf.ico /out:"%OUT_APP%" /lib:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF /r:System.dll,System.Core.dll,System.Xaml.dll,System.Web.Extensions.dll,PresentationCore.dll,PresentationFramework.dll,WindowsBase.dll,System.IO.Compression.dll,System.IO.Compression.FileSystem.dll /recurse:src\*.cs
 
 if %ERRORLEVEL% NEQ 0 (
     echo [FAILED] Compilation of KerfStudio.exe failed!
@@ -54,7 +54,7 @@ echo =====================================================================
 if "%1"=="--test" (
     echo.
     echo [*] Compiling and running Automated Verification Tests...
-    "%CSC%" /target:exe /main:Kerf.Tests.TestRunner /out:tests\TestRunner.exe /platform:x64 /optimize+ /warn:1 /lib:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF /r:System.dll,System.Core.dll,WindowsBase.dll,PresentationCore.dll,PresentationFramework.dll,System.Xaml.dll,System.Drawing.dll,System.Xml.dll,System.Web.Extensions.dll /recurse:src\*.cs tests\TestRunner.cs
+    "%CSC%" /target:exe /main:Kerf.Tests.TestRunner /out:tests\TestRunner.exe /platform:x64 /optimize+ /warn:1 /lib:C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF /r:System.dll,System.Core.dll,WindowsBase.dll,PresentationCore.dll,PresentationFramework.dll,System.Xaml.dll,System.Drawing.dll,System.Xml.dll,System.Web.Extensions.dll,System.IO.Compression.dll,System.IO.Compression.FileSystem.dll /recurse:src\*.cs tests\TestRunner.cs
     if %ERRORLEVEL% EQU 0 (
         tests\TestRunner.exe
     )
