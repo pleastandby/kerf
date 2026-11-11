@@ -184,8 +184,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 5. Animation Command History & Full Undo/Redo | 2/2 | Complete | 2026-11-06 |
 | 6. Interactive State Machine Engine | 4/4 | Complete | 2026-11-08 |
 | 7. Interactive Listeners, State Machine Runtime and Transition Execution | 3/3 | Complete | 2026-11-08 |
-| 8. Verification, Legacy Migration & Safe Deprecation | 3/3 | Complete | 2026-11-11 |
+| 8. Persistence, Runtime Integration, Export and Legacy Decommissioning | 3/3 | Complete | 2026-11-11 |
 
 ---
 *Roadmap defined: 2026-11-05*
-*Last updated: 2026-11-08 after Phase 7 completion*
+*Last updated: 2026-11-11 after Phase 8 completion*
