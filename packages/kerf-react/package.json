@@ -1,6 +1,6 @@
 {
   "name": "kerf-react",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Official plug-and-play React runtime for Kerf (.kfx) interactive motion graphics, vector animations, and state machines.",
   "license": "MIT",
   "author": "Kerf Technologies",
@@ -9,7 +9,7 @@
     "url": "git+https://github.com/pleastandby/kerf.git",
     "directory": "packages/kerf-react"
   },
-  "homepage": "https://github.com/pleastandby/kerf/tree/master/packages/kerf-react#readme",
+  "homepage": "https://github.com/pleastandby/kerf/packages",
   "bugs": {
     "url": "https://github.com/pleastandby/kerf/issues"
   },

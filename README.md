@@ -1,4 +1,4 @@
-# Kerf Studio — Native Windows GPU-Accelerated Vector Design Application
+# Kerf — Native Windows GPU-Accelerated Vector Design Application
 
 ![Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows)
 ![DirectX](https://img.shields.io/badge/Graphics-Direct3D%2011%20Hardware-green)
@@ -7,7 +7,7 @@
 [![npm version](https://img.shields.io/npm/v/kerf-react.svg?logo=npm&color=CB3837)](https://www.npmjs.com/package/kerf-react)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-**Kerf Studio** is a standalone, GPU-accelerated native Windows desktop application for professional vector design, Bézier path manipulation, and component layout. Built with a Direct3D 11 hardware-accelerated retained scene graph and a high-performance native Rust geometric kernel (`kerf_core.dll`), Kerf Studio delivers true 60+ FPS subpixel rendering, analytical mathematical Bézier solvers, and a creative suite experience inspired by After Effects and Figma.
+**Kerf** is a standalone, GPU-accelerated native Windows desktop application for professional vector design, Bézier path manipulation, and component layout. Built with a Direct3D 11 hardware-accelerated retained scene graph and a high-performance native Rust geometric kernel (`kerf_core.dll`), Kerf Studio delivers true 60+ FPS subpixel rendering, analytical mathematical Bézier solvers, and a creative suite experience inspired by After Effects and Figma.
 
 ---
 

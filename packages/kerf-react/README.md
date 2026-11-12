@@ -4,6 +4,7 @@
 
 [![npm version](https://img.shields.io/npm/v/kerf-react.svg?logo=npm&color=CB3837)](https://www.npmjs.com/package/kerf-react)
 [![license](https://img.shields.io/github/license/pleastandby/kerf)](https://github.com/pleastandby/kerf/blob/master/LICENSE)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-pleastandby%2Fkerf%2Fpackages-blue?logo=github)](https://github.com/pleastandby/kerf/packages)
 
 Embed interactive, resolution-independent vector animations exported from **Kerf Studio** in any React application with **zero configuration** — just like Rive and Lottie.
 
@@ -134,7 +135,8 @@ export function Gauge({ value }: { value: number }) {
 
 ---
 
-## 📄 License
+## 📄 License & Repository
 
-MIT © [pleastandby](https://github.com/pleastandby/kerf)
+- **Repository**: [https://github.com/pleastandby/kerf/packages](https://github.com/pleastandby/kerf/packages)
+- **License**: MIT © [pleastandby](https://github.com/pleastandby/kerf)
 
