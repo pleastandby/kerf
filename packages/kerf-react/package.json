@@ -1,0 +1,57 @@
+{
+  "name": "kerf-react",
+  "version": "1.0.0",
+  "description": "Official plug-and-play React runtime for Kerf (.kfx) interactive motion graphics, vector animations, and state machines.",
+  "license": "MIT",
+  "author": "Kerf Technologies",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kerf-design/kerf.git"
+  },
+  "keywords": [
+    "kerf",
+    "rive",
+    "lottie",
+    "animation",
+    "motion",
+    "vector",
+    "state-machine",
+    "react",
+    "canvas",
+    "interactive"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "vite build && tsc --emitDeclarationOnly",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=16.8.0",
+    "react-dom": ">=16.8.0"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0 || ^19.0.0",
+    "@types/react-dom": "^18.3.0 || ^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  }
+}
