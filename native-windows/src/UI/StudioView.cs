@@ -424,9 +424,41 @@ namespace Kerf.UI
             public double Position;
             public double Start;
             public double End;
+
+            // Equal Spacing & Distribution (Figma style autocomplete)
+            public bool IsSpacingGuide;
+            public double SpacingValue;
+            public Rect SpacingBox1;
+            public Rect SpacingBox2;
+            public Point DimensionStart1;
+            public Point DimensionEnd1;
+            public Point DimensionStart2;
+            public Point DimensionEnd2;
         }
         private readonly List<SnapGuide> _activeSnapGuides = new List<SnapGuide>();
         private bool _smartSnappingEnabled = true;
+        private Button _snapToggleButton;
+
+        // Image Cropping & Editing State
+        public enum CropHandleType
+        {
+            None,
+            TopLeft,
+            TopCenter,
+            TopRight,
+            MiddleRight,
+            BottomRight,
+            BottomCenter,
+            BottomLeft,
+            MiddleLeft,
+            Inside
+        }
+        private bool _isImageCropping = false;
+        private LayerNode _cropImageNode = null;
+        private CropHandleType _activeCropHandle = CropHandleType.None;
+        private bool _isDraggingCropHandle = false;
+        private Point _cropDragStartMouse;
+        private Rect _cropDragStartUV;
 
         public StudioView()
         {
@@ -494,6 +526,10 @@ namespace Kerf.UI
         private void InitializeStudioUI()
         {
             Background = KerfBrand.ObsidianBrush; // #1E082E
+            AllowDrop = true;
+            DragEnter += (s, e) => HandleCanvasDragOver(e);
+            DragOver += (s, e) => HandleCanvasDragOver(e);
+            Drop += (s, e) => HandleCanvasDrop(e);
 
             var rootGrid = new Grid();
             rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) }); // Top Bar
@@ -988,6 +1024,16 @@ namespace Kerf.UI
             var modeSwitcher = CreateModeSwitcher();
             leftStack.Children.Add(modeSwitcher);
 
+            var sepTools = CreateSeparator();
+            sepTools.Margin = new Thickness(6, 0, 6, 0);
+            leftStack.Children.Add(sepTools);
+
+            var snapToggle = CreateSnapToggleButton();
+            leftStack.Children.Add(snapToggle);
+
+            var placeImgBtn = CreatePlaceImageTopButton();
+            leftStack.Children.Add(placeImgBtn);
+
             DockPanel.SetDock(leftStack, Dock.Left);
             dock.Children.Add(leftStack);
 
@@ -1110,6 +1156,420 @@ namespace Kerf.UI
                 _saveStatusTimer.Tick += (s, e) => UpdateSaveStatus();
             }
             if (!_saveStatusTimer.IsEnabled) _saveStatusTimer.Start();
+        }
+
+        private Button CreateSnapToggleButton()
+        {
+            var btn = new Button
+            {
+                Height = 26,
+                Padding = new Thickness(10, 0, 10, 0),
+                Margin = new Thickness(4, 0, 4, 0),
+                Cursor = Cursors.Hand,
+                Template = CreateRoundedButtonTemplate(6)
+            };
+            Action updateAppearance = () =>
+            {
+                btn.Content = _smartSnappingEnabled ? "🧲 Snapping: ON" : "🧲 Snapping: OFF";
+                btn.Background = _smartSnappingEnabled ? KerfBrand.DarkSlateBrush : Brushes.Transparent;
+                btn.Foreground = _smartSnappingEnabled ? KerfBrand.MintBrush : KerfBrand.TextMutedBrush;
+                btn.BorderBrush = _smartSnappingEnabled ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush;
+                btn.BorderThickness = new Thickness(1);
+                btn.ToolTip = _smartSnappingEnabled
+                    ? "Smart Snapping & Equal Spacing Guides: ON (Click to disable for freehand drawing/moving) [Shift+S]"
+                    : "Smart Snapping: OFF (Freehand moving & drawing active - click to enable) [Shift+S]";
+            };
+            updateAppearance();
+            btn.Click += (s, e) =>
+            {
+                ToggleSmartSnapping();
+                updateAppearance();
+            };
+            _snapToggleButton = btn;
+            return btn;
+        }
+
+        public void ToggleSmartSnapping()
+        {
+            _smartSnappingEnabled = !_smartSnappingEnabled;
+            if (!_smartSnappingEnabled)
+            {
+                _activeSnapGuides.Clear();
+            }
+            if (_snapToggleButton != null)
+            {
+                _snapToggleButton.Content = _smartSnappingEnabled ? "🧲 Snapping: ON" : "🧲 Snapping: OFF";
+                _snapToggleButton.Background = _smartSnappingEnabled ? KerfBrand.DarkSlateBrush : Brushes.Transparent;
+                _snapToggleButton.Foreground = _smartSnappingEnabled ? KerfBrand.MintBrush : KerfBrand.TextMutedBrush;
+                _snapToggleButton.BorderBrush = _smartSnappingEnabled ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush;
+                _snapToggleButton.ToolTip = _smartSnappingEnabled
+                    ? "Smart Snapping & Equal Spacing Guides: ON (Click to disable for freehand drawing/moving) [Shift+S]"
+                    : "Smart Snapping: OFF (Freehand moving & drawing active - click to enable) [Shift+S]";
+            }
+            RefreshCanvas();
+        }
+
+        private Button CreatePlaceImageTopButton()
+        {
+            var btn = new Button
+            {
+                Content = "📷 Place Image...",
+                Height = 26,
+                Padding = new Thickness(8, 0, 8, 0),
+                Margin = new Thickness(4, 0, 4, 0),
+                Background = Brushes.Transparent,
+                Foreground = KerfBrand.TextWhiteBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = "Import and place images onto canvas [Ctrl+Shift+K]",
+                Template = CreateRoundedButtonTemplate(6)
+            };
+            btn.Click += (s, e) => PromptPlaceImage();
+            return btn;
+        }
+
+        public void PromptPlaceImage()
+        {
+            var ofd = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Place Image",
+                Filter = "Image Files (*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.svg)|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.svg|All Files (*.*)|*.*",
+                Multiselect = true
+            };
+            if (ofd.ShowDialog() == true)
+            {
+                Point center = ScreenToCanvas(new Point(_canvasHost != null ? _canvasHost.ActualWidth / 2.0 : 400, _canvasHost != null ? _canvasHost.ActualHeight / 2.0 : 300));
+                ImportImages(ofd.FileNames, center);
+            }
+        }
+
+        public void ImportImages(string[] filePaths, Point? targetPt = null)
+        {
+            if (filePaths == null || filePaths.Length == 0) return;
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page == null) return;
+
+            Point placePt = targetPt.HasValue ? targetPt.Value : ScreenToCanvas(new Point(300, 200));
+            var newlyImported = new List<LayerNode>();
+
+            for (int i = 0; i < filePaths.Length; i++)
+            {
+                string filePath = filePaths[i];
+                if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) continue;
+
+                string ext = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
+                if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".bmp" && ext != ".gif" && ext != ".svg")
+                    continue;
+
+                double imgW = 400;
+                double imgH = 300;
+                try
+                {
+                    var bi = new System.Windows.Media.Imaging.BitmapImage();
+                    bi.BeginInit();
+                    bi.UriSource = new Uri(filePath, UriKind.Absolute);
+                    bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                    bi.EndInit();
+                    if (bi.PixelWidth > 0 && bi.PixelHeight > 0)
+                    {
+                        imgW = bi.PixelWidth;
+                        imgH = bi.PixelHeight;
+                        if (imgW > 1200)
+                        {
+                            double ratio = 1200.0 / imgW;
+                            imgW = 1200;
+                            imgH = Math.Round(imgH * ratio);
+                        }
+                    }
+                }
+                catch { }
+
+                var imgNode = new LayerNode
+                {
+                    Id = Guid.NewGuid().ToString().Substring(0, 8),
+                    Name = System.IO.Path.GetFileNameWithoutExtension(filePath),
+                    Type = ElementType.Image,
+                    X = placePt.X,
+                    Y = placePt.Y,
+                    Width = imgW,
+                    Height = imgH,
+                    Fills = new List<Paint>
+                    {
+                        new Paint
+                        {
+                            Type = PaintType.Image,
+                            ImageRef = filePath,
+                            ImageFillMode = "Fill",
+                            Enabled = true,
+                            CropRect = new Rect(0, 0, 1, 1)
+                        }
+                    }
+                };
+
+                page.Layers.Add(imgNode);
+                _sceneGraph.InvalidateNode(imgNode.Id);
+                newlyImported.Add(imgNode);
+
+                placePt.X += 30;
+                placePt.Y += 30;
+            }
+
+            if (newlyImported.Count > 0)
+            {
+                _selectedLayers.Clear();
+                foreach (var n in newlyImported) _selectedLayers.Add(n);
+                OnSelectionChanged();
+                History.MarkDirty();
+                RefreshCanvas();
+                RefreshPropertyInspector();
+            }
+        }
+
+        public void HandleCanvasDragOver(DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effects = DragDropEffects.Copy;
+                e.Handled = true;
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+            }
+        }
+
+        public void HandleCanvasDrop(DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                if (files != null && files.Length > 0)
+                {
+                    Point screenPt = (_canvasHost != null) ? e.GetPosition(_canvasHost) : new Point(200, 200);
+                    Point canvasPt = ScreenToCanvas(screenPt);
+                    ImportImages(files, canvasPt);
+                    e.Handled = true;
+                }
+            }
+        }
+
+        public void EnterImageCropMode(LayerNode node)
+        {
+            if (node == null) return;
+            _isImageCropping = true;
+            _cropImageNode = node;
+            var paint = node.GetPrimaryImagePaint();
+            if (paint != null && !paint.CropRect.HasValue)
+            {
+                paint.CropRect = new Rect(0, 0, 1, 1);
+            }
+            if (!_selectedLayers.Contains(node))
+            {
+                _selectedLayers.Clear();
+                _selectedLayers.Add(node);
+                OnSelectionChanged();
+            }
+            RefreshCanvas();
+            RefreshPropertyInspector();
+        }
+
+        public void ExitImageCropMode()
+        {
+            _isImageCropping = false;
+            _cropImageNode = null;
+            _activeCropHandle = CropHandleType.None;
+            _isDraggingCropHandle = false;
+            RefreshCanvas();
+            RefreshPropertyInspector();
+        }
+
+        private CropHandleType HitTestCropHandles(Point canvasPt, LayerNode node)
+        {
+            if (node == null) return CropHandleType.None;
+            var paint = node.GetPrimaryImagePaint();
+            if (paint == null) return CropHandleType.None;
+
+            var bounds = node.GetBounds();
+            var uv = paint.CropRect.HasValue ? paint.CropRect.Value : new Rect(0, 0, 1, 1);
+
+            double cropX = bounds.X + uv.X * bounds.Width;
+            double cropY = bounds.Y + uv.Y * bounds.Height;
+            double cropW = Math.Max(4, uv.Width * bounds.Width);
+            double cropH = Math.Max(4, uv.Height * bounds.Height);
+            var cropBox = new Rect(cropX, cropY, cropW, cropH);
+
+            double tol = 12.0 / _zoomScale;
+
+            // Check corners
+            if (Math.Abs(canvasPt.X - cropBox.X) <= tol && Math.Abs(canvasPt.Y - cropBox.Y) <= tol) return CropHandleType.TopLeft;
+            if (Math.Abs(canvasPt.X - cropBox.Right) <= tol && Math.Abs(canvasPt.Y - cropBox.Y) <= tol) return CropHandleType.TopRight;
+            if (Math.Abs(canvasPt.X - cropBox.X) <= tol && Math.Abs(canvasPt.Y - cropBox.Bottom) <= tol) return CropHandleType.BottomLeft;
+            if (Math.Abs(canvasPt.X - cropBox.Right) <= tol && Math.Abs(canvasPt.Y - cropBox.Bottom) <= tol) return CropHandleType.BottomRight;
+
+            // Check edges
+            if (Math.Abs(canvasPt.Y - cropBox.Y) <= tol && canvasPt.X >= cropBox.X - tol && canvasPt.X <= cropBox.Right + tol) return CropHandleType.TopCenter;
+            if (Math.Abs(canvasPt.Y - cropBox.Bottom) <= tol && canvasPt.X >= cropBox.X - tol && canvasPt.X <= cropBox.Right + tol) return CropHandleType.BottomCenter;
+            if (Math.Abs(canvasPt.X - cropBox.X) <= tol && canvasPt.Y >= cropBox.Y - tol && canvasPt.Y <= cropBox.Bottom + tol) return CropHandleType.MiddleLeft;
+            if (Math.Abs(canvasPt.X - cropBox.Right) <= tol && canvasPt.Y >= cropBox.Y - tol && canvasPt.Y <= cropBox.Bottom + tol) return CropHandleType.MiddleRight;
+
+            // Inside crop box
+            if (cropBox.Contains(canvasPt)) return CropHandleType.Inside;
+
+            return CropHandleType.None;
+        }
+
+        private void HandleCropHandleDrag(Point canvasPt)
+        {
+            if (_cropImageNode == null) return;
+            var paint = _cropImageNode.GetPrimaryImagePaint();
+            if (paint == null) return;
+
+            var bounds = _cropImageNode.GetBounds();
+            if (bounds.Width <= 0 || bounds.Height <= 0) return;
+
+            double dx = (canvasPt.X - _cropDragStartMouse.X) / bounds.Width;
+            double dy = (canvasPt.Y - _cropDragStartMouse.Y) / bounds.Height;
+
+            var uv = _cropDragStartUV;
+            double newX = uv.X;
+            double newY = uv.Y;
+            double newW = uv.Width;
+            double newH = uv.Height;
+
+            switch (_activeCropHandle)
+            {
+                case CropHandleType.TopLeft:
+                    newX = Math.Max(0.0, Math.Min(uv.Right - 0.05, uv.X + dx));
+                    newY = Math.Max(0.0, Math.Min(uv.Bottom - 0.05, uv.Y + dy));
+                    newW = uv.Right - newX;
+                    newH = uv.Bottom - newY;
+                    break;
+                case CropHandleType.TopCenter:
+                    newY = Math.Max(0.0, Math.Min(uv.Bottom - 0.05, uv.Y + dy));
+                    newH = uv.Bottom - newY;
+                    break;
+                case CropHandleType.TopRight:
+                    newY = Math.Max(0.0, Math.Min(uv.Bottom - 0.05, uv.Y + dy));
+                    newW = Math.Max(0.05, Math.Min(1.0 - uv.X, uv.Width + dx));
+                    newH = uv.Bottom - newY;
+                    break;
+                case CropHandleType.MiddleRight:
+                    newW = Math.Max(0.05, Math.Min(1.0 - uv.X, uv.Width + dx));
+                    break;
+                case CropHandleType.BottomRight:
+                    newW = Math.Max(0.05, Math.Min(1.0 - uv.X, uv.Width + dx));
+                    newH = Math.Max(0.05, Math.Min(1.0 - uv.Y, uv.Height + dy));
+                    break;
+                case CropHandleType.BottomCenter:
+                    newH = Math.Max(0.05, Math.Min(1.0 - uv.Y, uv.Height + dy));
+                    break;
+                case CropHandleType.BottomLeft:
+                    newX = Math.Max(0.0, Math.Min(uv.Right - 0.05, uv.X + dx));
+                    newW = uv.Right - newX;
+                    newH = Math.Max(0.05, Math.Min(1.0 - uv.Y, uv.Height + dy));
+                    break;
+                case CropHandleType.MiddleLeft:
+                    newX = Math.Max(0.0, Math.Min(uv.Right - 0.05, uv.X + dx));
+                    newW = uv.Right - newX;
+                    break;
+                case CropHandleType.Inside:
+                    newX = Math.Max(0.0, Math.Min(1.0 - uv.Width, uv.X + dx));
+                    newY = Math.Max(0.0, Math.Min(1.0 - uv.Height, uv.Y + dy));
+                    break;
+            }
+
+            paint.CropRect = new Rect(Math.Round(newX, 3), Math.Round(newY, 3), Math.Round(newW, 3), Math.Round(newH, 3));
+            _sceneGraph.InvalidateNode(_cropImageNode.Id);
+            RefreshCanvas();
+            RefreshPropertyInspector();
+        }
+
+        private void RenderImageCropOverlay(DrawingContext dc, LayerNode node)
+        {
+            if (node == null) return;
+            var paint = node.GetPrimaryImagePaint();
+            if (paint == null) return;
+
+            var bounds = node.GetBounds();
+            var uv = paint.CropRect.HasValue ? paint.CropRect.Value : new Rect(0, 0, 1, 1);
+
+            double cropX = bounds.X + uv.X * bounds.Width;
+            double cropY = bounds.Y + uv.Y * bounds.Height;
+            double cropW = Math.Max(4, uv.Width * bounds.Width);
+            double cropH = Math.Max(4, uv.Height * bounds.Height);
+            var cropBox = new Rect(cropX, cropY, cropW, cropH);
+
+            // 1. Semi-transparent dark mask over full bounds outside cropBox
+            var maskBrush = new SolidColorBrush(Color.FromArgb(160, 0, 0, 0));
+            maskBrush.Freeze();
+
+            if (cropBox.Y > bounds.Y)
+                dc.DrawRectangle(maskBrush, null, new Rect(bounds.X, bounds.Y, bounds.Width, cropBox.Y - bounds.Y));
+            if (bounds.Bottom > cropBox.Bottom)
+                dc.DrawRectangle(maskBrush, null, new Rect(bounds.X, cropBox.Bottom, bounds.Width, bounds.Bottom - cropBox.Bottom));
+            if (cropBox.X > bounds.X)
+                dc.DrawRectangle(maskBrush, null, new Rect(bounds.X, cropBox.Y, cropBox.X - bounds.X, cropBox.Height));
+            if (bounds.Right > cropBox.Right)
+                dc.DrawRectangle(maskBrush, null, new Rect(cropBox.Right, cropBox.Y, bounds.Right - cropBox.Right, cropBox.Height));
+
+            // 2. Crop rectangle border
+            var cropPen = new Pen(KerfBrand.MintBrush, 1.8 / _zoomScale);
+            cropPen.Freeze();
+            dc.DrawRectangle(null, cropPen, cropBox);
+
+            // 3. Rule-of-thirds grid
+            var gridPen = new Pen(new SolidColorBrush(Color.FromArgb(90, 255, 255, 255)), 1.0 / _zoomScale);
+            gridPen.DashStyle = new DashStyle(new double[] { 3, 3 }, 0);
+            gridPen.Freeze();
+            dc.DrawLine(gridPen, new Point(cropBox.X + cropBox.Width / 3.0, cropBox.Y), new Point(cropBox.X + cropBox.Width / 3.0, cropBox.Bottom));
+            dc.DrawLine(gridPen, new Point(cropBox.X + 2.0 * cropBox.Width / 3.0, cropBox.Y), new Point(cropBox.X + 2.0 * cropBox.Width / 3.0, cropBox.Bottom));
+            dc.DrawLine(gridPen, new Point(cropBox.X, cropBox.Y + cropBox.Height / 3.0), new Point(cropBox.Right, cropBox.Y + cropBox.Height / 3.0));
+            dc.DrawLine(gridPen, new Point(cropBox.X, cropBox.Y + 2.0 * cropBox.Height / 3.0), new Point(cropBox.Right, cropBox.Y + 2.0 * cropBox.Height / 3.0));
+
+            // 4. 8 Figma-style crop corner & edge handles
+            double arm = 14.0 / _zoomScale;
+            double thick = 3.0 / _zoomScale;
+            var handlePen = new Pen(Brushes.White, thick);
+            handlePen.StartLineCap = PenLineCap.Square;
+            handlePen.EndLineCap = PenLineCap.Square;
+            handlePen.Freeze();
+
+            // Top-Left corner
+            dc.DrawLine(handlePen, new Point(cropBox.X, cropBox.Y), new Point(cropBox.X + arm, cropBox.Y));
+            dc.DrawLine(handlePen, new Point(cropBox.X, cropBox.Y), new Point(cropBox.X, cropBox.Y + arm));
+
+            // Top-Right corner
+            dc.DrawLine(handlePen, new Point(cropBox.Right, cropBox.Y), new Point(cropBox.Right - arm, cropBox.Y));
+            dc.DrawLine(handlePen, new Point(cropBox.Right, cropBox.Y), new Point(cropBox.Right, cropBox.Y + arm));
+
+            // Bottom-Left corner
+            dc.DrawLine(handlePen, new Point(cropBox.X, cropBox.Bottom), new Point(cropBox.X + arm, cropBox.Bottom));
+            dc.DrawLine(handlePen, new Point(cropBox.X, cropBox.Bottom), new Point(cropBox.X, cropBox.Bottom - arm));
+
+            // Bottom-Right corner
+            dc.DrawLine(handlePen, new Point(cropBox.Right, cropBox.Bottom), new Point(cropBox.Right - arm, cropBox.Bottom));
+            dc.DrawLine(handlePen, new Point(cropBox.Right, cropBox.Bottom), new Point(cropBox.Right - arm, cropBox.Bottom));
+
+            // 4 Edge bar handles
+            dc.DrawLine(handlePen, new Point(cropBox.X + cropBox.Width / 2.0 - arm / 2.0, cropBox.Y), new Point(cropBox.X + cropBox.Width / 2.0 + arm / 2.0, cropBox.Y));
+            dc.DrawLine(handlePen, new Point(cropBox.X + cropBox.Width / 2.0 - arm / 2.0, cropBox.Bottom), new Point(cropBox.X + cropBox.Width / 2.0 + arm / 2.0, cropBox.Bottom));
+            dc.DrawLine(handlePen, new Point(cropBox.X, cropBox.Y + cropBox.Height / 2.0 - arm / 2.0), new Point(cropBox.X, cropBox.Y + cropBox.Height / 2.0 + arm / 2.0));
+            dc.DrawLine(handlePen, new Point(cropBox.Right, cropBox.Y + cropBox.Height / 2.0 - arm / 2.0), new Point(cropBox.Right, cropBox.Y + cropBox.Height / 2.0 + arm / 2.0));
+
+            // 5. Instruction Pill Badge
+            var ft = new FormattedText(
+                "CROP MODE · Drag handles to crop, Enter to finish",
+                CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Segoe UI Semibold"),
+                11 / _zoomScale,
+                Brushes.White);
+            var badgeRect = new Rect(cropBox.X + (cropBox.Width - ft.Width) / 2.0 - 8 / _zoomScale, cropBox.Y - 26 / _zoomScale, ft.Width + 16 / _zoomScale, 20 / _zoomScale);
+            var badgeBg = new SolidColorBrush(Color.FromArgb(220, 12, 66, 71));
+            badgeBg.Freeze();
+            dc.DrawRoundedRectangle(badgeBg, null, badgeRect, 4 / _zoomScale, 4 / _zoomScale);
+            dc.DrawText(ft, new Point(badgeRect.X + 8 / _zoomScale, badgeRect.Y + 2 / _zoomScale));
         }
 
         #endregion
@@ -4567,6 +5027,12 @@ namespace Kerf.UI
 
             if (primary.Type != ElementType.Group)
             {
+                // Dedicated Image Adjustments & Crop Inspector Section (Figma style)
+                if (primary.Type == ElementType.Image || (primary.Fills != null && primary.Fills.Any(f => f.Type == PaintType.Image)))
+                {
+                    BuildImageAdjustmentsSection(primary);
+                }
+
                 // 3. Multiple Fills Section (Figma style)
                 BuildFillsSection(primary);
 
@@ -7642,6 +8108,234 @@ namespace Kerf.UI
                     VerticalAlignment = VerticalAlignment.Center
                 }
             };
+        }
+
+        private void BuildImageAdjustmentsSection(LayerNode primary)
+        {
+            var paint = primary.GetPrimaryImagePaint();
+            if (paint == null) return;
+
+            _propertyInspectorStack.Children.Add(CreateInspectorSection("Image Adjustments"));
+
+            var card = new Border
+            {
+                Background = KerfBrand.FigmaCardBrush,
+                BorderBrush = KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(10, 8, 10, 8),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            var stack = new StackPanel();
+
+            // 1. Crop Mode & Reset Crop Buttons
+            var cropRow = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            cropRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            cropRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+            cropRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var cropBtn = new Button
+            {
+                Content = _isImageCropping ? "✓ Done Cropping" : "✂ Crop Image",
+                Height = 26,
+                Background = _isImageCropping ? KerfBrand.MintBrush : KerfBrand.DarkSlateBrush,
+                Foreground = _isImageCropping ? KerfBrand.TextBlackBrush : KerfBrand.TextWhiteBrush,
+                BorderBrush = _isImageCropping ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = "Toggle interactive on-canvas crop mode",
+                Template = CreateRoundedButtonTemplate(6)
+            };
+            cropBtn.Click += (s, e) =>
+            {
+                if (_isImageCropping) ExitImageCropMode();
+                else EnterImageCropMode(primary);
+            };
+            Grid.SetColumn(cropBtn, 0);
+            cropRow.Children.Add(cropBtn);
+
+            var resetCropBtn = CreateSmallButton("Reset Crop", "Reset image crop to full size", () =>
+            {
+                paint.CropRect = new Rect(0, 0, 1, 1);
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+                RefreshPropertyInspector();
+            });
+            resetCropBtn.Height = 26;
+            resetCropBtn.Width = double.NaN;
+            resetCropBtn.Padding = new Thickness(6, 0, 6, 0);
+            Grid.SetColumn(resetCropBtn, 2);
+            cropRow.Children.Add(resetCropBtn);
+            stack.Children.Add(cropRow);
+
+            // 2. Fill Mode ComboBox (Fill, Fit, Crop, Tile)
+            var modeDock = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var modeLbl = new TextBlock
+            {
+                Text = "Mode",
+                FontSize = 11,
+                Foreground = KerfBrand.TextMutedBrush,
+                Width = 75,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(modeLbl, Dock.Left);
+            modeDock.Children.Add(modeLbl);
+
+            var modeCombo = new ComboBox
+            {
+                Height = 24,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            modeCombo.Items.Add("Fill");
+            modeCombo.Items.Add("Fit");
+            modeCombo.Items.Add("Crop");
+            modeCombo.Items.Add("Tile");
+            modeCombo.SelectedItem = string.IsNullOrEmpty(paint.ImageFillMode) ? "Fill" : paint.ImageFillMode;
+            modeCombo.SelectionChanged += (s, e) =>
+            {
+                if (modeCombo.SelectedItem != null)
+                {
+                    paint.ImageFillMode = modeCombo.SelectedItem.ToString();
+                    _sceneGraph.InvalidateNode(primary.Id);
+                    History.MarkDirty();
+                    RefreshCanvas();
+                }
+            };
+            modeDock.Children.Add(modeCombo);
+            stack.Children.Add(modeDock);
+
+            // Separator before adjustments
+            var sep = CreateSeparator();
+            sep.Margin = new Thickness(0, 4, 0, 8);
+            stack.Children.Add(sep);
+
+            // 3. Figma Adjustment Sliders
+            stack.Children.Add(CreateImageAdjustmentRow("Exposure", paint.Exposure, -100, 100, (v) =>
+            {
+                paint.Exposure = Math.Round(v);
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+            }));
+
+            stack.Children.Add(CreateImageAdjustmentRow("Contrast", paint.Contrast, -100, 100, (v) =>
+            {
+                paint.Contrast = Math.Round(v);
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+            }));
+
+            stack.Children.Add(CreateImageAdjustmentRow("Saturation", paint.Saturation, -100, 100, (v) =>
+            {
+                paint.Saturation = Math.Round(v);
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+            }));
+
+            stack.Children.Add(CreateImageAdjustmentRow("Temperature", paint.Temperature, -100, 100, (v) =>
+            {
+                paint.Temperature = Math.Round(v);
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+            }));
+
+            stack.Children.Add(CreateImageAdjustmentRow("Tint", paint.Tint, -100, 100, (v) =>
+            {
+                paint.Tint = Math.Round(v);
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+            }));
+
+            stack.Children.Add(CreateImageAdjustmentRow("Highlights", paint.Highlights, -100, 100, (v) =>
+            {
+                paint.Highlights = Math.Round(v);
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+            }));
+
+            stack.Children.Add(CreateImageAdjustmentRow("Shadows", paint.Shadows, -100, 100, (v) =>
+            {
+                paint.Shadows = Math.Round(v);
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+            }));
+
+            // 4. Reset All Adjustments button
+            var resetAllBtn = CreateSmallButton("Reset All Adjustments", "Reset all image adjustments back to defaults", () =>
+            {
+                paint.Exposure = 0;
+                paint.Contrast = 0;
+                paint.Saturation = 0;
+                paint.Temperature = 0;
+                paint.Tint = 0;
+                paint.Highlights = 0;
+                paint.Shadows = 0;
+                _sceneGraph.InvalidateNode(primary.Id);
+                History.MarkDirty();
+                RefreshCanvas();
+                RefreshPropertyInspector();
+            });
+            resetAllBtn.Height = 24;
+            resetAllBtn.Width = double.NaN;
+            resetAllBtn.Padding = new Thickness(8, 0, 8, 0);
+            resetAllBtn.Margin = new Thickness(0, 6, 0, 0);
+            stack.Children.Add(resetAllBtn);
+
+            card.Child = stack;
+            _propertyInspectorStack.Children.Add(card);
+        }
+
+        private FrameworkElement CreateImageAdjustmentRow(string label, double currentVal, double min, double max, Action<double> onChanged)
+        {
+            var dock = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+            var lbl = new TextBlock
+            {
+                Text = label,
+                FontSize = 11,
+                Foreground = KerfBrand.TextMutedBrush,
+                Width = 75,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(lbl, Dock.Left);
+            dock.Children.Add(lbl);
+
+            var valTxt = new TextBlock
+            {
+                Text = currentVal > 0 ? ("+" + currentVal.ToString("F0")) : currentVal.ToString("F0"),
+                FontSize = 11,
+                Foreground = KerfBrand.TextWhiteBrush,
+                Width = 32,
+                TextAlignment = TextAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 0, 0, 0)
+            };
+            DockPanel.SetDock(valTxt, Dock.Right);
+            dock.Children.Add(valTxt);
+
+            var slider = new Slider
+            {
+                Minimum = min,
+                Maximum = max,
+                Value = currentVal,
+                VerticalAlignment = VerticalAlignment.Center,
+                SmallChange = 1,
+                LargeChange = 10
+            };
+            slider.ValueChanged += (s, e) =>
+            {
+                valTxt.Text = slider.Value > 0 ? ("+" + slider.Value.ToString("F0")) : slider.Value.ToString("F0");
+                onChanged(slider.Value);
+            };
+            dock.Children.Add(slider);
+
+            return dock;
         }
 
         private void BuildFillsSection(LayerNode primary)
@@ -10951,6 +11645,31 @@ namespace Kerf.UI
 
             if (button == MouseButton.Left)
             {
+                // Image Crop Mode Interaction
+                if (_isImageCropping && _cropImageNode != null)
+                {
+                    var cropHit = HitTestCropHandles(canvasPt, _cropImageNode);
+                    if (cropHit != CropHandleType.None)
+                    {
+                        if (clickCount >= 2 && cropHit == CropHandleType.Inside)
+                        {
+                            ExitImageCropMode();
+                            return;
+                        }
+                        _activeCropHandle = cropHit;
+                        _isDraggingCropHandle = true;
+                        _cropDragStartMouse = canvasPt;
+                        var p = _cropImageNode.GetPrimaryImagePaint();
+                        _cropDragStartUV = (p != null && p.CropRect.HasValue) ? p.CropRect.Value : new Rect(0, 0, 1, 1);
+                        if (_canvasHost != null) _canvasHost.CaptureMouse();
+                        return;
+                    }
+                    else
+                    {
+                        ExitImageCropMode();
+                    }
+                }
+
                 if (_currentStudioMode == StudioMode.Design && _activeTool == ToolType.Select)
                 {
                     var guide = FindGuideNear(canvasPt);
@@ -11300,6 +12019,11 @@ namespace Kerf.UI
                                 StartInPlaceTextEditing(leaf);
                                 return;
                             }
+                            else if (leaf.Type == ElementType.Image || (leaf.Fills != null && leaf.Fills.Any(f => f.Type == PaintType.Image)))
+                            {
+                                EnterImageCropMode(leaf);
+                                return;
+                            }
                         }
                     }
 
@@ -11419,6 +12143,27 @@ namespace Kerf.UI
                 RefreshCanvas();
                 _lastMousePos = screenPt;
                 return;
+            }
+
+            if (_isDraggingCropHandle && _cropImageNode != null)
+            {
+                HandleCropHandleDrag(canvasPt);
+                _lastMousePos = screenPt;
+                return;
+            }
+
+            if (_isImageCropping && _cropImageNode != null && !_isTransforming && !_isPanning)
+            {
+                var ch = HitTestCropHandles(canvasPt, _cropImageNode);
+                if (_canvasHost != null)
+                {
+                    if (ch == CropHandleType.TopLeft || ch == CropHandleType.BottomRight) _canvasHost.Cursor = Cursors.SizeNWSE;
+                    else if (ch == CropHandleType.TopRight || ch == CropHandleType.BottomLeft) _canvasHost.Cursor = Cursors.SizeNESW;
+                    else if (ch == CropHandleType.TopCenter || ch == CropHandleType.BottomCenter) _canvasHost.Cursor = Cursors.SizeNS;
+                    else if (ch == CropHandleType.MiddleLeft || ch == CropHandleType.MiddleRight) _canvasHost.Cursor = Cursors.SizeWE;
+                    else if (ch == CropHandleType.Inside) _canvasHost.Cursor = Cursors.SizeAll;
+                    else _canvasHost.Cursor = Cursors.Arrow;
+                }
             }
 
             // Marquee / Rectangle selection dragging
@@ -12090,6 +12835,9 @@ namespace Kerf.UI
                                 dy += bestSnapDeltaY;
                                 _activeSnapGuides.Add(new SnapGuide { IsVertical = false, Position = bestSnapY, Start = snapSpanMinX, End = snapSpanMaxX });
                             }
+
+                            // Equal Spacing & Distribution Smart Snapping
+                            CheckDistributionSnapping(others, minInitX + dx, minInitY + dy, selW, selH, snapThreshold, ref dx, ref dy);
                         }
                     }
 
@@ -12296,6 +13044,19 @@ namespace Kerf.UI
                 }
                 _activeGradientLayer = null;
                 _activeGradientPaint = null;
+            }
+
+            if (_isDraggingCropHandle)
+            {
+                _isDraggingCropHandle = false;
+                _activeCropHandle = CropHandleType.None;
+                if (_canvasHost != null && _canvasHost.IsMouseCaptured)
+                {
+                    _canvasHost.ReleaseMouseCapture();
+                }
+                History.MarkDirty();
+                RefreshCanvas();
+                RefreshPropertyInspector();
             }
 
             if (_isPanning)
@@ -12967,6 +13728,13 @@ namespace Kerf.UI
                 }
             }
 
+            // If in Image Crop Mode, render dedicated crop overlay and return
+            if (_isImageCropping && _cropImageNode != null)
+            {
+                RenderImageCropOverlay(dc, _cropImageNode);
+                return;
+            }
+
             // If actively drawing with Pen Tool, render full pen drawing overlay (all nodes, handles, rubber-band)
             if (_activeTool == ToolType.Pen && _activePenGeometry != null && _activePenGeometry.Nodes.Count > 0)
             {
@@ -13008,13 +13776,34 @@ namespace Kerf.UI
 
                 foreach (var g in _activeSnapGuides)
                 {
-                    if (g.IsVertical)
+                    if (g.IsSpacingGuide)
                     {
-                        dc.DrawLine(snapPen, new Point(g.Position, g.Start - 20 / _zoomScale), new Point(g.Position, g.End + 20 / _zoomScale));
+                        var pink = Color.FromRgb(236, 72, 153);
+                        var gapFill = new SolidColorBrush(Color.FromArgb(32, pink.R, pink.G, pink.B));
+                        gapFill.Freeze();
+                        if (!g.SpacingBox1.IsEmpty) dc.DrawRectangle(gapFill, null, g.SpacingBox1);
+                        if (!g.SpacingBox2.IsEmpty) dc.DrawRectangle(gapFill, null, g.SpacingBox2);
+
+                        var distPen = new Pen(new SolidColorBrush(pink), 1.2 / _zoomScale);
+                        distPen.Freeze();
+
+                        DrawDimensionLineWithTicks(dc, distPen, g.DimensionStart1, g.DimensionEnd1, g.IsVertical);
+                        DrawDimensionLineWithTicks(dc, distPen, g.DimensionStart2, g.DimensionEnd2, g.IsVertical);
+
+                        string label = Math.Round(g.SpacingValue).ToString(CultureInfo.InvariantCulture);
+                        DrawDistancePillBadge(dc, label, new Point((g.DimensionStart1.X + g.DimensionEnd1.X) / 2.0, (g.DimensionStart1.Y + g.DimensionEnd1.Y) / 2.0));
+                        DrawDistancePillBadge(dc, label, new Point((g.DimensionStart2.X + g.DimensionEnd2.X) / 2.0, (g.DimensionStart2.Y + g.DimensionEnd2.Y) / 2.0));
                     }
                     else
                     {
-                        dc.DrawLine(snapPen, new Point(g.Start - 20 / _zoomScale, g.Position), new Point(g.End + 20 / _zoomScale, g.Position));
+                        if (g.IsVertical)
+                        {
+                            dc.DrawLine(snapPen, new Point(g.Position, g.Start - 20 / _zoomScale), new Point(g.Position, g.End + 20 / _zoomScale));
+                        }
+                        else
+                        {
+                            dc.DrawLine(snapPen, new Point(g.Start - 20 / _zoomScale, g.Position), new Point(g.End + 20 / _zoomScale, g.Position));
+                        }
                     }
                 }
             }
@@ -13351,6 +14140,277 @@ namespace Kerf.UI
             if (_editingGradientPaint != null && _editingGradientLayer != null && _selectedLayers.Contains(_editingGradientLayer))
             {
                 GradientRollerEngine.RenderOverlay(dc, _editingGradientLayer, _editingGradientPaint, _zoomScale, _activeGradientStopIndex);
+            }
+        }
+
+        private void DrawDimensionLineWithTicks(DrawingContext dc, Pen pen, Point p1, Point p2, bool isVertical)
+        {
+            dc.DrawLine(pen, p1, p2);
+            double tick = 4.0 / _zoomScale;
+            if (isVertical)
+            {
+                dc.DrawLine(pen, new Point(p1.X, p1.Y - tick), new Point(p1.X, p1.Y + tick));
+                dc.DrawLine(pen, new Point(p2.X, p2.Y - tick), new Point(p2.X, p2.Y + tick));
+            }
+            else
+            {
+                dc.DrawLine(pen, new Point(p1.X - tick, p1.Y), new Point(p1.X + tick, p1.Y));
+                dc.DrawLine(pen, new Point(p2.X - tick, p2.Y), new Point(p2.X + tick, p2.Y));
+            }
+        }
+
+        private void DrawDistancePillBadge(DrawingContext dc, string text, Point center)
+        {
+            var ft = new FormattedText(
+                text,
+                CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Segoe UI Bold"),
+                10 / _zoomScale,
+                Brushes.White);
+
+            double padH = 5.0 / _zoomScale;
+            double padV = 2.0 / _zoomScale;
+            var pillRect = new Rect(center.X - ft.Width / 2.0 - padH, center.Y - ft.Height / 2.0 - padV, ft.Width + padH * 2.0, ft.Height + padV * 2.0);
+            var pillBrush = new SolidColorBrush(Color.FromRgb(236, 72, 153));
+            pillBrush.Freeze();
+            dc.DrawRoundedRectangle(pillBrush, null, pillRect, 3.0 / _zoomScale, 3.0 / _zoomScale);
+            dc.DrawText(ft, new Point(center.X - ft.Width / 2.0, center.Y - ft.Height / 2.0));
+        }
+
+        private void CheckDistributionSnapping(
+            List<LayerNode> others,
+            double proposedLeft, double proposedTop, double selW, double selH,
+            double snapThreshold,
+            ref double dx, ref double dy)
+        {
+            if (others == null || others.Count < 2) return;
+
+            double proposedRight = proposedLeft + selW;
+            double proposedBottom = proposedTop + selH;
+
+            // 1. Horizontal Equal Spacing Distribution
+            double bestDistDeltaX = double.MaxValue;
+            SnapGuide bestDistGuideX = null;
+
+            var horizOthers = new List<LayerNode>();
+            for (int i = 0; i < others.Count; i++)
+            {
+                var o = others[i];
+                if (Math.Max(proposedTop, o.Y) < Math.Min(proposedBottom, o.Y + o.Height) + 300)
+                    horizOthers.Add(o);
+            }
+
+            for (int i = 0; i < horizOthers.Count; i++)
+            {
+                for (int j = 0; j < horizOthers.Count; j++)
+                {
+                    if (i == j) continue;
+                    var b = horizOthers[i];
+                    var c = horizOthers[j];
+                    if (b.X + b.Width > c.X) continue;
+
+                    double bRight = b.X + b.Width;
+                    double cLeft = c.X;
+                    double cRight = c.X + c.Width;
+                    double bLeft = b.X;
+                    double midY = (Math.Min(proposedBottom, Math.Min(b.Y + b.Height, c.Y + c.Height)) + Math.Max(proposedTop, Math.Max(b.Y, c.Y))) / 2.0;
+
+                    // Case A: Dragged object is between B and C: B --- [A] --- C
+                    if (bRight <= proposedLeft + snapThreshold && proposedRight <= cLeft + snapThreshold)
+                    {
+                        double targetGap = (cLeft - bRight - selW) / 2.0;
+                        if (targetGap >= 0)
+                        {
+                            double idealLeft = bRight + targetGap;
+                            double diff = idealLeft - proposedLeft;
+                            if (Math.Abs(diff) <= snapThreshold && Math.Abs(diff) < Math.Abs(bestDistDeltaX))
+                            {
+                                bestDistDeltaX = diff;
+                                bestDistGuideX = new SnapGuide
+                                {
+                                    IsSpacingGuide = true,
+                                    IsVertical = true,
+                                    SpacingValue = targetGap,
+                                    DimensionStart1 = new Point(bRight, midY),
+                                    DimensionEnd1 = new Point(idealLeft, midY),
+                                    DimensionStart2 = new Point(idealLeft + selW, midY),
+                                    DimensionEnd2 = new Point(cLeft, midY),
+                                    SpacingBox1 = new Rect(bRight, proposedTop, targetGap, selH),
+                                    SpacingBox2 = new Rect(idealLeft + selW, proposedTop, targetGap, selH)
+                                };
+                            }
+                        }
+                    }
+
+                    // Case B: Sequential step: B --- C --- [A] where gap(B, C) == gap(C, A)
+                    double existingGap = cLeft - bRight;
+                    if (existingGap > 2.0)
+                    {
+                        // A after C: gap(C, A) == existingGap
+                        if (proposedLeft >= cRight - snapThreshold)
+                        {
+                            double idealLeft = cRight + existingGap;
+                            double diff = idealLeft - proposedLeft;
+                            if (Math.Abs(diff) <= snapThreshold && Math.Abs(diff) < Math.Abs(bestDistDeltaX))
+                            {
+                                bestDistDeltaX = diff;
+                                bestDistGuideX = new SnapGuide
+                                {
+                                    IsSpacingGuide = true,
+                                    IsVertical = true,
+                                    SpacingValue = existingGap,
+                                    DimensionStart1 = new Point(bRight, midY),
+                                    DimensionEnd1 = new Point(cLeft, midY),
+                                    DimensionStart2 = new Point(cRight, midY),
+                                    DimensionEnd2 = new Point(idealLeft, midY),
+                                    SpacingBox1 = new Rect(bRight, b.Y, existingGap, b.Height),
+                                    SpacingBox2 = new Rect(cRight, proposedTop, existingGap, selH)
+                                };
+                            }
+                        }
+                        // [A] before B: gap(A, B) == existingGap
+                        if (proposedRight <= bLeft + snapThreshold)
+                        {
+                            double idealLeft = bLeft - existingGap - selW;
+                            double diff = idealLeft - proposedLeft;
+                            if (Math.Abs(diff) <= snapThreshold && Math.Abs(diff) < Math.Abs(bestDistDeltaX))
+                            {
+                                bestDistDeltaX = diff;
+                                bestDistGuideX = new SnapGuide
+                                {
+                                    IsSpacingGuide = true,
+                                    IsVertical = true,
+                                    SpacingValue = existingGap,
+                                    DimensionStart1 = new Point(idealLeft + selW, midY),
+                                    DimensionEnd1 = new Point(bLeft, midY),
+                                    DimensionStart2 = new Point(bRight, midY),
+                                    DimensionEnd2 = new Point(cLeft, midY),
+                                    SpacingBox1 = new Rect(idealLeft + selW, proposedTop, existingGap, selH),
+                                    SpacingBox2 = new Rect(bRight, b.Y, existingGap, b.Height)
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (bestDistGuideX != null && Math.Abs(bestDistDeltaX) <= snapThreshold)
+            {
+                dx += bestDistDeltaX;
+                _activeSnapGuides.Add(bestDistGuideX);
+            }
+
+            // 2. Vertical Equal Spacing Distribution
+            double bestDistDeltaY = double.MaxValue;
+            SnapGuide bestDistGuideY = null;
+
+            var vertOthers = new List<LayerNode>();
+            for (int i = 0; i < others.Count; i++)
+            {
+                var o = others[i];
+                if (Math.Max(proposedLeft, o.X) < Math.Min(proposedRight, o.X + o.Width) + 300)
+                    vertOthers.Add(o);
+            }
+
+            for (int i = 0; i < vertOthers.Count; i++)
+            {
+                for (int j = 0; j < vertOthers.Count; j++)
+                {
+                    if (i == j) continue;
+                    var b = vertOthers[i];
+                    var c = vertOthers[j];
+                    if (b.Y + b.Height > c.Y) continue;
+
+                    double bBottom = b.Y + b.Height;
+                    double cTop = c.Y;
+                    double cBottom = c.Y + c.Height;
+                    double bTop = b.Y;
+                    double midX = (Math.Min(proposedRight, Math.Min(b.X + b.Width, c.X + c.Width)) + Math.Max(proposedLeft, Math.Max(b.X, c.X))) / 2.0;
+
+                    // Case A: Dragged object is between B and C: B above [A] above C
+                    if (bBottom <= proposedTop + snapThreshold && proposedBottom <= cTop + snapThreshold)
+                    {
+                        double targetGap = (cTop - bBottom - selH) / 2.0;
+                        if (targetGap >= 0)
+                        {
+                            double idealTop = bBottom + targetGap;
+                            double diff = idealTop - proposedTop;
+                            if (Math.Abs(diff) <= snapThreshold && Math.Abs(diff) < Math.Abs(bestDistDeltaY))
+                            {
+                                bestDistDeltaY = diff;
+                                bestDistGuideY = new SnapGuide
+                                {
+                                    IsSpacingGuide = true,
+                                    IsVertical = false,
+                                    SpacingValue = targetGap,
+                                    DimensionStart1 = new Point(midX, bBottom),
+                                    DimensionEnd1 = new Point(midX, idealTop),
+                                    DimensionStart2 = new Point(midX, idealTop + selH),
+                                    DimensionEnd2 = new Point(midX, cTop),
+                                    SpacingBox1 = new Rect(proposedLeft, bBottom, selW, targetGap),
+                                    SpacingBox2 = new Rect(proposedLeft, idealTop + selH, selW, targetGap)
+                                };
+                            }
+                        }
+                    }
+
+                    // Case B: Sequential step: B above C above [A] where gap(B, C) == gap(C, A)
+                    double existingGap = cTop - bBottom;
+                    if (existingGap > 2.0)
+                    {
+                        // A below C: gap(C, A) == existingGap
+                        if (proposedTop >= cBottom - snapThreshold)
+                        {
+                            double idealTop = cBottom + existingGap;
+                            double diff = idealTop - proposedTop;
+                            if (Math.Abs(diff) <= snapThreshold && Math.Abs(diff) < Math.Abs(bestDistDeltaY))
+                            {
+                                bestDistDeltaY = diff;
+                                bestDistGuideY = new SnapGuide
+                                {
+                                    IsSpacingGuide = true,
+                                    IsVertical = false,
+                                    SpacingValue = existingGap,
+                                    DimensionStart1 = new Point(midX, bBottom),
+                                    DimensionEnd1 = new Point(midX, cTop),
+                                    DimensionStart2 = new Point(midX, cBottom),
+                                    DimensionEnd2 = new Point(midX, idealTop),
+                                    SpacingBox1 = new Rect(b.X, bBottom, b.Width, existingGap),
+                                    SpacingBox2 = new Rect(proposedLeft, cBottom, selW, existingGap)
+                                };
+                            }
+                        }
+                        // [A] above B: gap(A, B) == existingGap
+                        if (proposedBottom <= bTop + snapThreshold)
+                        {
+                            double idealTop = bTop - existingGap - selH;
+                            double diff = idealTop - proposedTop;
+                            if (Math.Abs(diff) <= snapThreshold && Math.Abs(diff) < Math.Abs(bestDistDeltaY))
+                            {
+                                bestDistDeltaY = diff;
+                                bestDistGuideY = new SnapGuide
+                                {
+                                    IsSpacingGuide = true,
+                                    IsVertical = false,
+                                    SpacingValue = existingGap,
+                                    DimensionStart1 = new Point(midX, idealTop + selH),
+                                    DimensionEnd1 = new Point(midX, bTop),
+                                    DimensionStart2 = new Point(midX, bBottom),
+                                    DimensionEnd2 = new Point(midX, cTop),
+                                    SpacingBox1 = new Rect(proposedLeft, idealTop + selH, selW, existingGap),
+                                    SpacingBox2 = new Rect(b.X, bBottom, b.Width, existingGap)
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (bestDistGuideY != null && Math.Abs(bestDistDeltaY) <= snapThreshold)
+            {
+                dy += bestDistDeltaY;
+                _activeSnapGuides.Add(bestDistGuideY);
             }
         }
 
@@ -15184,6 +16244,7 @@ namespace Kerf.UI
                 if (e.Key == Key.Z) { Redo(); e.Handled = true; }
                 else if (e.Key == Key.S) { SaveAsCurrentDocument(); e.Handled = true; }
                 else if (e.Key == Key.E) { ShowExportDialog(); e.Handled = true; }
+                else if (e.Key == Key.K) { PromptPlaceImage(); e.Handled = true; }
                 else if (e.Key == Key.G) { UngroupSelectedLayers(); e.Handled = true; }
                 else if (e.Key == Key.V) { PasteLayersHere(_lastRightClickCanvasPoint); e.Handled = true; }
                 else if (e.Key == Key.OemCloseBrackets) { MoveSelectedLayerZ(true, true); e.Handled = true; }
@@ -15200,6 +16261,7 @@ namespace Kerf.UI
             else if (!isCtrl && isShift && !isAlt)
             {
                 if (e.Key == Key.A) { AutoAlignSelectedLayers(); e.Handled = true; } // Shift + A Auto align / Auto layout
+                else if (e.Key == Key.S) { ToggleSmartSnapping(); e.Handled = true; } // Shift + S = Toggle Snapping
                 else if (e.Key == Key.D0) { ZoomTo100(); e.Handled = true; } // Shift + 0 = 100%
                 else if (e.Key == Key.D1) { ZoomToFit(); e.Handled = true; } // Shift + 1 = Zoom to Fit
                 else if (e.Key == Key.D2) { ZoomToSelection(); e.Handled = true; } // Shift + 2 = Zoom to Selection
@@ -15230,6 +16292,12 @@ namespace Kerf.UI
             {
                 if (e.Key == Key.Enter)
                 {
+                    if (_isImageCropping)
+                    {
+                        ExitImageCropMode();
+                        e.Handled = true;
+                        return;
+                    }
                     if (_activeTool == ToolType.Anchor)
                     {
                         SetActiveTool(ToolType.Select);
@@ -15257,6 +16325,12 @@ namespace Kerf.UI
                 }
                 else if (e.Key == Key.Escape)
                 {
+                    if (_isImageCropping)
+                    {
+                        ExitImageCropMode();
+                        e.Handled = true;
+                        return;
+                    }
                     if (_activeTool == ToolType.Anchor)
                     {
                         SetActiveTool(ToolType.Select);
@@ -24639,6 +25713,10 @@ namespace Kerf.UI
             _visuals.Add(_overlayVisual);
 
             ClipToBounds = true;
+            AllowDrop = true;
+            DragEnter += (s, e) => _studio.HandleCanvasDragOver(e);
+            DragOver += (s, e) => _studio.HandleCanvasDragOver(e);
+            Drop += (s, e) => _studio.HandleCanvasDrop(e);
 
             MouseDown += (s, e) => _studio.HandleCanvasMouseDown(e.GetPosition(this), e.ChangedButton, e.ClickCount);
             MouseMove += (s, e) => _studio.HandleCanvasMouseMove(e.GetPosition(this));

@@ -20,6 +20,7 @@ namespace Kerf.Engine
     public static class HighQualityImageRenderer
     {
         private static readonly Dictionary<string, BitmapSource> _imageCache = new Dictionary<string, BitmapSource>();
+        private static readonly Dictionary<string, BitmapSource> _adjustedImageCache = new Dictionary<string, BitmapSource>();
 
         #region Public Export API
 
@@ -615,26 +616,163 @@ namespace Kerf.Engine
             }
         }
 
+        public static BitmapSource GetAdjustedBitmap(Paint paint)
+        {
+            if (paint == null || string.IsNullOrEmpty(paint.ImageRef)) return null;
+
+            BitmapSource bmp;
+            if (!_imageCache.TryGetValue(paint.ImageRef, out bmp))
+            {
+                if (File.Exists(paint.ImageRef))
+                {
+                    try
+                    {
+                        var bi = new BitmapImage();
+                        bi.BeginInit();
+                        bi.UriSource = new Uri(paint.ImageRef, UriKind.Absolute);
+                        bi.CacheOption = BitmapCacheOption.OnLoad;
+                        bi.EndInit();
+                        bi.Freeze();
+                        bmp = bi;
+                        _imageCache[paint.ImageRef] = bmp;
+                    }
+                    catch
+                    {
+                        bmp = null;
+                    }
+                }
+            }
+
+            if (bmp == null) return null;
+
+            bool hasCrop = paint.CropRect.HasValue &&
+                (paint.CropRect.Value.X > 0.001 || paint.CropRect.Value.Y > 0.001 ||
+                 paint.CropRect.Value.Width < 0.999 || paint.CropRect.Value.Height < 0.999);
+
+            bool hasAdjust = Math.Abs(paint.Exposure) > 0.1 || Math.Abs(paint.Contrast) > 0.1 ||
+                Math.Abs(paint.Saturation) > 0.1 || Math.Abs(paint.Temperature) > 0.1 ||
+                Math.Abs(paint.Tint) > 0.1 || Math.Abs(paint.Highlights) > 0.1 || Math.Abs(paint.Shadows) > 0.1;
+
+            if (!hasCrop && !hasAdjust)
+            {
+                return bmp;
+            }
+
+            double cx = (paint.CropRect.HasValue) ? paint.CropRect.Value.X : 0.0;
+            double cy = (paint.CropRect.HasValue) ? paint.CropRect.Value.Y : 0.0;
+            double cw = (paint.CropRect.HasValue) ? paint.CropRect.Value.Width : 1.0;
+            double ch = (paint.CropRect.HasValue) ? paint.CropRect.Value.Height : 1.0;
+
+            string key = string.Format(CultureInfo.InvariantCulture, "{0}_C{1:F3}_{2:F3}_{3:F3}_{4:F3}_E{5:F1}_C{6:F1}_S{7:F1}_T{8:F1}_Ti{9:F1}_H{10:F1}_Sh{11:F1}",
+                paint.ImageRef, cx, cy, cw, ch,
+                paint.Exposure, paint.Contrast, paint.Saturation, paint.Temperature, paint.Tint, paint.Highlights, paint.Shadows);
+
+            BitmapSource cached;
+            if (_adjustedImageCache.TryGetValue(key, out cached))
+            {
+                return cached;
+            }
+
+            BitmapSource current = bmp;
+            if (hasCrop)
+            {
+                int px = (int)Math.Max(0, Math.Min(bmp.PixelWidth - 1, cx * bmp.PixelWidth));
+                int py = (int)Math.Max(0, Math.Min(bmp.PixelHeight - 1, cy * bmp.PixelHeight));
+                int pw = (int)Math.Max(1, Math.Min(bmp.PixelWidth - px, cw * bmp.PixelWidth));
+                int ph = (int)Math.Max(1, Math.Min(bmp.PixelHeight - py, ch * bmp.PixelHeight));
+                try
+                {
+                    var cb = new CroppedBitmap(bmp, new Int32Rect(px, py, pw, ph));
+                    cb.Freeze();
+                    current = cb;
+                }
+                catch { }
+            }
+
+            if (hasAdjust)
+            {
+                try
+                {
+                    var conv = new FormatConvertedBitmap(current, PixelFormats.Bgra32, null, 0);
+                    int width = conv.PixelWidth;
+                    int height = conv.PixelHeight;
+                    int stride = width * 4;
+                    byte[] pixels = new byte[stride * height];
+                    conv.CopyPixels(pixels, stride, 0);
+
+                    double exp = paint.Exposure / 100.0;
+                    double cont = (paint.Contrast + 100.0) / 100.0;
+                    double sat = (paint.Saturation + 100.0) / 100.0;
+                    double temp = paint.Temperature / 100.0;
+                    double tint = paint.Tint / 100.0;
+                    double hi = paint.Highlights / 100.0;
+                    double sh = paint.Shadows / 100.0;
+
+                    for (int i = 0; i < pixels.Length; i += 4)
+                    {
+                        byte b = pixels[i];
+                        byte g = pixels[i + 1];
+                        byte r = pixels[i + 2];
+                        byte a = pixels[i + 3];
+                        if (a == 0) continue;
+
+                        double rd = r * (1.0 + exp);
+                        double gd = g * (1.0 + exp);
+                        double bd = b * (1.0 + exp);
+
+                        double lum = 0.299 * rd + 0.587 * gd + 0.114 * bd;
+                        if (hi != 0 && lum > 128.0)
+                        {
+                            double factor = (lum - 128.0) / 128.0;
+                            rd += hi * 35.0 * factor;
+                            gd += hi * 35.0 * factor;
+                            bd += hi * 35.0 * factor;
+                        }
+                        if (sh != 0 && lum < 128.0)
+                        {
+                            double factor = (128.0 - lum) / 128.0;
+                            rd += sh * 35.0 * factor;
+                            gd += sh * 35.0 * factor;
+                            bd += sh * 35.0 * factor;
+                        }
+
+                        rd = ((rd - 128.0) * cont) + 128.0;
+                        gd = ((gd - 128.0) * cont) + 128.0;
+                        bd = ((bd - 128.0) * cont) + 128.0;
+
+                        lum = 0.299 * rd + 0.587 * gd + 0.114 * bd;
+                        rd = lum + (rd - lum) * sat;
+                        gd = lum + (gd - lum) * sat;
+                        bd = lum + (bd - lum) * sat;
+
+                        rd += temp * 25.0 + tint * 15.0;
+                        gd -= tint * 20.0;
+                        bd -= temp * 25.0 - tint * 15.0;
+
+                        pixels[i] = (byte)Math.Max(0, Math.Min(255, (int)bd));
+                        pixels[i + 1] = (byte)Math.Max(0, Math.Min(255, (int)gd));
+                        pixels[i + 2] = (byte)Math.Max(0, Math.Min(255, (int)rd));
+                    }
+
+                    var result = BitmapSource.Create(width, height, conv.DpiX, conv.DpiY, PixelFormats.Bgra32, null, pixels, stride);
+                    result.Freeze();
+                    current = result;
+                }
+                catch { }
+            }
+
+            _adjustedImageCache[key] = current;
+            return current;
+        }
+
         private static void RenderImageLayer(LayerNode node, DrawingContext dc)
         {
             var bounds = new Rect(node.X, node.Y, Math.Max(1, node.Width), Math.Max(1, node.Height));
-            var paint = node.Fills != null ? node.Fills.FirstOrDefault(f => f.Type == PaintType.Image && f.Enabled) : null;
+            var paint = node.GetPrimaryImagePaint();
 
             if (paint != null && !string.IsNullOrEmpty(paint.ImageRef))
             {
-                BitmapSource bmp;
-                if (!_imageCache.TryGetValue(paint.ImageRef, out bmp))
-                {
-                    if (File.Exists(paint.ImageRef))
-                    {
-                        try
-                        {
-                            bmp = new BitmapImage(new Uri(paint.ImageRef, UriKind.Absolute));
-                            _imageCache[paint.ImageRef] = bmp;
-                        }
-                        catch { bmp = null; }
-                    }
-                }
+                BitmapSource bmp = GetAdjustedBitmap(paint);
 
                 if (bmp != null)
                 {

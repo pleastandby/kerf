@@ -317,6 +317,16 @@ namespace Kerf.Model
         public string ImageRef { get; set; }
         public string ImageFillMode { get; set; } // Fill, Fit, Crop, Tile
 
+        // Image Adjustments & Cropping (Figma style)
+        public double Exposure { get; set; }     // -100 to +100
+        public double Contrast { get; set; }     // -100 to +100
+        public double Saturation { get; set; }   // -100 to +100
+        public double Temperature { get; set; }  // -100 to +100
+        public double Tint { get; set; }         // -100 to +100
+        public double Highlights { get; set; }   // -100 to +100
+        public double Shadows { get; set; }      // -100 to +100
+        public Rect? CropRect { get; set; }      // Normalized UV coordinates (0, 0, 1, 1) default
+
         // UI Expansion State
         public bool IsExpanded { get; set; }
 
@@ -333,6 +343,14 @@ namespace Kerf.Model
             GradientRadius = 0.5;
             GradientStops = new List<GradientStopData>();
             ImageFillMode = "Fill";
+            Exposure = 0.0;
+            Contrast = 0.0;
+            Saturation = 0.0;
+            Temperature = 0.0;
+            Tint = 0.0;
+            Highlights = 0.0;
+            Shadows = 0.0;
+            CropRect = null;
         }
 
         public static Paint Solid(string hex, double opacity = 1.0)
@@ -374,6 +392,14 @@ namespace Kerf.Model
                 GradientRadius = this.GradientRadius,
                 ImageRef = this.ImageRef,
                 ImageFillMode = this.ImageFillMode,
+                Exposure = this.Exposure,
+                Contrast = this.Contrast,
+                Saturation = this.Saturation,
+                Temperature = this.Temperature,
+                Tint = this.Tint,
+                Highlights = this.Highlights,
+                Shadows = this.Shadows,
+                CropRect = this.CropRect,
                 IsExpanded = this.IsExpanded,
                 GradientStops = new List<GradientStopData>()
             };
@@ -994,6 +1020,19 @@ namespace Kerf.Model
                 }
             }
             return new Rect(X, Y, Math.Max(1, Width), Math.Max(1, Height));
+        }
+
+        public Paint GetPrimaryImagePaint()
+        {
+            if (Fills != null)
+            {
+                for (int i = 0; i < Fills.Count; i++)
+                {
+                    if (Fills[i] != null && Fills[i].Type == PaintType.Image && Fills[i].Enabled)
+                        return Fills[i];
+                }
+            }
+            return null;
         }
 
         public Matrix GetRenderTransformMatrix()

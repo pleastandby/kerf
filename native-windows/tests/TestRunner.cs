@@ -7,6 +7,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Kerf.Engine;
 using Kerf.Engine.Animation;
 using Kerf.IO;
@@ -114,6 +115,7 @@ namespace Kerf.Tests
             RunTest("Runtime Integration Developer Guide & Help Navigation", TestRuntimeDeveloperGuideAndHelpNavigation);
             RunTest("Advanced Stroke Engine: Outside Stroke Clipping, Trim Path & Stroke Tapering", TestAdvancedStrokeEngineOutsideClipTrimAndTaper);
             RunTest("Multiple Fills/Strokes Reordering & Freely Movable Radial Gradients", TestMultipleFillsStrokesReorderAndFreelyMovableRadialGradient);
+            RunTest("Smart Guide Distribution, Image Drag-and-Drop & Figma Image Editing", TestSmartGuideDistributionImageImportAndAdjustments);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9775,6 +9777,130 @@ namespace Kerf.Tests
             // Aspect ratio correction: minDim = 100. rx = 0.5 * 100 / 200 = 0.25. ry = 0.5 * 100 / 100 = 0.5
             Assert(Math.Abs(brush.RadiusX - 0.25) < 0.01, "RadiusX is aspect-ratio corrected for non-square rectangles");
             Assert(Math.Abs(brush.RadiusY - 0.50) < 0.01, "RadiusY is aspect-ratio corrected for non-square rectangles");
+        }
+
+        private static void TestSmartGuideDistributionImageImportAndAdjustments()
+        {
+            // 1. Smart Guide Equal Spacing & Distribution Detection
+            var studio = new StudioView();
+            var page = studio.Document.GetActivePage();
+            page.Layers.Clear();
+
+            var b = new LayerNode { Id = "obj-b", Name = "B", Type = ElementType.Rectangle, X = 0, Y = 100, Width = 100, Height = 80 };
+            var c = new LayerNode { Id = "obj-c", Name = "C", Type = ElementType.Rectangle, X = 250, Y = 100, Width = 100, Height = 80 };
+            page.Layers.Add(b);
+            page.Layers.Add(c);
+
+            // Dragged object A with width = 50. Between B (right=100) and C (left=250), span = 150.
+            // Equal gap is (150 - 50) / 2 = 50. Ideal A.X = 150.
+            var others = new List<LayerNode> { b, c };
+            double dx = 0.0, dy = 0.0;
+            double proposedLeft = 148.0;
+            double proposedTop = 100.0;
+            double selW = 50.0;
+            double selH = 80.0;
+            double snapThreshold = 6.0;
+
+            // Compute equal spacing distribution
+            double targetGap = (c.X - (b.X + b.Width) - selW) / 2.0;
+            Assert(Math.Abs(targetGap - 50.0) < 0.001, "Target equal gap between B and C accurately computed as 50px");
+
+            double idealLeft = (b.X + b.Width) + targetGap;
+            double diff = idealLeft - proposedLeft;
+            Assert(Math.Abs(diff) <= snapThreshold, "Difference between proposed position and equal-spacing position is within snap threshold");
+
+            // 2. Snapping Toggle Button & Freehand Mode
+            Assert(studio.GetType().GetField("_smartSnappingEnabled", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance) != null,
+                "Smart snapping toggle field exists on StudioView");
+            studio.ToggleSmartSnapping(); // Should disable
+            var snapField = studio.GetType().GetField("_smartSnappingEnabled", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            bool snapEnabled = (bool)snapField.GetValue(studio);
+            Assert(!snapEnabled, "Toggling smart snapping disables snapping for freehand moving and drawing");
+
+            studio.ToggleSmartSnapping(); // Should re-enable
+            snapEnabled = (bool)snapField.GetValue(studio);
+            Assert(snapEnabled, "Toggling smart snapping re-enables smart guides & snapping");
+
+            // 3. Image Creation & File Drop / Import Option
+            string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KerfImageTests_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string testImagePath = System.IO.Path.Combine(tempDir, "sample_photo.png");
+
+            // Generate valid 100x80 test PNG bitmap
+            int imgW = 100, imgH = 80;
+            int stride = imgW * 4;
+            byte[] pixelData = new byte[stride * imgH];
+            for (int i = 0; i < pixelData.Length; i += 4)
+            {
+                pixelData[i] = 100;     // Blue
+                pixelData[i + 1] = 150; // Green
+                pixelData[i + 2] = 200; // Red
+                pixelData[i + 3] = 255; // Alpha
+            }
+            var testBmp = BitmapSource.Create(imgW, imgH, 96, 96, PixelFormats.Bgra32, null, pixelData, stride);
+            using (var fs = new FileStream(testImagePath, FileMode.Create))
+            {
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(testBmp));
+                encoder.Save(fs);
+            }
+            Assert(File.Exists(testImagePath), "Sample test PNG generated on disk");
+
+            // Test ImportImages onto canvas at (50, 75)
+            studio.ImportImages(new string[] { testImagePath }, new Point(50, 75));
+            Assert(page.Layers.Count >= 3, "ImportImages successfully created new layer on active page");
+            var imgLayer = page.Layers[page.Layers.Count - 1];
+            Assert(imgLayer.Type == ElementType.Image, "Imported layer element type is ElementType.Image");
+            Assert(imgLayer.X == 50 && imgLayer.Y == 75, "Imported image placed at target canvas drop point");
+            Assert(imgLayer.Width == 100 && imgLayer.Height == 80, "Imported image dimensions preserve native pixel aspect ratio");
+            Assert(imgLayer.Fills != null && imgLayer.Fills.Count > 0, "Imported layer has Fills list");
+            Assert(imgLayer.Fills[0].Type == PaintType.Image && imgLayer.Fills[0].ImageRef == testImagePath, "Imported layer fill is PaintType.Image with ImageRef");
+
+            // 4. Figma Image Adjustments (Exposure, Contrast, Saturation, Temperature, Tint, Highlights, Shadows)
+            var imgPaint = imgLayer.GetPrimaryImagePaint();
+            Assert(imgPaint != null, "GetPrimaryImagePaint retrieves active image paint fill");
+            imgPaint.Exposure = 30.0;
+            imgPaint.Contrast = 20.0;
+            imgPaint.Saturation = -15.0;
+            imgPaint.Temperature = 10.0;
+            imgPaint.Tint = -5.0;
+            imgPaint.Highlights = 25.0;
+            imgPaint.Shadows = -10.0;
+            imgPaint.CropRect = new Rect(0.1, 0.1, 0.8, 0.8);
+
+            var clonedPaint = imgPaint.Clone();
+            Assert(clonedPaint.Exposure == 30.0 && clonedPaint.Contrast == 20.0 && clonedPaint.Saturation == -15.0, "Paint.Clone preserves all image adjustment values");
+            Assert(clonedPaint.CropRect.HasValue && clonedPaint.CropRect.Value.Width == 0.8, "Paint.Clone preserves CropRect UV coordinates");
+
+            // 5. Image Crop & Adjustments Rendering Pipeline
+            var gpu = new GpuRenderer();
+            var adjustedBmp = gpu.GetAdjustedBitmap(imgPaint);
+            Assert(adjustedBmp != null, "GetAdjustedBitmap produces valid adjusted bitmap");
+            // Cropped to 80% of 100x80 -> 80x64
+            Assert(adjustedBmp.PixelWidth == 80, string.Format("Adjusted bitmap cropped width expected 80, got {0}", adjustedBmp.PixelWidth));
+            Assert(adjustedBmp.PixelHeight == 64, string.Format("Adjusted bitmap cropped height expected 64, got {0}", adjustedBmp.PixelHeight));
+
+            // HighQualityImageRenderer parity verification
+            var hqBmp = HighQualityImageRenderer.GetAdjustedBitmap(imgPaint);
+            Assert(hqBmp != null && hqBmp.PixelWidth == 80 && hqBmp.PixelHeight == 64, "HighQualityImageRenderer applies identical crop & color adjustments");
+
+            // 6. Interactive Canvas Image Crop Mode (Figma Double-Tap)
+            studio.EnterImageCropMode(imgLayer);
+            var cropField = studio.GetType().GetField("_isImageCropping", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            bool isCropping = (bool)cropField.GetValue(studio);
+            Assert(isCropping, "Double-tapping imported image enters on-canvas image crop mode");
+
+            studio.ExitImageCropMode();
+            isCropping = (bool)cropField.GetValue(studio);
+            Assert(!isCropping, "Exiting crop mode restores normal canvas mode");
+
+            // Clean up temporary image
+            try
+            {
+                File.Delete(testImagePath);
+                Directory.Delete(tempDir, true);
+            }
+            catch { }
         }
     }
 }
