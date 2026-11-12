@@ -1,6 +1,6 @@
 {
   "name": "kerf-react",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Official plug-and-play React runtime for Kerf (.kfx) interactive motion graphics, vector animations, and state machines.",
   "license": "MIT",
   "author": "Kerf Technologies",
