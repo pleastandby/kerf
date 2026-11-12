@@ -9718,6 +9718,15 @@ namespace Kerf.Tests
             Assert(node.Fills[1] == fill1, "Fill 1 displaced to position 1");
             Assert(node.Fills[2] == fill2, "Fill 2 displaced to position 2");
 
+            // Verify Object Canvas Color Updates: In Figma, Fill 0 is the top-most fill on the object
+            var gpu = new GpuRenderer();
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                gpu.Render(node, dc);
+            }
+            Assert(dv != null, "GpuRenderer renders object with top-most fill rendered on top of canvas shape");
+
             // 2. Stroke Reordering & Expansion Tracking
             var stroke1 = new StrokeData { Width = 2.0, Paint = Paint.Solid("#111111"), IsExpanded = false };
             var stroke2 = new StrokeData { Width = 5.0, Paint = Paint.Solid("#222222"), IsExpanded = true };

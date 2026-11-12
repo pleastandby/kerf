@@ -23,6 +23,9 @@ using Kerf.Tools;
 using Microsoft.Win32;
 using IOPath = System.IO.Path;
 using Layer = Kerf.Model.LayerNode;
+using DoubleAnimation = System.Windows.Media.Animation.DoubleAnimation;
+using QuadraticEase = System.Windows.Media.Animation.QuadraticEase;
+using EasingMode = System.Windows.Media.Animation.EasingMode;
 
 namespace Kerf.UI
 {
@@ -324,16 +327,6 @@ namespace Kerf.UI
         private LayerNode _editingGradientLayer = null;
         private GradientRampControl _activeGradientRamp = null;
 
-        // Fills and Strokes Drag-and-Drop Reordering State
-        private bool _isDraggingFillList = false;
-        private int _draggedFillIndex = -1;
-        private int _dragFillDropIndex = -1;
-        private Point _dragFillStartMouse;
-
-        private bool _isDraggingStrokeList = false;
-        private int _draggedStrokeIndex = -1;
-        private int _dragStrokeDropIndex = -1;
-        private Point _dragStrokeStartMouse;
 
         public void SetEditingGradient(LayerNode layer, Paint paint, GradientRampControl ramp = null)
         {
@@ -8088,27 +8081,6 @@ namespace Kerf.UI
             return grip;
         }
 
-        private Border CreateSkeletonSlot(string label)
-        {
-            return new Border
-            {
-                Height = 28,
-                Margin = new Thickness(0, 0, 0, 6),
-                Background = new SolidColorBrush(Color.FromArgb(45, 70, 239, 177)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
-                BorderThickness = new Thickness(1.5),
-                CornerRadius = new CornerRadius(5),
-                Child = new TextBlock
-                {
-                    Text = "⇋  " + label,
-                    FontSize = 9.5,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                }
-            };
-        }
 
         private void BuildImageAdjustmentsSection(LayerNode primary)
         {
@@ -8362,51 +8334,18 @@ namespace Kerf.UI
             }
 
             var fillsContainer = new StackPanel();
-
-            // Smooth displacement and skeleton view if currently dragging
-            if (_isDraggingFillList && _draggedFillIndex >= 0 && _dragFillDropIndex >= 0 && _draggedFillIndex < primary.Fills.Count)
+            var fillCards = new List<Border>();
+            for (int i = 0; i < primary.Fills.Count; i++)
             {
-                var draggedItem = primary.Fills[_draggedFillIndex];
-                int n = primary.Fills.Count;
-                int dropIdx = Math.Max(0, Math.Min(n - 1, _dragFillDropIndex));
-
-                var displaced = new List<Paint>();
-                for (int k = 0; k < n; k++)
-                {
-                    if (k != _draggedFillIndex) displaced.Add(primary.Fills[k]);
-                }
-                displaced.Insert(Math.Min(displaced.Count, dropIdx), draggedItem);
-
-                for (int k = 0; k < displaced.Count; k++)
-                {
-                    var fill = displaced[k];
-                    if (fill == draggedItem)
-                    {
-                        fillsContainer.Children.Add(CreateSkeletonSlot("Drop Fill Here (Position " + (k + 1) + ")"));
-                        var ghost = BuildFillCard(primary, fill, _draggedFillIndex, fillsContainer, true);
-                        ghost.Opacity = 0.65;
-                        ghost.BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177));
-                        fillsContainer.Children.Add(ghost);
-                    }
-                    else
-                    {
-                        int origIdx = primary.Fills.IndexOf(fill);
-                        fillsContainer.Children.Add(BuildFillCard(primary, fill, origIdx, fillsContainer, false));
-                    }
-                }
-            }
-            else
-            {
-                for (int i = 0; i < primary.Fills.Count; i++)
-                {
-                    fillsContainer.Children.Add(BuildFillCard(primary, primary.Fills[i], i, fillsContainer, false));
-                }
+                var card = BuildFillCard(primary, primary.Fills[i], i, fillsContainer, fillCards);
+                fillCards.Add(card);
+                fillsContainer.Children.Add(card);
             }
 
             _propertyInspectorStack.Children.Add(fillsContainer);
         }
 
-        private Border BuildFillCard(LayerNode primary, Paint fill, int fillIdx, StackPanel fillsContainer, bool isGhost)
+        private Border BuildFillCard(LayerNode primary, Paint fill, int fillIdx, StackPanel fillsContainer, List<Border> fillCards)
         {
             var card = new Border
             {
@@ -8415,64 +8354,141 @@ namespace Kerf.UI
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5),
                 Padding = new Thickness(fill.IsExpanded ? 6 : 4, fill.IsExpanded ? 6 : 2, fill.IsExpanded ? 6 : 4, fill.IsExpanded ? 6 : 2),
-                Margin = new Thickness(0, 0, 0, 6)
+                Margin = new Thickness(0, 0, 0, 6),
+                RenderTransform = new TranslateTransform(0, 0)
             };
 
             var cardStack = new StackPanel();
 
             // 1. Grip Handle for Drag & Drop
             var grip = CreateDragGripHandle();
-            if (!isGhost)
+            grip.PreviewMouseLeftButtonDown += (s, e) =>
             {
-                grip.PreviewMouseLeftButtonDown += (s, e) =>
-                {
-                    _draggedFillIndex = fillIdx;
-                    _dragFillDropIndex = fillIdx;
-                    _dragFillStartMouse = e.GetPosition(_propertyInspectorStack);
-                    grip.CaptureMouse();
-                };
-                grip.PreviewMouseMove += (s, e) =>
-                {
-                    if (e.LeftButton == MouseButtonState.Pressed && _draggedFillIndex >= 0)
-                    {
-                        Point cur = e.GetPosition(_propertyInspectorStack);
-                        if (!_isDraggingFillList && Math.Abs(cur.Y - _dragFillStartMouse.Y) > 3)
-                        {
-                            _isDraggingFillList = true;
-                        }
+                int origIndex = fillIdx;
+                int currentSlot = origIndex;
+                var snapshotFills = new List<Paint>(primary.Fills);
+                Point startMouse = e.GetPosition(fillsContainer);
 
-                        if (_isDraggingFillList)
+                Panel.SetZIndex(card, 100);
+                card.Opacity = 0.92;
+                card.BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177));
+                grip.CaptureMouse();
+
+                MouseEventHandler moveHandler = null;
+                MouseButtonEventHandler upHandler = null;
+
+                moveHandler = (sender, me) =>
+                {
+                    if (me.LeftButton != MouseButtonState.Pressed || !grip.IsMouseCaptured) return;
+
+                    Point curMouse = me.GetPosition(fillsContainer);
+                    double deltaY = curMouse.Y - startMouse.Y;
+
+                    var trans = card.RenderTransform as TranslateTransform;
+                    if (trans != null) trans.Y = deltaY;
+
+                    int count = fillCards.Count;
+                    if (count < 2) return;
+
+                    double[] cardTops = new double[count];
+                    double[] cardHeights = new double[count];
+                    double accY = 0;
+                    for (int k = 0; k < count; k++)
+                    {
+                        cardTops[k] = accY;
+                        double h = fillCards[k].ActualHeight > 0 ? fillCards[k].ActualHeight : 32.0;
+                        cardHeights[k] = h;
+                        accY += h + 6.0;
+                    }
+
+                    double draggedCenter = cardTops[origIndex] + deltaY + cardHeights[origIndex] / 2.0;
+                    int targetSlot = origIndex;
+                    for (int slot = 0; slot < count; slot++)
+                    {
+                        if (draggedCenter < cardTops[slot] + cardHeights[slot])
                         {
-                            Point posInList = e.GetPosition(fillsContainer);
-                            double totalH = Math.Max(1.0, fillsContainer.ActualHeight);
-                            int count = primary.Fills.Count;
-                            double slotH = totalH / count;
-                            int newDrop = (int)Math.Floor(posInList.Y / slotH);
-                            newDrop = Math.Max(0, Math.Min(count - 1, newDrop));
-                            if (newDrop != _dragFillDropIndex)
+                            targetSlot = slot;
+                            break;
+                        }
+                        if (slot == count - 1)
+                        {
+                            targetSlot = count - 1;
+                        }
+                    }
+                    targetSlot = Math.Max(0, Math.Min(count - 1, targetSlot));
+
+                    if (targetSlot != currentSlot)
+                    {
+                        currentSlot = targetSlot;
+
+                        // Smoothly relocate other cards just like home screen apps
+                        double shiftAmt = cardHeights[origIndex] + 6.0;
+                        for (int k = 0; k < count; k++)
+                        {
+                            if (k == origIndex) continue;
+
+                            double targetShift = 0.0;
+                            if (origIndex < currentSlot)
                             {
-                                _dragFillDropIndex = newDrop;
-                                RefreshPropertyInspector();
+                                if (k > origIndex && k <= currentSlot) targetShift = -shiftAmt;
+                            }
+                            else if (origIndex > currentSlot)
+                            {
+                                if (k >= currentSlot && k < origIndex) targetShift = +shiftAmt;
+                            }
+
+                            var otherTrans = fillCards[k].RenderTransform as TranslateTransform;
+                            if (otherTrans != null)
+                            {
+                                var anim = new DoubleAnimation
+                                {
+                                    To = targetShift,
+                                    Duration = TimeSpan.FromMilliseconds(160),
+                                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+                                };
+                                otherTrans.BeginAnimation(TranslateTransform.YProperty, anim);
                             }
                         }
-                    }
-                };
-                grip.PreviewMouseLeftButtonUp += (s, e) =>
-                {
-                    if (_isDraggingFillList && _draggedFillIndex >= 0 && _dragFillDropIndex >= 0 && _draggedFillIndex != _dragFillDropIndex)
-                    {
-                        var item = primary.Fills[_draggedFillIndex];
-                        primary.Fills.RemoveAt(_draggedFillIndex);
-                        primary.Fills.Insert(Math.Min(primary.Fills.Count, _dragFillDropIndex), item);
+
+                        // Real-time canvas color update depending on new order of colors
+                        var previewFills = new List<Paint>();
+                        for (int k = 0; k < snapshotFills.Count; k++)
+                        {
+                            if (k != origIndex) previewFills.Add(snapshotFills[k]);
+                        }
+                        previewFills.Insert(Math.Min(previewFills.Count, currentSlot), snapshotFills[origIndex]);
+
+                        primary.Fills = previewFills;
                         InvalidateAndRefresh(primary);
                     }
+                };
+
+                upHandler = (sender, ue) =>
+                {
+                    grip.PreviewMouseMove -= moveHandler;
+                    grip.PreviewMouseLeftButtonUp -= upHandler;
                     grip.ReleaseMouseCapture();
-                    _isDraggingFillList = false;
-                    _draggedFillIndex = -1;
-                    _dragFillDropIndex = -1;
+
+                    card.Opacity = 1.0;
+                    card.BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66));
+                    Panel.SetZIndex(card, 0);
+
+                    // Final commit
+                    var finalFills = new List<Paint>();
+                    for (int k = 0; k < snapshotFills.Count; k++)
+                    {
+                        if (k != origIndex) finalFills.Add(snapshotFills[k]);
+                    }
+                    finalFills.Insert(Math.Min(finalFills.Count, currentSlot), snapshotFills[origIndex]);
+
+                    primary.Fills = finalFills;
+                    InvalidateAndRefresh(primary);
                     RefreshPropertyInspector();
                 };
-            }
+
+                grip.PreviewMouseMove += moveHandler;
+                grip.PreviewMouseLeftButtonUp += upHandler;
+            };
 
             // 2. Swatch
             var swatch = new Border
@@ -8819,50 +8835,18 @@ namespace Kerf.UI
             }
 
             var strokesContainer = new StackPanel();
-
-            if (_isDraggingStrokeList && _draggedStrokeIndex >= 0 && _dragStrokeDropIndex >= 0 && _draggedStrokeIndex < primary.Strokes.Count)
+            var strokeCards = new List<Border>();
+            for (int i = 0; i < primary.Strokes.Count; i++)
             {
-                var draggedItem = primary.Strokes[_draggedStrokeIndex];
-                int n = primary.Strokes.Count;
-                int dropIdx = Math.Max(0, Math.Min(n - 1, _dragStrokeDropIndex));
-
-                var displaced = new List<StrokeData>();
-                for (int k = 0; k < n; k++)
-                {
-                    if (k != _draggedStrokeIndex) displaced.Add(primary.Strokes[k]);
-                }
-                displaced.Insert(Math.Min(displaced.Count, dropIdx), draggedItem);
-
-                for (int k = 0; k < displaced.Count; k++)
-                {
-                    var stroke = displaced[k];
-                    if (stroke == draggedItem)
-                    {
-                        strokesContainer.Children.Add(CreateSkeletonSlot("Drop Stroke Here (Position " + (k + 1) + ")"));
-                        var ghost = BuildStrokeCard(primary, stroke, _draggedStrokeIndex, strokesContainer, true);
-                        ghost.Opacity = 0.65;
-                        ghost.BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177));
-                        strokesContainer.Children.Add(ghost);
-                    }
-                    else
-                    {
-                        int origIdx = primary.Strokes.IndexOf(stroke);
-                        strokesContainer.Children.Add(BuildStrokeCard(primary, stroke, origIdx, strokesContainer, false));
-                    }
-                }
-            }
-            else
-            {
-                for (int i = 0; i < primary.Strokes.Count; i++)
-                {
-                    strokesContainer.Children.Add(BuildStrokeCard(primary, primary.Strokes[i], i, strokesContainer, false));
-                }
+                var card = BuildStrokeCard(primary, primary.Strokes[i], i, strokesContainer, strokeCards);
+                strokeCards.Add(card);
+                strokesContainer.Children.Add(card);
             }
 
             _propertyInspectorStack.Children.Add(strokesContainer);
         }
 
-        private Border BuildStrokeCard(LayerNode primary, StrokeData stroke, int strokeIdx, StackPanel strokesContainer, bool isGhost)
+        private Border BuildStrokeCard(LayerNode primary, StrokeData stroke, int strokeIdx, StackPanel strokesContainer, List<Border> strokeCards)
         {
             if (stroke.Paint == null) stroke.Paint = Paint.Solid("#000000");
 
@@ -8873,64 +8857,141 @@ namespace Kerf.UI
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(5),
                 Padding = new Thickness(stroke.IsExpanded ? 6 : 4, stroke.IsExpanded ? 6 : 2, stroke.IsExpanded ? 6 : 4, stroke.IsExpanded ? 6 : 2),
-                Margin = new Thickness(0, 0, 0, 6)
+                Margin = new Thickness(0, 0, 0, 6),
+                RenderTransform = new TranslateTransform(0, 0)
             };
 
             var cardStack = new StackPanel();
 
             // 1. Grip Handle
             var grip = CreateDragGripHandle();
-            if (!isGhost)
+            grip.PreviewMouseLeftButtonDown += (s, e) =>
             {
-                grip.PreviewMouseLeftButtonDown += (s, e) =>
-                {
-                    _draggedStrokeIndex = strokeIdx;
-                    _dragStrokeDropIndex = strokeIdx;
-                    _dragStrokeStartMouse = e.GetPosition(_propertyInspectorStack);
-                    grip.CaptureMouse();
-                };
-                grip.PreviewMouseMove += (s, e) =>
-                {
-                    if (e.LeftButton == MouseButtonState.Pressed && _draggedStrokeIndex >= 0)
-                    {
-                        Point cur = e.GetPosition(_propertyInspectorStack);
-                        if (!_isDraggingStrokeList && Math.Abs(cur.Y - _dragStrokeStartMouse.Y) > 3)
-                        {
-                            _isDraggingStrokeList = true;
-                        }
+                int origIndex = strokeIdx;
+                int currentSlot = origIndex;
+                var snapshotStrokes = new List<StrokeData>(primary.Strokes);
+                Point startMouse = e.GetPosition(strokesContainer);
 
-                        if (_isDraggingStrokeList)
+                Panel.SetZIndex(card, 100);
+                card.Opacity = 0.92;
+                card.BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177));
+                grip.CaptureMouse();
+
+                MouseEventHandler moveHandler = null;
+                MouseButtonEventHandler upHandler = null;
+
+                moveHandler = (sender, me) =>
+                {
+                    if (me.LeftButton != MouseButtonState.Pressed || !grip.IsMouseCaptured) return;
+
+                    Point curMouse = me.GetPosition(strokesContainer);
+                    double deltaY = curMouse.Y - startMouse.Y;
+
+                    var trans = card.RenderTransform as TranslateTransform;
+                    if (trans != null) trans.Y = deltaY;
+
+                    int count = strokeCards.Count;
+                    if (count < 2) return;
+
+                    double[] cardTops = new double[count];
+                    double[] cardHeights = new double[count];
+                    double accY = 0;
+                    for (int k = 0; k < count; k++)
+                    {
+                        cardTops[k] = accY;
+                        double h = strokeCards[k].ActualHeight > 0 ? strokeCards[k].ActualHeight : 32.0;
+                        cardHeights[k] = h;
+                        accY += h + 6.0;
+                    }
+
+                    double draggedCenter = cardTops[origIndex] + deltaY + cardHeights[origIndex] / 2.0;
+                    int targetSlot = origIndex;
+                    for (int slot = 0; slot < count; slot++)
+                    {
+                        if (draggedCenter < cardTops[slot] + cardHeights[slot])
                         {
-                            Point posInList = e.GetPosition(strokesContainer);
-                            double totalH = Math.Max(1.0, strokesContainer.ActualHeight);
-                            int count = primary.Strokes.Count;
-                            double slotH = totalH / count;
-                            int newDrop = (int)Math.Floor(posInList.Y / slotH);
-                            newDrop = Math.Max(0, Math.Min(count - 1, newDrop));
-                            if (newDrop != _dragStrokeDropIndex)
+                            targetSlot = slot;
+                            break;
+                        }
+                        if (slot == count - 1)
+                        {
+                            targetSlot = count - 1;
+                        }
+                    }
+                    targetSlot = Math.Max(0, Math.Min(count - 1, targetSlot));
+
+                    if (targetSlot != currentSlot)
+                    {
+                        currentSlot = targetSlot;
+
+                        // Smoothly relocate other cards just like home screen apps
+                        double shiftAmt = cardHeights[origIndex] + 6.0;
+                        for (int k = 0; k < count; k++)
+                        {
+                            if (k == origIndex) continue;
+
+                            double targetShift = 0.0;
+                            if (origIndex < currentSlot)
                             {
-                                _dragStrokeDropIndex = newDrop;
-                                RefreshPropertyInspector();
+                                if (k > origIndex && k <= currentSlot) targetShift = -shiftAmt;
+                            }
+                            else if (origIndex > currentSlot)
+                            {
+                                if (k >= currentSlot && k < origIndex) targetShift = +shiftAmt;
+                            }
+
+                            var otherTrans = strokeCards[k].RenderTransform as TranslateTransform;
+                            if (otherTrans != null)
+                            {
+                                var anim = new DoubleAnimation
+                                {
+                                    To = targetShift,
+                                    Duration = TimeSpan.FromMilliseconds(160),
+                                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+                                };
+                                otherTrans.BeginAnimation(TranslateTransform.YProperty, anim);
                             }
                         }
-                    }
-                };
-                grip.PreviewMouseLeftButtonUp += (s, e) =>
-                {
-                    if (_isDraggingStrokeList && _draggedStrokeIndex >= 0 && _dragStrokeDropIndex >= 0 && _draggedStrokeIndex != _dragStrokeDropIndex)
-                    {
-                        var item = primary.Strokes[_draggedStrokeIndex];
-                        primary.Strokes.RemoveAt(_draggedStrokeIndex);
-                        primary.Strokes.Insert(Math.Min(primary.Strokes.Count, _dragStrokeDropIndex), item);
+
+                        // Real-time canvas stroke update depending on new order of strokes
+                        var previewStrokes = new List<StrokeData>();
+                        for (int k = 0; k < snapshotStrokes.Count; k++)
+                        {
+                            if (k != origIndex) previewStrokes.Add(snapshotStrokes[k]);
+                        }
+                        previewStrokes.Insert(Math.Min(previewStrokes.Count, currentSlot), snapshotStrokes[origIndex]);
+
+                        primary.Strokes = previewStrokes;
                         InvalidateAndRefresh(primary);
                     }
+                };
+
+                upHandler = (sender, ue) =>
+                {
+                    grip.PreviewMouseMove -= moveHandler;
+                    grip.PreviewMouseLeftButtonUp -= upHandler;
                     grip.ReleaseMouseCapture();
-                    _isDraggingStrokeList = false;
-                    _draggedStrokeIndex = -1;
-                    _dragStrokeDropIndex = -1;
+
+                    card.Opacity = 1.0;
+                    card.BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66));
+                    Panel.SetZIndex(card, 0);
+
+                    // Final commit
+                    var finalStrokes = new List<StrokeData>();
+                    for (int k = 0; k < snapshotStrokes.Count; k++)
+                    {
+                        if (k != origIndex) finalStrokes.Add(snapshotStrokes[k]);
+                    }
+                    finalStrokes.Insert(Math.Min(finalStrokes.Count, currentSlot), snapshotStrokes[origIndex]);
+
+                    primary.Strokes = finalStrokes;
+                    InvalidateAndRefresh(primary);
                     RefreshPropertyInspector();
                 };
-            }
+
+                grip.PreviewMouseMove += moveHandler;
+                grip.PreviewMouseLeftButtonUp += upHandler;
+            };
 
             // 2. Swatch
             var swatch = new Border

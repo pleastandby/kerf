@@ -536,8 +536,9 @@ namespace Kerf.Engine
                 {
                     if (node.Fills != null)
                     {
-                        foreach (var fill in node.Fills)
+                        for (int i = node.Fills.Count - 1; i >= 0; i--)
                         {
+                            var fill = node.Fills[i];
                             if (fill != null && fill.Enabled)
                             {
                                 var b = gpu.CreateBrushFromPaint(fill, new Rect(node.X, node.Y, node.Width, node.Height));
@@ -547,8 +548,9 @@ namespace Kerf.Engine
                     }
                     if (node.Strokes != null)
                     {
-                        foreach (var st in node.Strokes)
+                        for (int i = node.Strokes.Count - 1; i >= 0; i--)
                         {
+                            var st = node.Strokes[i];
                             if (st != null && st.Enabled && st.Width > 0.0 && st.Paint != null)
                             {
                                 var sb = gpu.CreateBrushFromPaint(st.Paint, new Rect(node.X, node.Y, node.Width, node.Height));
@@ -573,11 +575,12 @@ namespace Kerf.Engine
             var geo = gpu.BuildGeometry(node);
             if (geo == null) return;
 
-            // 1. Multiple Fills (drawn in order)
+            // 1. Multiple Fills (drawn from bottom to top so Fills[0] is rendered on top)
             if (node.Fills != null)
             {
-                foreach (var fill in node.Fills)
+                for (int i = node.Fills.Count - 1; i >= 0; i--)
                 {
+                    var fill = node.Fills[i];
                     if (fill != null && fill.Enabled)
                     {
                         var fillBrush = gpu.CreateBrushFromPaint(fill, new Rect(node.X, node.Y, node.Width, node.Height));
@@ -589,11 +592,12 @@ namespace Kerf.Engine
                 }
             }
 
-            // 2. Multiple Strokes (drawn in order with inside/outside/center alignment)
+            // 2. Multiple Strokes (drawn from bottom to top so Strokes[0] is rendered on top)
             if (node.Strokes != null)
             {
-                foreach (var stroke in node.Strokes)
+                for (int i = node.Strokes.Count - 1; i >= 0; i--)
                 {
+                    var stroke = node.Strokes[i];
                     if (stroke == null || !stroke.Enabled || stroke.Width <= 0.0 || stroke.Paint == null) continue;
 
                     var strokeBrush = gpu.CreateBrushFromPaint(stroke.Paint, new Rect(node.X, node.Y, node.Width, node.Height));

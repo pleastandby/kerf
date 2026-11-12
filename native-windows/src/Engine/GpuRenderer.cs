@@ -1382,11 +1382,12 @@ namespace Kerf.Engine
 
             bool hasLiquidGlass = node.Effects != null && node.Effects.Any(e => e.Enabled && e.Type == EffectType.LiquidGlass);
 
-            // 1. Multiple Fills (drawn in order)
+            // 1. Multiple Fills (drawn from bottom to top so Fills[0] is rendered on top)
             if (node.Fills != null)
             {
-                foreach (var fill in node.Fills)
+                for (int i = node.Fills.Count - 1; i >= 0; i--)
                 {
+                    var fill = node.Fills[i];
                     if (fill != null && fill.Enabled)
                     {
                         if (hasLiquidGlass && fill.Type == PaintType.Solid)
@@ -1403,11 +1404,12 @@ namespace Kerf.Engine
                 }
             }
 
-            // 2. Multiple Strokes (drawn in order with alignment)
+            // 2. Multiple Strokes (drawn from bottom to top so Strokes[0] is rendered on top)
             if (node.Strokes != null)
             {
-                foreach (var stroke in node.Strokes)
+                for (int i = node.Strokes.Count - 1; i >= 0; i--)
                 {
+                    var stroke = node.Strokes[i];
                     if (stroke == null || !stroke.Enabled || stroke.Width <= 0.0 || stroke.Paint == null) continue;
 
                     var strokeBrush = CreateBrushFromPaint(stroke.Paint, new Rect(node.X, node.Y, node.Width, node.Height));
@@ -1553,8 +1555,9 @@ namespace Kerf.Engine
                 {
                     if (node.Fills != null)
                     {
-                        foreach (var fill in node.Fills)
+                        for (int i = node.Fills.Count - 1; i >= 0; i--)
                         {
+                            var fill = node.Fills[i];
                             if (fill != null && fill.Enabled)
                             {
                                 var fillBrush = CreateBrushFromPaint(fill, new Rect(node.X, node.Y, node.Width, node.Height));
@@ -1565,8 +1568,9 @@ namespace Kerf.Engine
 
                     if (node.Strokes != null)
                     {
-                        foreach (var stroke in node.Strokes)
+                        for (int i = node.Strokes.Count - 1; i >= 0; i--)
                         {
+                            var stroke = node.Strokes[i];
                             if (stroke != null && stroke.Enabled && stroke.Width > 0.0 && stroke.Paint != null)
                             {
                                 var sBrush = CreateBrushFromPaint(stroke.Paint, new Rect(node.X, node.Y, node.Width, node.Height));
