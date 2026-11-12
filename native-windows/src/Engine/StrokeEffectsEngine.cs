@@ -208,9 +208,21 @@ namespace Kerf.Engine
             return points[points.Count - 1];
         }
 
+        public static bool IsClockwisePolygon(List<Point> points)
+        {
+            if (points == null || points.Count < 3) return true;
+            double sum = 0.0;
+            int n = points.Count;
+            for (int i = 0; i < n; i++)
+            {
+                int next = (i + 1) % n;
+                sum += (points[i].X * points[next].Y - points[next].X * points[i].Y);
+            }
+            return sum >= 0.0;
+        }
+
         /// <summary>
-        /// Renders a tapered stroke along a path geometry.
-        /// Returns true if a tapered mesh was rendered; false if taper is inactive (taperStart == 0 and taperEnd == 0).
+        /// Backward-compatible overload for tapered stroke mesh rendering.
         /// </summary>
         public static bool RenderTaperedStroke(
             DrawingContext dc,
@@ -223,14 +235,30 @@ namespace Kerf.Engine
             double endWidthFrac,
             StrokeCap cap)
         {
+            if (taperStart <= 0.0001 && taperEnd <= 0.0001) return false;
+            return RenderContourMesh(dc, pathGeo, strokeBrush, baseWidth, StrokeAlignment.Center, true, taperStart, taperEnd, startWidthFrac, endWidthFrac, cap);
+        }
+
+        /// <summary>
+        /// Renders an analytical contour mesh along a path geometry.
+        /// Handles Outside, Inside, and Center alignments natively without destructive clipping.
+        /// Generates mathematically exact convex caps (round, flat, square) avoiding concave cutout artifacts.
+        /// </summary>
+        public static bool RenderContourMesh(
+            DrawingContext dc,
+            Geometry pathGeo,
+            Brush strokeBrush,
+            double baseWidth,
+            StrokeAlignment alignment,
+            bool isClockwise,
+            double taperStart,
+            double taperEnd,
+            double startWidthFrac,
+            double endWidthFrac,
+            StrokeCap cap)
+        {
             if (dc == null || pathGeo == null || strokeBrush == null) return false;
             if (baseWidth <= 0.0) return false;
-
-            // If no taper is active, return false so normal pen rendering is used
-            if (taperStart <= 0.0001 && taperEnd <= 0.0001)
-            {
-                return false;
-            }
 
             taperStart = Math.Max(0.0, Math.Min(1.0, taperStart));
             taperEnd = Math.Max(0.0, Math.Min(1.0, taperEnd));
@@ -257,7 +285,6 @@ namespace Kerf.Engine
                 var points = ExtractFigurePoints(fig);
                 if (points.Count < 2) continue;
 
-                // Cumulative distances
                 int n = points.Count;
                 var cumDist = new double[n];
                 cumDist[0] = 0.0;
@@ -271,9 +298,10 @@ namespace Kerf.Engine
                 double totalLen = cumDist[n - 1];
                 if (totalLen <= 0.001) continue;
 
-                // Compute normals and width for each vertex
-                var leftPoints = new Point[n];
-                var rightPoints = new Point[n];
+                var outerPoints = new Point[n];
+                var innerPoints = new Point[n];
+                var tangents = new Vector[n];
+                var outNormals = new Vector[n];
 
                 for (int i = 0; i < n; i++)
                 {
@@ -293,9 +321,9 @@ namespace Kerf.Engine
                         factor = Math.Min(factor, endFactor);
                     }
 
-                    double halfW = Math.Max(0.25, (baseWidth * factor) * 0.5);
+                    double curWidth = Math.Max(0.25, baseWidth * factor);
 
-                    // Tangent vector
+                    // Compute tangent vector (tx, ty)
                     double tx = 0.0, ty = 0.0;
                     if (i == 0)
                     {
@@ -334,45 +362,145 @@ namespace Kerf.Engine
                         tx /= tLen;
                         ty /= tLen;
                     }
+                    tangents[i] = new Vector(tx, ty);
 
-                    // Normal vector is perpendicular: (-ty, tx)
-                    double nx = -ty;
-                    double ny = tx;
+                    // Determine unit outward normal
+                    // In screen coordinates: Clockwise tangent (tx, ty) has outward normal (ty, -tx)
+                    double nOutX = isClockwise ? ty : -ty;
+                    double nOutY = isClockwise ? -tx : tx;
+                    outNormals[i] = new Vector(nOutX, nOutY);
 
-                    leftPoints[i] = new Point(points[i].X + nx * halfW, points[i].Y + ny * halfW);
-                    rightPoints[i] = new Point(points[i].X - nx * halfW, points[i].Y - ny * halfW);
-                }
-
-                // Construct tapered polygon mesh
-                var streamGeo = new StreamGeometry();
-                using (var ctx = streamGeo.Open())
-                {
-                    ctx.BeginFigure(leftPoints[0], true, true);
-
-                    for (int i = 1; i < n; i++)
+                    // Position outer and inner points based on alignment
+                    if (alignment == StrokeAlignment.Outside)
                     {
-                        ctx.LineTo(leftPoints[i], true, false);
+                        outerPoints[i] = new Point(points[i].X + nOutX * curWidth, points[i].Y + nOutY * curWidth);
+                        innerPoints[i] = new Point(points[i].X, points[i].Y);
                     }
-
-                    // End cap
-                    if (cap == StrokeCap.Round)
+                    else if (alignment == StrokeAlignment.Inside)
                     {
-                        ctx.ArcTo(rightPoints[n - 1], new Size(baseWidth * 0.5, baseWidth * 0.5), 0, false, SweepDirection.Clockwise, true, false);
+                        outerPoints[i] = new Point(points[i].X, points[i].Y);
+                        innerPoints[i] = new Point(points[i].X - nOutX * curWidth, points[i].Y - nOutY * curWidth);
                     }
                     else
                     {
-                        ctx.LineTo(rightPoints[n - 1], true, false);
+                        double halfW = curWidth * 0.5;
+                        outerPoints[i] = new Point(points[i].X + nOutX * halfW, points[i].Y + nOutY * halfW);
+                        innerPoints[i] = new Point(points[i].X - nOutX * halfW, points[i].Y - nOutY * halfW);
                     }
+                }
 
-                    for (int i = n - 2; i >= 0; i--)
+                // Check if figure is closed
+                bool isClosedFigure = fig.IsClosed;
+
+                var streamGeo = new StreamGeometry();
+                streamGeo.FillRule = FillRule.EvenOdd;
+                using (var ctx = streamGeo.Open())
+                {
+                    if (isClosedFigure)
                     {
-                        ctx.LineTo(rightPoints[i], true, false);
+                        // Outer loop
+                        ctx.BeginFigure(outerPoints[0], true, true);
+                        for (int i = 1; i < n; i++)
+                        {
+                            ctx.LineTo(outerPoints[i], true, false);
+                        }
+
+                        // Inner loop (hole)
+                        ctx.BeginFigure(innerPoints[0], true, true);
+                        for (int i = 1; i < n; i++)
+                        {
+                            ctx.LineTo(innerPoints[i], true, false);
+                        }
                     }
-
-                    // Start cap
-                    if (cap == StrokeCap.Round)
+                    else
                     {
-                        ctx.ArcTo(leftPoints[0], new Size(baseWidth * 0.5, baseWidth * 0.5), 0, false, SweepDirection.Clockwise, true, false);
+                        ctx.BeginFigure(outerPoints[0], true, true);
+
+                        for (int i = 1; i < n; i++)
+                        {
+                            ctx.LineTo(outerPoints[i], true, false);
+                        }
+                        // Open path: End Cap from outerPoints[n-1] to innerPoints[n-1]
+                        Point pOutEnd = outerPoints[n - 1];
+                        Point pInEnd = innerPoints[n - 1];
+                        double capCenterX = (pOutEnd.X + pInEnd.X) * 0.5;
+                        double capCenterY = (pOutEnd.Y + pInEnd.Y) * 0.5;
+                        double capRadius = Math.Sqrt((pOutEnd.X - pInEnd.X) * (pOutEnd.X - pInEnd.X) +
+                                                     (pOutEnd.Y - pInEnd.Y) * (pOutEnd.Y - pInEnd.Y)) * 0.5;
+
+                        Vector tEnd = tangents[n - 1];
+                        Vector nOutEnd = outNormals[n - 1];
+                        double uOutX = (capRadius > 0.001) ? (pOutEnd.X - capCenterX) / capRadius : nOutEnd.X;
+                        double uOutY = (capRadius > 0.001) ? (pOutEnd.Y - capCenterY) / capRadius : nOutEnd.Y;
+
+                        if (cap == StrokeCap.Round && capRadius > 0.5)
+                        {
+                            const int numSteps = 12;
+                            for (int k = 1; k < numSteps; k++)
+                            {
+                                double alpha = (double)k / numSteps * Math.PI;
+                                double cosA = Math.Cos(alpha);
+                                double sinA = Math.Sin(alpha);
+                                double px = capCenterX + uOutX * (capRadius * cosA) + tEnd.X * (capRadius * sinA);
+                                double py = capCenterY + uOutY * (capRadius * cosA) + tEnd.Y * (capRadius * sinA);
+                                ctx.LineTo(new Point(px, py), true, false);
+                            }
+                            ctx.LineTo(pInEnd, true, false);
+                        }
+                        else if (cap == StrokeCap.Square && capRadius > 0.5)
+                        {
+                            ctx.LineTo(new Point(pOutEnd.X + tEnd.X * capRadius, pOutEnd.Y + tEnd.Y * capRadius), true, false);
+                            ctx.LineTo(new Point(pInEnd.X + tEnd.X * capRadius, pInEnd.Y + tEnd.Y * capRadius), true, false);
+                            ctx.LineTo(pInEnd, true, false);
+                        }
+                        else
+                        {
+                            ctx.LineTo(pInEnd, true, false);
+                        }
+
+                        // Inner boundary
+                        for (int i = n - 2; i >= 0; i--)
+                        {
+                            ctx.LineTo(innerPoints[i], true, false);
+                        }
+
+                        // Start Cap from innerPoints[0] to outerPoints[0]
+                        Point pOutStart = outerPoints[0];
+                        Point pInStart = innerPoints[0];
+                        double capStartCenterX = (pOutStart.X + pInStart.X) * 0.5;
+                        double capStartCenterY = (pOutStart.Y + pInStart.Y) * 0.5;
+                        double capStartRadius = Math.Sqrt((pOutStart.X - pInStart.X) * (pOutStart.X - pInStart.X) +
+                                                          (pOutStart.Y - pInStart.Y) * (pOutStart.Y - pInStart.Y)) * 0.5;
+
+                        Vector tStart = tangents[0];
+                        Vector nOutStart = outNormals[0];
+                        double uOutStartX = (capStartRadius > 0.001) ? (pOutStart.X - capStartCenterX) / capStartRadius : nOutStart.X;
+                        double uOutStartY = (capStartRadius > 0.001) ? (pOutStart.Y - capStartCenterY) / capStartRadius : nOutStart.Y;
+
+                        if (cap == StrokeCap.Round && capStartRadius > 0.5)
+                        {
+                            const int numSteps = 12;
+                            for (int k = 1; k < numSteps; k++)
+                            {
+                                double beta = (double)k / numSteps * Math.PI;
+                                double cosB = Math.Cos(beta);
+                                double sinB = Math.Sin(beta);
+                                double px = capStartCenterX - uOutStartX * (capStartRadius * cosB) - tStart.X * (capStartRadius * sinB);
+                                double py = capStartCenterY - uOutStartY * (capStartRadius * cosB) - tStart.Y * (capStartRadius * sinB);
+                                ctx.LineTo(new Point(px, py), true, false);
+                            }
+                            ctx.LineTo(pOutStart, true, false);
+                        }
+                        else if (cap == StrokeCap.Square && capStartRadius > 0.5)
+                        {
+                            ctx.LineTo(new Point(pInStart.X - tStart.X * capStartRadius, pInStart.Y - tStart.Y * capStartRadius), true, false);
+                            ctx.LineTo(new Point(pOutStart.X - tStart.X * capStartRadius, pOutStart.Y - tStart.Y * capStartRadius), true, false);
+                            ctx.LineTo(pOutStart, true, false);
+                        }
+                        else
+                        {
+                            ctx.LineTo(pOutStart, true, false);
+                        }
                     }
                 }
 
@@ -400,60 +528,52 @@ namespace Kerf.Engine
             Geometry activeGeo = TrimGeometry(geo, stroke.TrimStart, stroke.TrimEnd, stroke.TrimOffset);
             if (activeGeo == null) return;
 
+            bool isTrimmed = stroke.TrimStart > 0.0001 || stroke.TrimEnd < 0.9999 || Math.Abs(stroke.TrimOffset) > 0.0001;
             bool hasTaper = stroke.TaperStart > 0.0001 || stroke.TaperEnd > 0.0001;
+            bool needsContourMesh = hasTaper || isTrimmed || stroke.Alignment != StrokeAlignment.Center;
 
-            if (stroke.Alignment == StrokeAlignment.Inside)
+            if (needsContourMesh)
             {
-                // Inside alignment: clip strictly to the shape interior
-                dc.PushClip(geo);
-                if (hasTaper)
+                // Detect orientation of parent geometry to ensure outward normals point exterior to the shape
+                bool isClockwise = true;
+                PathGeometry flatParent;
+                try { flatParent = geo.GetFlattenedPathGeometry(0.25, ToleranceType.Absolute); }
+                catch { flatParent = null; }
+                if (flatParent != null && flatParent.Figures != null && flatParent.Figures.Count > 0)
                 {
-                    RenderTaperedStroke(dc, activeGeo, strokeBrush, stroke.Width * 2.0, stroke.TaperStart, stroke.TaperEnd, stroke.TaperStartWidth, stroke.TaperEndWidth, stroke.Cap);
+                    var parentPoints = ExtractFigurePoints(flatParent.Figures[0]);
+                    isClockwise = IsClockwisePolygon(parentPoints);
                 }
-                else
-                {
-                    var insidePen = strokePen.Clone();
-                    insidePen.Thickness = stroke.Width * 2.0;
-                    insidePen.Freeze();
-                    dc.DrawGeometry(null, insidePen, activeGeo);
-                }
-                dc.Pop();
-            }
-            else if (stroke.Alignment == StrokeAlignment.Outside)
-            {
-                // Outside alignment: clip OUT the interior of the shape completely so stroke never bleeds inside!
-                var bounds = geo.GetRenderBounds(strokePen);
-                bounds.Inflate(Math.Max(50.0, stroke.Width * 4.0), Math.Max(50.0, stroke.Width * 4.0));
-                var bigBox = new RectangleGeometry(bounds);
-                var outsideClip = new CombinedGeometry(GeometryCombineMode.Exclude, bigBox, geo);
-                outsideClip.Freeze();
 
-                dc.PushClip(outsideClip);
-                if (hasTaper)
+                // If inside alignment without taper/trim on closed shape, push clip to guarantee no outer bleed
+                if (stroke.Alignment == StrokeAlignment.Inside)
                 {
-                    RenderTaperedStroke(dc, activeGeo, strokeBrush, stroke.Width * 2.0, stroke.TaperStart, stroke.TaperEnd, stroke.TaperStartWidth, stroke.TaperEndWidth, stroke.Cap);
+                    dc.PushClip(geo);
                 }
-                else
+
+                bool rendered = RenderContourMesh(
+                    dc,
+                    activeGeo,
+                    strokeBrush,
+                    stroke.Width,
+                    stroke.Alignment,
+                    isClockwise,
+                    stroke.TaperStart,
+                    stroke.TaperEnd,
+                    stroke.TaperStartWidth,
+                    stroke.TaperEndWidth,
+                    stroke.Cap);
+
+                if (stroke.Alignment == StrokeAlignment.Inside)
                 {
-                    var outsidePen = strokePen.Clone();
-                    outsidePen.Thickness = stroke.Width * 2.0;
-                    outsidePen.Freeze();
-                    dc.DrawGeometry(null, outsidePen, activeGeo);
+                    dc.Pop();
                 }
-                dc.Pop();
+
+                if (rendered) return;
             }
-            else
-            {
-                // Center alignment
-                if (hasTaper)
-                {
-                    RenderTaperedStroke(dc, activeGeo, strokeBrush, stroke.Width, stroke.TaperStart, stroke.TaperEnd, stroke.TaperStartWidth, stroke.TaperEndWidth, stroke.Cap);
-                }
-                else
-                {
-                    dc.DrawGeometry(null, strokePen, activeGeo);
-                }
-            }
+
+            // Fallback for standard untrimmed center stroke
+            dc.DrawGeometry(null, strokePen, activeGeo);
         }
     }
 }

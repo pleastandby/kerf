@@ -8158,26 +8158,71 @@ namespace Kerf.UI
 
                 cardStack.Children.Add(alignRow);
 
-                // --- TRIM PATH CONTROLS ---
-                var trimHeader = new Grid { Margin = new Thickness(0, 8, 0, 4) };
-                trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                // --- STROKE EFFECTS COLLAPSIBLE PANEL ---
+                bool isTrimmed = (stroke.TrimStart > 0.001 || stroke.TrimEnd < 0.999 || Math.Abs(stroke.TrimOffset) > 0.001);
+                bool isTapered = (stroke.TaperStart > 0.001 || stroke.TaperEnd > 0.001 || stroke.TaperStartWidth > 0.001 || stroke.TaperEndWidth > 0.001);
+                bool isEffectUsed = isTrimmed || isTapered;
+                bool isEffectsExpanded = stroke.IsEffectsExpanded.HasValue ? stroke.IsEffectsExpanded.Value : isEffectUsed;
 
-                var trimTitle = new TextBlock
+                var effectsToggleRow = new Border
                 {
-                    Text = "TRIM PATH",
-                    FontSize = 9.5,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                    Margin = new Thickness(0, 6, 0, 2),
+                    Padding = new Thickness(6, 4, 6, 4),
+                    Background = new SolidColorBrush(Color.FromRgb(26, 32, 46)),
+                    CornerRadius = new CornerRadius(4),
+                    Cursor = Cursors.Hand
+                };
+
+                var toggleGrid = new Grid();
+                toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Arrow
+                toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Title
+                toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Badge / Reset
+
+                var arrowText = new TextBlock
+                {
+                    Text = isEffectsExpanded ? "▼" : "▶",
+                    FontSize = 8.5,
+                    Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                    Margin = new Thickness(0, 0, 6, 0),
                     VerticalAlignment = VerticalAlignment.Center
                 };
-                Grid.SetColumn(trimTitle, 0);
-                trimHeader.Children.Add(trimTitle);
+                Grid.SetColumn(arrowText, 0);
+                toggleGrid.Children.Add(arrowText);
 
-                bool isTrimmed = (stroke.TrimStart > 0.001 || stroke.TrimEnd < 0.999 || Math.Abs(stroke.TrimOffset) > 0.001);
-                if (isTrimmed)
+                var effectsTitle = new TextBlock
                 {
-                    var resetTrimBtn = new Button
+                    Text = "STROKE EFFECTS",
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = isEffectUsed ? new SolidColorBrush(Color.FromRgb(70, 239, 177)) : new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(effectsTitle, 1);
+                toggleGrid.Children.Add(effectsTitle);
+
+                if (isEffectUsed)
+                {
+                    var rightStack = new StackPanel { Orientation = Orientation.Horizontal };
+                    var activeBadge = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(50, 70, 239, 177)),
+                        BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(3),
+                        Padding = new Thickness(4, 1, 4, 1),
+                        Margin = new Thickness(0, 0, 4, 0),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Child = new TextBlock
+                        {
+                            Text = "Active",
+                            FontSize = 8,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = new SolidColorBrush(Color.FromRgb(70, 239, 177))
+                        }
+                    };
+                    rightStack.Children.Add(activeBadge);
+
+                    var resetAllBtn = new Button
                     {
                         Template = CreateRoundedButtonTemplate(3),
                         Content = "Reset",
@@ -8188,227 +8233,300 @@ namespace Kerf.UI
                         Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
                         BorderThickness = new Thickness(0),
                         Cursor = Cursors.Hand,
-                        ToolTip = "Reset trim path to full outline (0% - 100%)"
+                        ToolTip = "Reset all trim path and taper effects"
                     };
-                    resetTrimBtn.Click += (s, e) =>
+                    resetAllBtn.Click += (s, e) =>
                     {
                         stroke.TrimStart = 0.0;
                         stroke.TrimEnd = 1.0;
                         stroke.TrimOffset = 0.0;
-                        InvalidateAndRefresh(primary);
-                        RefreshPropertyInspector();
-                    };
-                    Grid.SetColumn(resetTrimBtn, 1);
-                    trimHeader.Children.Add(resetTrimBtn);
-                }
-                cardStack.Children.Add(trimHeader);
-
-                var trimStartEndGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
-                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                double startTrimS = stroke.TrimStart;
-                var trimStartField = ScrubControls.CreateScrubField("Start", Math.Round(stroke.TrimStart * 100.0, 1), new Action<double>(val =>
-                {
-                    stroke.TrimStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                    InvalidateAndRefresh(primary);
-                    if (_currentStudioMode == StudioMode.Animate)
-                    {
-                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimStart, stroke.TrimStart);
-                    }
-                }), 0.0, 100.0, 1.0, "%", "Trim Start percentage", 1, new Action(() =>
-                {
-                    double finalTrimS = stroke.TrimStart;
-                    if (Math.Abs(finalTrimS - startTrimS) > 1e-6)
-                    {
-                        if (_currentStudioMode == StudioMode.Animate)
-                        {
-                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimStart, startTrimS, finalTrimS);
-                        }
-                        startTrimS = finalTrimS;
-                    }
-                }));
-                var animTrimStart = CreateAnimatedPropertyField(trimStartField, primary, PropKey.StrokeTrimStart);
-                Grid.SetColumn(animTrimStart, 0);
-                trimStartEndGrid.Children.Add(animTrimStart);
-
-                double startTrimE = stroke.TrimEnd;
-                var trimEndField = ScrubControls.CreateScrubField("End", Math.Round(stroke.TrimEnd * 100.0, 1), new Action<double>(val =>
-                {
-                    stroke.TrimEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                    InvalidateAndRefresh(primary);
-                    if (_currentStudioMode == StudioMode.Animate)
-                    {
-                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimEnd, stroke.TrimEnd);
-                    }
-                }), 0.0, 100.0, 1.0, "%", "Trim End percentage", 1, new Action(() =>
-                {
-                    double finalTrimE = stroke.TrimEnd;
-                    if (Math.Abs(finalTrimE - startTrimE) > 1e-6)
-                    {
-                        if (_currentStudioMode == StudioMode.Animate)
-                        {
-                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimEnd, startTrimE, finalTrimE);
-                        }
-                        startTrimE = finalTrimE;
-                    }
-                }));
-                var animTrimEnd = CreateAnimatedPropertyField(trimEndField, primary, PropKey.StrokeTrimEnd);
-                Grid.SetColumn(animTrimEnd, 2);
-                trimStartEndGrid.Children.Add(animTrimEnd);
-
-                cardStack.Children.Add(trimStartEndGrid);
-
-                double startTrimOff = stroke.TrimOffset;
-                var trimOffsetField = ScrubControls.CreateScrubField("Offset", Math.Round(stroke.TrimOffset * 100.0, 1), new Action<double>(val =>
-                {
-                    stroke.TrimOffset = val / 100.0;
-                    InvalidateAndRefresh(primary);
-                    if (_currentStudioMode == StudioMode.Animate)
-                    {
-                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimOffset, stroke.TrimOffset);
-                    }
-                }), -360.0, 360.0, 1.0, "%", "Trim Offset shift percentage", 1, new Action(() =>
-                {
-                    double finalTrimOff = stroke.TrimOffset;
-                    if (Math.Abs(finalTrimOff - startTrimOff) > 1e-6)
-                    {
-                        if (_currentStudioMode == StudioMode.Animate)
-                        {
-                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimOffset, startTrimOff, finalTrimOff);
-                        }
-                        startTrimOff = finalTrimOff;
-                    }
-                }));
-                var animTrimOffset = CreateAnimatedPropertyField(trimOffsetField, primary, PropKey.StrokeTrimOffset);
-                cardStack.Children.Add(animTrimOffset);
-
-                // --- STROKE TAPER CONTROLS ---
-                var taperHeader = new Grid { Margin = new Thickness(0, 6, 0, 4) };
-                taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                var taperTitle = new TextBlock
-                {
-                    Text = "STROKE TAPER",
-                    FontSize = 9.5,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                Grid.SetColumn(taperTitle, 0);
-                taperHeader.Children.Add(taperTitle);
-
-                bool isTapered = (stroke.TaperStart > 0.001 || stroke.TaperEnd > 0.001 || stroke.TaperStartWidth > 0.001 || stroke.TaperEndWidth > 0.001);
-                if (isTapered)
-                {
-                    var resetTaperBtn = new Button
-                    {
-                        Template = CreateRoundedButtonTemplate(3),
-                        Content = "Reset",
-                        FontSize = 9,
-                        Height = 16,
-                        Padding = new Thickness(4, 0, 4, 0),
-                        Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
-                        Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
-                        BorderThickness = new Thickness(0),
-                        Cursor = Cursors.Hand,
-                        ToolTip = "Reset taper lengths and tips to uniform stroke"
-                    };
-                    resetTaperBtn.Click += (s, e) =>
-                    {
                         stroke.TaperStart = 0.0;
                         stroke.TaperEnd = 0.0;
                         stroke.TaperStartWidth = 0.0;
                         stroke.TaperEndWidth = 0.0;
+                        stroke.IsEffectsExpanded = false;
                         InvalidateAndRefresh(primary);
                         RefreshPropertyInspector();
                     };
-                    Grid.SetColumn(resetTaperBtn, 1);
-                    taperHeader.Children.Add(resetTaperBtn);
+                    rightStack.Children.Add(resetAllBtn);
+
+                    Grid.SetColumn(rightStack, 2);
+                    toggleGrid.Children.Add(rightStack);
                 }
-                cardStack.Children.Add(taperHeader);
 
-                var taperGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
-                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                double startTaperS = stroke.TaperStart;
-                var taperStartField = ScrubControls.CreateScrubField("Start Length", Math.Round(stroke.TaperStart * 100.0, 1), new Action<double>(val =>
+                effectsToggleRow.Child = toggleGrid;
+                effectsToggleRow.MouseLeftButtonDown += (s, e) =>
                 {
-                    stroke.TaperStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                    InvalidateAndRefresh(primary);
-                    if (_currentStudioMode == StudioMode.Animate)
+                    stroke.IsEffectsExpanded = !isEffectsExpanded;
+                    RefreshPropertyInspector();
+                };
+
+                cardStack.Children.Add(effectsToggleRow);
+
+                if (isEffectsExpanded)
+                {
+                    var effectsContainer = new StackPanel { Margin = new Thickness(6, 4, 0, 2) };
+
+                    // --- TRIM PATH CONTROLS ---
+                    var trimHeader = new Grid { Margin = new Thickness(0, 6, 0, 4) };
+                    trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    var trimTitle = new TextBlock
                     {
-                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperStart, stroke.TaperStart);
+                        Text = "TRIM PATH",
+                        FontSize = 9.5,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    Grid.SetColumn(trimTitle, 0);
+                    trimHeader.Children.Add(trimTitle);
+
+                    if (isTrimmed)
+                    {
+                        var resetTrimBtn = new Button
+                        {
+                            Template = CreateRoundedButtonTemplate(3),
+                            Content = "Reset",
+                            FontSize = 9,
+                            Height = 16,
+                            Padding = new Thickness(4, 0, 4, 0),
+                            Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                            Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                            BorderThickness = new Thickness(0),
+                            Cursor = Cursors.Hand,
+                            ToolTip = "Reset trim path to full outline (0% - 100%)"
+                        };
+                        resetTrimBtn.Click += (s, e) =>
+                        {
+                            stroke.TrimStart = 0.0;
+                            stroke.TrimEnd = 1.0;
+                            stroke.TrimOffset = 0.0;
+                            if (stroke.TaperStart <= 0.001 && stroke.TaperEnd <= 0.001 && stroke.TaperStartWidth <= 0.001 && stroke.TaperEndWidth <= 0.001)
+                            {
+                                stroke.IsEffectsExpanded = false;
+                            }
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        };
+                        Grid.SetColumn(resetTrimBtn, 1);
+                        trimHeader.Children.Add(resetTrimBtn);
                     }
-                }), 0.0, 100.0, 1.0, "%", "Taper Start length fraction", 1, new Action(() =>
-                {
-                    double finalTaperS = stroke.TaperStart;
-                    if (Math.Abs(finalTaperS - startTaperS) > 1e-6)
+                    effectsContainer.Children.Add(trimHeader);
+
+                    var trimStartEndGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                    trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                    trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                    double startTrimS = stroke.TrimStart;
+                    var trimStartField = ScrubControls.CreateScrubField("Start", Math.Round(stroke.TrimStart * 100.0, 1), new Action<double>(val =>
                     {
+                        stroke.TrimStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                        InvalidateAndRefresh(primary);
                         if (_currentStudioMode == StudioMode.Animate)
                         {
-                            CommitKeyframeValueChange(primary, PropKey.StrokeTaperStart, startTaperS, finalTaperS);
+                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimStart, stroke.TrimStart);
                         }
-                        startTaperS = finalTaperS;
-                    }
-                }));
-                var animTaperStart = CreateAnimatedPropertyField(taperStartField, primary, PropKey.StrokeTaperStart);
-                Grid.SetColumn(animTaperStart, 0);
-                taperGrid.Children.Add(animTaperStart);
+                    }), 0.0, 100.0, 1.0, "%", "Trim Start percentage", 1, new Action(() =>
+                    {
+                        double finalTrimS = stroke.TrimStart;
+                        if (Math.Abs(finalTrimS - startTrimS) > 1e-6)
+                        {
+                            if (_currentStudioMode == StudioMode.Animate)
+                            {
+                                CommitKeyframeValueChange(primary, PropKey.StrokeTrimStart, startTrimS, finalTrimS);
+                            }
+                            startTrimS = finalTrimS;
+                        }
+                    }));
+                    var animTrimStart = CreateAnimatedPropertyField(trimStartField, primary, PropKey.StrokeTrimStart);
+                    Grid.SetColumn(animTrimStart, 0);
+                    trimStartEndGrid.Children.Add(animTrimStart);
 
-                double startTaperE = stroke.TaperEnd;
-                var taperEndField = ScrubControls.CreateScrubField("End Length", Math.Round(stroke.TaperEnd * 100.0, 1), new Action<double>(val =>
-                {
-                    stroke.TaperEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                    InvalidateAndRefresh(primary);
-                    if (_currentStudioMode == StudioMode.Animate)
+                    double startTrimE = stroke.TrimEnd;
+                    var trimEndField = ScrubControls.CreateScrubField("End", Math.Round(stroke.TrimEnd * 100.0, 1), new Action<double>(val =>
                     {
-                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperEnd, stroke.TaperEnd);
-                    }
-                }), 0.0, 100.0, 1.0, "%", "Taper End length fraction", 1, new Action(() =>
-                {
-                    double finalTaperE = stroke.TaperEnd;
-                    if (Math.Abs(finalTaperE - startTaperE) > 1e-6)
-                    {
+                        stroke.TrimEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                        InvalidateAndRefresh(primary);
                         if (_currentStudioMode == StudioMode.Animate)
                         {
-                            CommitKeyframeValueChange(primary, PropKey.StrokeTaperEnd, startTaperE, finalTaperE);
+                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimEnd, stroke.TrimEnd);
                         }
-                        startTaperE = finalTaperE;
+                    }), 0.0, 100.0, 1.0, "%", "Trim End percentage", 1, new Action(() =>
+                    {
+                        double finalTrimE = stroke.TrimEnd;
+                        if (Math.Abs(finalTrimE - startTrimE) > 1e-6)
+                        {
+                            if (_currentStudioMode == StudioMode.Animate)
+                            {
+                                CommitKeyframeValueChange(primary, PropKey.StrokeTrimEnd, startTrimE, finalTrimE);
+                            }
+                            startTrimE = finalTrimE;
+                        }
+                    }));
+                    var animTrimEnd = CreateAnimatedPropertyField(trimEndField, primary, PropKey.StrokeTrimEnd);
+                    Grid.SetColumn(animTrimEnd, 2);
+                    trimStartEndGrid.Children.Add(animTrimEnd);
+
+                    effectsContainer.Children.Add(trimStartEndGrid);
+
+                    double startTrimOff = stroke.TrimOffset;
+                    var trimOffsetField = ScrubControls.CreateScrubField("Offset", Math.Round(stroke.TrimOffset * 100.0, 1), new Action<double>(val =>
+                    {
+                        stroke.TrimOffset = val / 100.0;
+                        InvalidateAndRefresh(primary);
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimOffset, stroke.TrimOffset);
+                        }
+                    }), -360.0, 360.0, 1.0, "%", "Trim Offset shift percentage", 1, new Action(() =>
+                    {
+                        double finalTrimOff = stroke.TrimOffset;
+                        if (Math.Abs(finalTrimOff - startTrimOff) > 1e-6)
+                        {
+                            if (_currentStudioMode == StudioMode.Animate)
+                            {
+                                CommitKeyframeValueChange(primary, PropKey.StrokeTrimOffset, startTrimOff, finalTrimOff);
+                            }
+                            startTrimOff = finalTrimOff;
+                        }
+                    }));
+                    var animTrimOffset = CreateAnimatedPropertyField(trimOffsetField, primary, PropKey.StrokeTrimOffset);
+                    effectsContainer.Children.Add(animTrimOffset);
+
+                    // --- STROKE TAPER CONTROLS ---
+                    var taperHeader = new Grid { Margin = new Thickness(0, 6, 0, 4) };
+                    taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    var taperTitle = new TextBlock
+                    {
+                        Text = "STROKE TAPER",
+                        FontSize = 9.5,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    Grid.SetColumn(taperTitle, 0);
+                    taperHeader.Children.Add(taperTitle);
+
+                    if (isTapered)
+                    {
+                        var resetTaperBtn = new Button
+                        {
+                            Template = CreateRoundedButtonTemplate(3),
+                            Content = "Reset",
+                            FontSize = 9,
+                            Height = 16,
+                            Padding = new Thickness(4, 0, 4, 0),
+                            Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                            Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                            BorderThickness = new Thickness(0),
+                            Cursor = Cursors.Hand,
+                            ToolTip = "Reset taper lengths and tips to uniform stroke"
+                        };
+                        resetTaperBtn.Click += (s, e) =>
+                        {
+                            stroke.TaperStart = 0.0;
+                            stroke.TaperEnd = 0.0;
+                            stroke.TaperStartWidth = 0.0;
+                            stroke.TaperEndWidth = 0.0;
+                            if (stroke.TrimStart <= 0.001 && stroke.TrimEnd >= 0.999 && Math.Abs(stroke.TrimOffset) <= 0.001)
+                            {
+                                stroke.IsEffectsExpanded = false;
+                            }
+                            InvalidateAndRefresh(primary);
+                            RefreshPropertyInspector();
+                        };
+                        Grid.SetColumn(resetTaperBtn, 1);
+                        taperHeader.Children.Add(resetTaperBtn);
                     }
-                }));
-                var animTaperEnd = CreateAnimatedPropertyField(taperEndField, primary, PropKey.StrokeTaperEnd);
-                Grid.SetColumn(animTaperEnd, 2);
-                taperGrid.Children.Add(animTaperEnd);
+                    effectsContainer.Children.Add(taperHeader);
 
-                cardStack.Children.Add(taperGrid);
+                    var taperGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                    taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                    taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                var taperTipGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
-                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    double startTaperS = stroke.TaperStart;
+                    var taperStartField = ScrubControls.CreateScrubField("Start Length", Math.Round(stroke.TaperStart * 100.0, 1), new Action<double>(val =>
+                    {
+                        stroke.TaperStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                        InvalidateAndRefresh(primary);
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperStart, stroke.TaperStart);
+                        }
+                    }), 0.0, 100.0, 1.0, "%", "Taper Start length fraction", 1, new Action(() =>
+                    {
+                        double finalTaperS = stroke.TaperStart;
+                        if (Math.Abs(finalTaperS - startTaperS) > 1e-6)
+                        {
+                            if (_currentStudioMode == StudioMode.Animate)
+                            {
+                                CommitKeyframeValueChange(primary, PropKey.StrokeTaperStart, startTaperS, finalTaperS);
+                            }
+                            startTaperS = finalTaperS;
+                        }
+                    }));
+                    var animTaperStart = CreateAnimatedPropertyField(taperStartField, primary, PropKey.StrokeTaperStart);
+                    Grid.SetColumn(animTaperStart, 0);
+                    taperGrid.Children.Add(animTaperStart);
 
-                var startTipField = ScrubControls.CreateScrubField("Start Tip", Math.Round(stroke.TaperStartWidth * 100.0, 1), new Action<double>(val =>
-                {
-                    stroke.TaperStartWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                    InvalidateAndRefresh(primary);
-                }), 0.0, 100.0, 1.0, "%", "Start tip thickness fraction (0% = sharp point)");
-                Grid.SetColumn(startTipField, 0);
-                taperTipGrid.Children.Add(startTipField);
+                    double startTaperE = stroke.TaperEnd;
+                    var taperEndField = ScrubControls.CreateScrubField("End Length", Math.Round(stroke.TaperEnd * 100.0, 1), new Action<double>(val =>
+                    {
+                        stroke.TaperEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                        InvalidateAndRefresh(primary);
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperEnd, stroke.TaperEnd);
+                        }
+                    }), 0.0, 100.0, 1.0, "%", "Taper End length fraction", 1, new Action(() =>
+                    {
+                        double finalTaperE = stroke.TaperEnd;
+                        if (Math.Abs(finalTaperE - startTaperE) > 1e-6)
+                        {
+                            if (_currentStudioMode == StudioMode.Animate)
+                            {
+                                CommitKeyframeValueChange(primary, PropKey.StrokeTaperEnd, startTaperE, finalTaperE);
+                            }
+                            startTaperE = finalTaperE;
+                        }
+                    }));
+                    var animTaperEnd = CreateAnimatedPropertyField(taperEndField, primary, PropKey.StrokeTaperEnd);
+                    Grid.SetColumn(animTaperEnd, 2);
+                    taperGrid.Children.Add(animTaperEnd);
 
-                var endTipField = ScrubControls.CreateScrubField("End Tip", Math.Round(stroke.TaperEndWidth * 100.0, 1), new Action<double>(val =>
-                {
-                    stroke.TaperEndWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                    InvalidateAndRefresh(primary);
-                }), 0.0, 100.0, 1.0, "%", "End tip thickness fraction (0% = sharp point)");
-                Grid.SetColumn(endTipField, 2);
-                taperTipGrid.Children.Add(endTipField);
+                    effectsContainer.Children.Add(taperGrid);
 
-                cardStack.Children.Add(taperTipGrid);
+                    var taperTipGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                    taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                    taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                    var startTipField = ScrubControls.CreateScrubField("Start Tip", Math.Round(stroke.TaperStartWidth * 100.0, 1), new Action<double>(val =>
+                    {
+                        stroke.TaperStartWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                        InvalidateAndRefresh(primary);
+                    }), 0.0, 100.0, 1.0, "%", "Start tip thickness fraction (0% = sharp point)");
+                    Grid.SetColumn(startTipField, 0);
+                    taperTipGrid.Children.Add(startTipField);
+
+                    var endTipField = ScrubControls.CreateScrubField("End Tip", Math.Round(stroke.TaperEndWidth * 100.0, 1), new Action<double>(val =>
+                    {
+                        stroke.TaperEndWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                        InvalidateAndRefresh(primary);
+                    }), 0.0, 100.0, 1.0, "%", "End tip thickness fraction (0% = sharp point)");
+                    Grid.SetColumn(endTipField, 2);
+                    taperTipGrid.Children.Add(endTipField);
+
+                    effectsContainer.Children.Add(taperTipGrid);
+
+                    cardStack.Children.Add(effectsContainer);
+                }
 
                 card.Child = cardStack;
                 _propertyInspectorStack.Children.Add(card);

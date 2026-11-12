@@ -9600,7 +9600,8 @@ namespace Kerf.Tests
                 TaperStart = 0.3,
                 TaperEnd = 0.4,
                 TaperStartWidth = 0.05,
-                TaperEndWidth = 0.08
+                TaperEndWidth = 0.08,
+                IsEffectsExpanded = true
             };
             var clone = stroke.Clone();
             Assert(clone != null, "StrokeData clone is non-null");
@@ -9612,8 +9613,39 @@ namespace Kerf.Tests
             Assert(Math.Abs(clone.TaperEnd - 0.4) < 0.001, "Clone preserves TaperEnd");
             Assert(Math.Abs(clone.TaperStartWidth - 0.05) < 0.001, "Clone preserves TaperStartWidth");
             Assert(Math.Abs(clone.TaperEndWidth - 0.08) < 0.001, "Clone preserves TaperEndWidth");
+            Assert(clone.IsEffectsExpanded == true, "Clone preserves IsEffectsExpanded");
 
-            // 5. PropertyBinder & Animation Evaluation
+            // 5. Analytical Contour Mesh Rendering & Cap Geometry
+            var polyPoints = new List<Point>
+            {
+                new Point(0, 0),
+                new Point(100, 0),
+                new Point(100, 100),
+                new Point(0, 100)
+            };
+            Assert(StrokeEffectsEngine.IsClockwisePolygon(polyPoints), "Clockwise polygon orientation correctly identified");
+            polyPoints.Reverse();
+            Assert(!StrokeEffectsEngine.IsClockwisePolygon(polyPoints), "Counter-clockwise polygon orientation correctly identified");
+
+            using (var dc2 = dv.RenderOpen())
+            {
+                // Render contour mesh for outside alignment with round cap and taper at start only
+                bool rendered = StrokeEffectsEngine.RenderContourMesh(
+                    dc2,
+                    lineGeo,
+                    Brushes.Blue,
+                    20.0,
+                    StrokeAlignment.Outside,
+                    true,
+                    0.5,
+                    0.0,
+                    0.0,
+                    1.0,
+                    StrokeCap.Round);
+                Assert(rendered, "RenderContourMesh successfully renders outside stroke with taper and convex round cap");
+            }
+
+            // 6. PropertyBinder & Animation Evaluation
             var layer = new LayerNode
             {
                 Id = "layer-test-stroke",

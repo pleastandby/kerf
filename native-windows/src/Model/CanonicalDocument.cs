@@ -405,6 +405,9 @@ namespace Kerf.Model
         public double TaperStartWidth { get; set; }
         public double TaperEndWidth { get; set; }
 
+        // UI Expansion State (collapsible)
+        public bool? IsEffectsExpanded { get; set; }
+
         public StrokeData()
         {
             Paint = Paint.Solid("#000000");
@@ -442,7 +445,8 @@ namespace Kerf.Model
                 TaperStart = this.TaperStart,
                 TaperEnd = this.TaperEnd,
                 TaperStartWidth = this.TaperStartWidth,
-                TaperEndWidth = this.TaperEndWidth
+                TaperEndWidth = this.TaperEndWidth,
+                IsEffectsExpanded = this.IsEffectsExpanded
             };
             if (DashPattern != null)
             {
