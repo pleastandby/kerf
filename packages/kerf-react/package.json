@@ -1,5 +1,5 @@
 {
-  "name": "kerf-react",
+  "name": "@pleastandby/kerf-react",
   "version": "1.0.0",
   "description": "Official plug-and-play React runtime for Kerf (.kfx) interactive motion graphics, vector animations, and state machines.",
   "license": "MIT",

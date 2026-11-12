@@ -1,9 +1,9 @@
-# kerf-react
+# @pleastandby/kerf-react
 
 > Official plug-and-play React runtime for Kerf (`.kfx`) interactive vector animations and state machines.
 
-[![npm version](https://img.shields.io/npm/v/kerf-react.svg)](https://www.npmjs.com/package/kerf-react)
-[![license](https://img.shields.io/npm/l/kerf-react.svg)](https://github.com/kerf-design/kerf)
+[![npm version](https://img.shields.io/npm/v/@pleastandby/kerf-react.svg)](https://www.npmjs.com/package/@pleastandby/kerf-react)
+[![license](https://img.shields.io/npm/l/@pleastandby/kerf-react.svg)](https://github.com/kerf-design/kerf)
 
 Embed interactive, resolution-independent vector animations exported from **Kerf Studio** in any React application with **zero configuration** — just like Rive and Lottie.
 
@@ -12,11 +12,11 @@ Embed interactive, resolution-independent vector animations exported from **Kerf
 ## 🚀 Installation
 
 ```bash
-npm install kerf-react
+npm install @pleastandby/kerf-react
 # or using pnpm
-pnpm add kerf-react
+pnpm add @pleastandby/kerf-react
 # or using yarn
-yarn add kerf-react
+yarn add @pleastandby/kerf-react
 ```
 
 ---
@@ -28,7 +28,7 @@ Export from Kerf Studio (`Export > Kerf Animation (.kfx)`) and place it in your 
 
 ### 2. Embed with `<Kerf />`
 ```tsx
-import { Kerf } from 'kerf-react';
+import { Kerf } from '@pleastandby/kerf-react';
 
 export function HeroBanner() {
   return (
@@ -48,7 +48,7 @@ Kerf state machines support interactive transitions driven by pointer events and
 ### Controlling Inputs via Props:
 ```tsx
 import { useState } from 'react';
-import { Kerf } from 'kerf-react';
+import { Kerf } from '@pleastandby/kerf-react';
 
 export function InteractiveCard() {
   const [isHovered, setIsHovered] = useState(false);
@@ -71,7 +71,7 @@ export function InteractiveCard() {
 ### Controlling Inputs via Ref:
 ```tsx
 import { useRef } from 'react';
-import { Kerf, KerfRef } from 'kerf-react';
+import { Kerf, KerfRef } from '@pleastandby/kerf-react';
 
 export function ActionButton() {
   const animRef = useRef<KerfRef>(null);
@@ -99,7 +99,7 @@ export function ActionButton() {
 For fine-grained control over the canvas, use the `useKerf()` hook (analogous to Rive's `useRive()`):
 
 ```tsx
-import { useKerf } from 'kerf-react';
+import { useKerf } from '@pleastandby/kerf-react';
 
 export function Gauge({ value }: { value: number }) {
   const { KerfComponent, setNumber, isLoaded, activeState } = useKerf({
@@ -137,3 +137,4 @@ export function Gauge({ value }: { value: number }) {
 ## 📄 License
 
 MIT © [Kerf Technologies](https://github.com/kerf-design/kerf)
+
