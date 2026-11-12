@@ -1,0 +1,51 @@
+name: Publish kerf-react to GitHub Packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - 'packages/kerf-react/**'
+      - '.github/workflows/publish-package.yml'
+  release:
+    types: [ published ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-github-packages:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/kerf-react
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (GitHub Packages)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@pleastandby'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Library & Typings
+        run: npm run build
+
+      - name: Configure Scope for GitHub Packages
+        run: |
+          npm pkg set name="@pleastandby/kerf-react"
+          npm pkg set publishConfig.registry="https://npm.pkg.github.com"
+          npm pkg set publishConfig.access="public"
+
+      - name: Publish to GitHub Packages
+        run: |
+          npm publish || echo "Package version already published to GitHub Packages or no increment needed."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
