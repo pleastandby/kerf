@@ -9421,9 +9421,13 @@ namespace Kerf.Tests
                 Mp4Exporter.ExportClipToVideo(doc, mp4Opts, mp4Path);
                 Assert(File.Exists(mp4Path), "MP4 video file was created");
                 byte[] mp4Bytes = File.ReadAllBytes(mp4Path);
-                Assert(mp4Bytes.Length > 100, "MP4 file has substantial binary content (" + mp4Bytes.Length + " bytes)");
+                Assert(mp4Bytes.Length > 1000, "MP4 file has substantial encoded video bitstream payload (" + mp4Bytes.Length + " bytes)");
                 string mp4HeaderStr = Encoding.ASCII.GetString(mp4Bytes, 4, 4);
                 Assert(mp4HeaderStr == "ftyp", "MP4 file begins with ISO 'ftyp' atom box");
+                string mp4Ascii = Encoding.ASCII.GetString(mp4Bytes);
+                Assert(mp4Ascii.Contains("moov"), "MP4 file contains ISO 'moov' movie metadata container");
+                Assert(mp4Ascii.Contains("mdat"), "MP4 file contains ISO 'mdat' media data bitstream payload");
+                Assert(mp4Ascii.Contains("vide"), "MP4 file contains 'vide' video track handler");
 
                 // 5. Test Animated GIF Exporter (GIF89a with LZW, Netscape looping & Floyd-Steinberg dithering)
                 string gifPath = Path.Combine(tempDir, "animation.gif");
