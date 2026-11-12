@@ -1649,7 +1649,7 @@ namespace Kerf.Engine
                     return CreateLinearGradientBrush(paint);
 
                 case PaintType.RadialGradient:
-                    return CreateRadialGradientBrush(paint);
+                    return CreateRadialGradientBrush(paint, bounds);
 
                 default:
                     var fallback = new SolidColorBrush(ParseHexColor(paint.ColorHex, paint.Opacity));
@@ -1764,14 +1764,31 @@ namespace Kerf.Engine
 
         private RadialGradientBrush CreateRadialGradientBrush(Paint paint)
         {
+            return CreateRadialGradientBrush(paint, new Rect(0, 0, 100, 100));
+        }
+
+        private RadialGradientBrush CreateRadialGradientBrush(Paint paint, Rect bounds)
+        {
+            double w = Math.Max(1.0, bounds.Width);
+            double h = Math.Max(1.0, bounds.Height);
+            double minDim = Math.Min(w, h);
+
+            double rx = (paint.GradientRadius * minDim) / w;
+            double ry = (paint.GradientRadius * minDim) / h;
+
             var rgb = new RadialGradientBrush
             {
                 Center = paint.GradientCenter,
                 GradientOrigin = paint.GradientCenter,
-                RadiusX = paint.GradientRadius,
-                RadiusY = paint.GradientRadius,
+                RadiusX = rx,
+                RadiusY = ry,
                 MappingMode = BrushMappingMode.RelativeToBoundingBox
             };
+
+            if (Math.Abs(paint.GradientAngle) > 0.01)
+            {
+                rgb.RelativeTransform = new RotateTransform(paint.GradientAngle, paint.GradientCenter.X, paint.GradientCenter.Y);
+            }
 
             PopulateGradientStops(rgb.GradientStops, paint);
 

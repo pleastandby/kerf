@@ -104,7 +104,8 @@ namespace Kerf.Tools
                 Point cNorm = paint.GradientCenter;
                 Point pCenter = new Point(node.X + w * cNorm.X, node.Y + h * cNorm.Y);
                 double rDist = Math.Max(10.0, Math.Min(w, h) * paint.GradientRadius);
-                Point pRadius = new Point(pCenter.X + rDist, pCenter.Y);
+                double rad = (paint.GradientAngle * Math.PI) / 180.0;
+                Point pRadius = new Point(pCenter.X + rDist * Math.Cos(rad), pCenter.Y + rDist * Math.Sin(rad));
 
                 if (Math.Abs(node.Rotation) > 0.001)
                 {
@@ -341,7 +342,19 @@ namespace Kerf.Tools
             {
                 Point cNorm = paint.GradientCenter;
                 Point pCenter = new Point(node.X + w * cNorm.X, node.Y + h * cNorm.Y);
-                double dist = Distance(localMouse, pCenter);
+                double dx = localMouse.X - pCenter.X;
+                double dy = localMouse.Y - pCenter.Y;
+                if (dx * dx + dy * dy > 0.0001)
+                {
+                    double deg = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+                    if (deg < 0) deg += 360.0;
+                    if (snapToAngles)
+                    {
+                        deg = Math.Round(deg / 45.0) * 45.0;
+                    }
+                    paint.GradientAngle = Math.Round(deg, 1);
+                }
+                double dist = Math.Sqrt(dx * dx + dy * dy);
                 double r = dist / Math.Max(10.0, Math.Min(w, h));
                 paint.GradientRadius = Math.Max(0.05, Math.Round(r, 3));
             }
@@ -404,7 +417,15 @@ namespace Kerf.Tools
                 {
                     Point cNorm = paint.GradientCenter;
                     Point pCenter = new Point(node.X + w * cNorm.X, node.Y + h * cNorm.Y);
-                    double dist = Distance(localMouse, pCenter);
+                    double dx = localMouse.X - pCenter.X;
+                    double dy = localMouse.Y - pCenter.Y;
+                    if (dx * dx + dy * dy > 0.0001)
+                    {
+                        double deg = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+                        if (deg < 0) deg += 360.0;
+                        paint.GradientAngle = Math.Round(deg, 1);
+                    }
+                    double dist = Math.Sqrt(dx * dx + dy * dy);
                     double r = dist / Math.Max(10.0, Math.Min(w, h));
                     paint.GradientRadius = Math.Max(0.05, Math.Round(r, 3));
                 }
@@ -445,6 +466,17 @@ namespace Kerf.Tools
             shadowPen.Freeze();
             var linePen = new Pen(new SolidColorBrush(Color.FromRgb(255, 255, 255)), 1.5 * invZoom);
             linePen.Freeze();
+
+            if (paint.Type == PaintType.RadialGradient)
+            {
+                double rDist = Math.Max(10.0, Math.Min(Math.Max(1.0, node.Width), Math.Max(1.0, node.Height)) * paint.GradientRadius);
+                var circlePen = new Pen(new SolidColorBrush(Color.FromArgb(90, 56, 189, 248)), 1.2 * invZoom)
+                {
+                    DashStyle = new DashStyle(new double[] { 4, 3 }, 0)
+                };
+                circlePen.Freeze();
+                dc.DrawEllipse(null, circlePen, startPt, rDist, rDist);
+            }
 
             dc.DrawLine(shadowPen, startPt, endPt);
             dc.DrawLine(linePen, startPt, endPt);

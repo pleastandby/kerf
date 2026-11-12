@@ -113,6 +113,7 @@ namespace Kerf.Tests
             RunTest("Dark Rounded Rectangle Styling for Lists and TextBoxes", TestDarkRoundedStylingForListsAndTextBoxes);
             RunTest("Runtime Integration Developer Guide & Help Navigation", TestRuntimeDeveloperGuideAndHelpNavigation);
             RunTest("Advanced Stroke Engine: Outside Stroke Clipping, Trim Path & Stroke Tapering", TestAdvancedStrokeEngineOutsideClipTrimAndTaper);
+            RunTest("Multiple Fills/Strokes Reordering & Freely Movable Radial Gradients", TestMultipleFillsStrokesReorderAndFreelyMovableRadialGradient);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9672,6 +9673,108 @@ namespace Kerf.Tests
             Assert(Math.Abs(layer.Strokes[0].TrimOffset - 0.45) < 0.001, "PropertyBinder binds StrokeTrimOffset");
             Assert(Math.Abs(layer.Strokes[0].TaperStart - 0.6) < 0.001, "PropertyBinder binds StrokeTaperStart");
             Assert(Math.Abs(layer.Strokes[0].TaperEnd - 0.7) < 0.001, "PropertyBinder binds StrokeTaperEnd");
+        }
+
+        private static void TestMultipleFillsStrokesReorderAndFreelyMovableRadialGradient()
+        {
+            // 1. Multiple Fills Reordering & Expansion Tracking
+            var fill1 = Paint.Solid("#FF0000");
+            var fill2 = Paint.Solid("#00FF00");
+            var fill3 = new Paint
+            {
+                Type = PaintType.RadialGradient,
+                ColorHex = "#0000FF",
+                GradientCenter = new Point(0.2, 0.8),
+                GradientRadius = 0.5,
+                GradientAngle = 135.0,
+                IsExpanded = false
+            };
+
+            var node = new LayerNode
+            {
+                Id = "test-reorder-node",
+                Type = ElementType.Rectangle,
+                X = 0,
+                Y = 0,
+                Width = 200,
+                Height = 100
+            };
+            node.Fills.Clear();
+            node.Fills.Add(fill1);
+            node.Fills.Add(fill2);
+            node.Fills.Add(fill3);
+
+            Assert(node.Fills.Count == 3, "Node initialized with 3 fills");
+            Assert(node.Fills[0] == fill1 && node.Fills[1] == fill2 && node.Fills[2] == fill3, "Fills initial order verified");
+
+            // Simulate Drag-and-Drop Reorder: Move fill3 (index 2) to top (index 0)
+            var movedFill = node.Fills[2];
+            node.Fills.RemoveAt(2);
+            node.Fills.Insert(0, movedFill);
+
+            Assert(node.Fills[0] == fill3, "Radial fill moved to position 0 via reorder");
+            Assert(node.Fills[1] == fill1, "Fill 1 displaced to position 1");
+            Assert(node.Fills[2] == fill2, "Fill 2 displaced to position 2");
+
+            // 2. Stroke Reordering & Expansion Tracking
+            var stroke1 = new StrokeData { Width = 2.0, Paint = Paint.Solid("#111111"), IsExpanded = false };
+            var stroke2 = new StrokeData { Width = 5.0, Paint = Paint.Solid("#222222"), IsExpanded = true };
+            node.Strokes.Add(stroke1);
+            node.Strokes.Add(stroke2);
+
+            Assert(node.Strokes[0].Width == 2.0 && node.Strokes[1].Width == 5.0, "Strokes initial order verified");
+            var movedStroke = node.Strokes[1];
+            node.Strokes.RemoveAt(1);
+            node.Strokes.Insert(0, movedStroke);
+
+            Assert(node.Strokes[0].Width == 5.0, "Stroke 2 moved to position 0 via reorder");
+            Assert(node.Strokes[1].Width == 2.0, "Stroke 1 displaced to position 1");
+            Assert(node.Strokes[0].IsExpanded == true, "Stroke expansion state preserved");
+            Assert(node.Strokes[1].IsExpanded == false, "Stroke collapsed state preserved");
+
+            // 3. Freely Movable Radial Gradient Engine Verification
+            var radPaint = new Paint
+            {
+                Type = PaintType.RadialGradient,
+                GradientCenter = new Point(0.2, 0.8),
+                GradientRadius = 0.5,
+                GradientAngle = 135.0
+            };
+            radPaint.GradientStops.Add(new GradientStopData(0.0, "#FFFFFF", 1.0));
+            radPaint.GradientStops.Add(new GradientStopData(1.0, "#000000", 1.0));
+
+            Point startPt, endPt;
+            List<Point> stopPoints;
+            bool ok = GradientRollerEngine.GetGradientPoints(node, radPaint, out startPt, out endPt, out stopPoints);
+            Assert(ok, "GetGradientPoints returns true for RadialGradient");
+
+            // Center point should be at (node.X + w * 0.2, node.Y + h * 0.8) = (40, 80)
+            Assert(Math.Abs(startPt.X - 40.0) < 0.1, "Radial gradient center X accurately computed in canvas space");
+            Assert(Math.Abs(startPt.Y - 80.0) < 0.1, "Radial gradient center Y accurately computed in canvas space");
+
+            // Radius handle endPt should be angled at 135° from center
+            double radAngle = Math.Atan2(endPt.Y - startPt.Y, endPt.X - startPt.X) * 180.0 / Math.PI;
+            if (radAngle < 0) radAngle += 360.0;
+            Assert(Math.Abs(radAngle - 135.0) < 0.5, "Radial gradient endPt handle accurately respects GradientAngle (135°)");
+
+            // Drag Start Handle (Center) to (150, 50)
+            GradientRollerEngine.UpdateStartHandleFromDrag(node, radPaint, new Point(150, 50), false);
+            Assert(Math.Abs(radPaint.GradientCenter.X - 0.75) < 0.01, "Freely dragging radial center updates GradientCenter.X");
+            Assert(Math.Abs(radPaint.GradientCenter.Y - 0.5) < 0.01, "Freely dragging radial center updates GradientCenter.Y");
+
+            // Drag End Handle (Radius) to (150, 0) - directly above center (angle 270° or -90°)
+            GradientRollerEngine.UpdateEndHandleFromDrag(node, radPaint, new Point(150, 0), false);
+            Assert(Math.Abs(radPaint.GradientAngle - 270.0) < 0.5, "Dragging radius handle freely updates radial angle to 270°");
+            Assert(Math.Abs(radPaint.GradientRadius - 0.5) < 0.05, "Dragging radius handle freely updates GradientRadius magnitude");
+
+            // 4. GPU Renderer Aspect Ratio Correction Verification
+            var gpu = new GpuRenderer();
+            var brush = gpu.CreateBrushFromPaint(radPaint, new Rect(0, 0, 200, 100)) as RadialGradientBrush;
+            Assert(brush != null, "CreateBrushFromPaint produces valid RadialGradientBrush");
+            Assert(brush.MappingMode == BrushMappingMode.RelativeToBoundingBox, "BrushMappingMode is RelativeToBoundingBox");
+            // Aspect ratio correction: minDim = 100. rx = 0.5 * 100 / 200 = 0.25. ry = 0.5 * 100 / 100 = 0.5
+            Assert(Math.Abs(brush.RadiusX - 0.25) < 0.01, "RadiusX is aspect-ratio corrected for non-square rectangles");
+            Assert(Math.Abs(brush.RadiusY - 0.50) < 0.01, "RadiusY is aspect-ratio corrected for non-square rectangles");
         }
     }
 }

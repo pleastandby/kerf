@@ -317,6 +317,9 @@ namespace Kerf.Model
         public string ImageRef { get; set; }
         public string ImageFillMode { get; set; } // Fill, Fit, Crop, Tile
 
+        // UI Expansion State
+        public bool IsExpanded { get; set; }
+
         public Paint()
         {
             Type = PaintType.Solid;
@@ -371,6 +374,7 @@ namespace Kerf.Model
                 GradientRadius = this.GradientRadius,
                 ImageRef = this.ImageRef,
                 ImageFillMode = this.ImageFillMode,
+                IsExpanded = this.IsExpanded,
                 GradientStops = new List<GradientStopData>()
             };
             if (GradientStops != null)
@@ -407,6 +411,7 @@ namespace Kerf.Model
 
         // UI Expansion State (collapsible)
         public bool? IsEffectsExpanded { get; set; }
+        public bool IsExpanded { get; set; }
 
         public StrokeData()
         {
@@ -446,7 +451,8 @@ namespace Kerf.Model
                 TaperEnd = this.TaperEnd,
                 TaperStartWidth = this.TaperStartWidth,
                 TaperEndWidth = this.TaperEndWidth,
-                IsEffectsExpanded = this.IsEffectsExpanded
+                IsEffectsExpanded = this.IsEffectsExpanded,
+                IsExpanded = this.IsExpanded
             };
             if (DashPattern != null)
             {

@@ -324,6 +324,17 @@ namespace Kerf.UI
         private LayerNode _editingGradientLayer = null;
         private GradientRampControl _activeGradientRamp = null;
 
+        // Fills and Strokes Drag-and-Drop Reordering State
+        private bool _isDraggingFillList = false;
+        private int _draggedFillIndex = -1;
+        private int _dragFillDropIndex = -1;
+        private Point _dragFillStartMouse;
+
+        private bool _isDraggingStrokeList = false;
+        private int _draggedStrokeIndex = -1;
+        private int _dragStrokeDropIndex = -1;
+        private Point _dragStrokeStartMouse;
+
         public void SetEditingGradient(LayerNode layer, Paint paint, GradientRampControl ramp = null)
         {
             _editingGradientLayer = layer;
@@ -7589,6 +7600,50 @@ namespace Kerf.UI
             }
         }
 
+        private Border CreateDragGripHandle()
+        {
+            var grip = new Border
+            {
+                Width = 14,
+                Height = 22,
+                Background = Brushes.Transparent,
+                Cursor = Cursors.SizeNS,
+                ToolTip = "Drag to rearrange order",
+                Margin = new Thickness(0, 0, 4, 0),
+                Child = new TextBlock
+                {
+                    Text = "⋮⋮",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(110, 125, 155)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            return grip;
+        }
+
+        private Border CreateSkeletonSlot(string label)
+        {
+            return new Border
+            {
+                Height = 28,
+                Margin = new Thickness(0, 0, 0, 6),
+                Background = new SolidColorBrush(Color.FromArgb(45, 70, 239, 177)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
+                BorderThickness = new Thickness(1.5),
+                CornerRadius = new CornerRadius(5),
+                Child = new TextBlock
+                {
+                    Text = "⇋  " + label,
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+        }
+
         private void BuildFillsSection(LayerNode primary)
         {
             if (primary.Fills == null) primary.Fills = new List<Paint>();
@@ -7612,243 +7667,438 @@ namespace Kerf.UI
                 return;
             }
 
-            for (int i = 0; i < primary.Fills.Count; i++)
+            var fillsContainer = new StackPanel();
+
+            // Smooth displacement and skeleton view if currently dragging
+            if (_isDraggingFillList && _draggedFillIndex >= 0 && _dragFillDropIndex >= 0 && _draggedFillIndex < primary.Fills.Count)
             {
-                int fillIdx = i;
-                var fill = primary.Fills[fillIdx];
+                var draggedItem = primary.Fills[_draggedFillIndex];
+                int n = primary.Fills.Count;
+                int dropIdx = Math.Max(0, Math.Min(n - 1, _dragFillDropIndex));
 
-                var card = new Border
+                var displaced = new List<Paint>();
+                for (int k = 0; k < n; k++)
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66)),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(5),
-                    Padding = new Thickness(6),
-                    Margin = new Thickness(0, 0, 0, 6)
-                };
-
-                var cardStack = new StackPanel();
-
-                // Top row: Eye, Type dropdown, Swatch, Delete button
-                var topRow = new DockPanel { LastChildFill = true };
-
-                var eyeBtn = new Button
-                {
-                    Template = CreateRoundedButtonTemplate(4),
-                    Content = fill.Enabled ? "👁" : "—",
-                    FontSize = 10,
-                    Width = 22,
-                    Height = 22,
-                    Background = fill.Enabled ? new SolidColorBrush(Color.FromRgb(35, 42, 60)) : Brushes.Transparent,
-                    Foreground = fill.Enabled ? Brushes.White : new SolidColorBrush(Color.FromRgb(100, 110, 130)),
-                    BorderThickness = new Thickness(0),
-                    Cursor = Cursors.Hand,
-                    ToolTip = fill.Enabled ? "Disable fill" : "Enable fill"
-                };
-                eyeBtn.Click += (s, e) =>
-                {
-                    fill.Enabled = !fill.Enabled;
-                    InvalidateAndRefresh(primary);
-                    RefreshPropertyInspector();
-                };
-                DockPanel.SetDock(eyeBtn, Dock.Left);
-                topRow.Children.Add(eyeBtn);
-
-                var delBtn = new Button
-                {
-                    Template = CreateRoundedButtonTemplate(4),
-                    Content = "✕",
-                    FontSize = 10,
-                    Width = 20,
-                    Height = 22,
-                    Background = Brushes.Transparent,
-                    Foreground = new SolidColorBrush(Color.FromRgb(150, 160, 180)),
-                    BorderThickness = new Thickness(0),
-                    Cursor = Cursors.Hand,
-                    ToolTip = "Remove fill"
-                };
-                delBtn.Click += (s, e) =>
-                {
-                    if (fillIdx < primary.Fills.Count)
-                    {
-                        primary.Fills.RemoveAt(fillIdx);
-                        InvalidateAndRefresh(primary);
-                        RefreshPropertyInspector();
-                    }
-                };
-                DockPanel.SetDock(delBtn, Dock.Right);
-                topRow.Children.Add(delBtn);
-
-                // Swatch
-                var swatch = new Border
-                {
-                    Width = 24,
-                    Height = 22,
-                    CornerRadius = new CornerRadius(3),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(60, 70, 95)),
-                    BorderThickness = new Thickness(1),
-                    Margin = new Thickness(4, 0, 6, 0),
-                    Cursor = Cursors.Hand,
-                    ToolTip = "Choose fill color/gradient"
-                };
-                if (fill.Type == PaintType.Solid)
-                {
-                    swatch.Background = new SolidColorBrush(GpuRenderer.ParseHexColor(fill.ColorHex, fill.Opacity));
+                    if (k != _draggedFillIndex) displaced.Add(primary.Fills[k]);
                 }
-                else if (fill.Type == PaintType.LinearGradient)
-                {
-                    var lgb = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
-                    GpuRenderer.PopulateGradientStops(lgb.GradientStops, fill);
-                    swatch.Background = lgb;
-                }
-                else
-                {
-                    var rgb = new RadialGradientBrush { Center = new Point(0.5, 0.5), GradientOrigin = new Point(0.5, 0.5), RadiusX = 0.5, RadiusY = 0.5 };
-                    GpuRenderer.PopulateGradientStops(rgb.GradientStops, fill);
-                    swatch.Background = rgb;
-                }
+                displaced.Insert(Math.Min(displaced.Count, dropIdx), draggedItem);
 
-                swatch.MouseLeftButtonUp += (s, e) =>
+                for (int k = 0; k < displaced.Count; k++)
                 {
-                    e.Handled = true;
-                    if (fill.Type != PaintType.Solid)
+                    var fill = displaced[k];
+                    if (fill == draggedItem)
                     {
-                        SetEditingGradient(primary, fill);
-                    }
-                    string initialColor = fill.ColorHex ?? "#D9D9D9";
-                    if (fill.Type == PaintType.LinearGradient && fill.GradientStops != null && fill.GradientStops.Count > 0)
-                        initialColor = fill.GradientStops[0].ColorHex;
-
-                    ColorPickerPopup.ShowAt(swatch, initialColor, newHex =>
-                    {
-                        fill.ColorHex = newHex;
-                        if (fill.GradientStops != null && fill.GradientStops.Count > 0)
-                        {
-                            fill.GradientStops[0].ColorHex = newHex;
-                        }
-                        InvalidateAndRefresh(primary);
-                        RefreshPropertyInspector();
-                    });
-                };
-                DockPanel.SetDock(swatch, Dock.Left);
-                topRow.Children.Add(swatch);
-
-                // Type combo
-                var typeCombo = CreateModernComboBox(22);
-                typeCombo.Margin = new Thickness(0, 0, 4, 0);
-                typeCombo.Items.Add(CreateModernComboBoxItem("Solid"));
-                typeCombo.Items.Add(CreateModernComboBoxItem("Linear Gradient"));
-                typeCombo.Items.Add(CreateModernComboBoxItem("Radial Gradient"));
-                typeCombo.SelectedIndex = (fill.Type == PaintType.LinearGradient) ? 1 : (fill.Type == PaintType.RadialGradient ? 2 : 0);
-                typeCombo.SelectionChanged += (s, e) =>
-                {
-                    if (typeCombo.SelectedIndex == 1)
-                    {
-                        fill.Type = PaintType.LinearGradient;
-                        if (fill.GradientStops == null || fill.GradientStops.Count == 0)
-                        {
-                            fill.GradientStops = new List<GradientStopData>
-                            {
-                                new GradientStopData(0.0, fill.ColorHex ?? "#D9D9D9", 1.0),
-                                new GradientStopData(1.0, "#4B5563", 1.0)
-                            };
-                        }
-                        SetEditingGradient(primary, fill);
-                    }
-                    else if (typeCombo.SelectedIndex == 2)
-                    {
-                        fill.Type = PaintType.RadialGradient;
-                        if (fill.GradientStops == null || fill.GradientStops.Count == 0)
-                        {
-                            fill.GradientStops = new List<GradientStopData>
-                            {
-                                new GradientStopData(0.0, fill.ColorHex ?? "#D9D9D9", 1.0),
-                                new GradientStopData(1.0, "#1F2937", 1.0)
-                            };
-                        }
-                        SetEditingGradient(primary, fill);
+                        fillsContainer.Children.Add(CreateSkeletonSlot("Drop Fill Here (Position " + (k + 1) + ")"));
+                        var ghost = BuildFillCard(primary, fill, _draggedFillIndex, fillsContainer, true);
+                        ghost.Opacity = 0.65;
+                        ghost.BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177));
+                        fillsContainer.Children.Add(ghost);
                     }
                     else
                     {
-                        fill.Type = PaintType.Solid;
-                        if (_editingGradientPaint == fill) ClearEditingGradient();
+                        int origIdx = primary.Fills.IndexOf(fill);
+                        fillsContainer.Children.Add(BuildFillCard(primary, fill, origIdx, fillsContainer, false));
                     }
-                    InvalidateAndRefresh(primary);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < primary.Fills.Count; i++)
+                {
+                    fillsContainer.Children.Add(BuildFillCard(primary, primary.Fills[i], i, fillsContainer, false));
+                }
+            }
+
+            _propertyInspectorStack.Children.Add(fillsContainer);
+        }
+
+        private Border BuildFillCard(LayerNode primary, Paint fill, int fillIdx, StackPanel fillsContainer, bool isGhost)
+        {
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(fill.IsExpanded ? 6 : 4, fill.IsExpanded ? 6 : 2, fill.IsExpanded ? 6 : 4, fill.IsExpanded ? 6 : 2),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+
+            var cardStack = new StackPanel();
+
+            // 1. Grip Handle for Drag & Drop
+            var grip = CreateDragGripHandle();
+            if (!isGhost)
+            {
+                grip.PreviewMouseLeftButtonDown += (s, e) =>
+                {
+                    _draggedFillIndex = fillIdx;
+                    _dragFillDropIndex = fillIdx;
+                    _dragFillStartMouse = e.GetPosition(_propertyInspectorStack);
+                    grip.CaptureMouse();
+                };
+                grip.PreviewMouseMove += (s, e) =>
+                {
+                    if (e.LeftButton == MouseButtonState.Pressed && _draggedFillIndex >= 0)
+                    {
+                        Point cur = e.GetPosition(_propertyInspectorStack);
+                        if (!_isDraggingFillList && Math.Abs(cur.Y - _dragFillStartMouse.Y) > 3)
+                        {
+                            _isDraggingFillList = true;
+                        }
+
+                        if (_isDraggingFillList)
+                        {
+                            Point posInList = e.GetPosition(fillsContainer);
+                            double totalH = Math.Max(1.0, fillsContainer.ActualHeight);
+                            int count = primary.Fills.Count;
+                            double slotH = totalH / count;
+                            int newDrop = (int)Math.Floor(posInList.Y / slotH);
+                            newDrop = Math.Max(0, Math.Min(count - 1, newDrop));
+                            if (newDrop != _dragFillDropIndex)
+                            {
+                                _dragFillDropIndex = newDrop;
+                                RefreshPropertyInspector();
+                            }
+                        }
+                    }
+                };
+                grip.PreviewMouseLeftButtonUp += (s, e) =>
+                {
+                    if (_isDraggingFillList && _draggedFillIndex >= 0 && _dragFillDropIndex >= 0 && _draggedFillIndex != _dragFillDropIndex)
+                    {
+                        var item = primary.Fills[_draggedFillIndex];
+                        primary.Fills.RemoveAt(_draggedFillIndex);
+                        primary.Fills.Insert(Math.Min(primary.Fills.Count, _dragFillDropIndex), item);
+                        InvalidateAndRefresh(primary);
+                    }
+                    grip.ReleaseMouseCapture();
+                    _isDraggingFillList = false;
+                    _draggedFillIndex = -1;
+                    _dragFillDropIndex = -1;
                     RefreshPropertyInspector();
                 };
-                topRow.Children.Add(typeCombo);
+            }
 
-                cardStack.Children.Add(topRow);
+            // 2. Swatch
+            var swatch = new Border
+            {
+                Width = 20,
+                Height = 20,
+                CornerRadius = new CornerRadius(3),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(60, 70, 95)),
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(2, 0, 6, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Choose fill color/gradient"
+            };
+            if (fill.Type == PaintType.Solid)
+            {
+                swatch.Background = new SolidColorBrush(GpuRenderer.ParseHexColor(fill.ColorHex, fill.Opacity));
+            }
+            else if (fill.Type == PaintType.LinearGradient)
+            {
+                var lgb = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
+                GpuRenderer.PopulateGradientStops(lgb.GradientStops, fill);
+                swatch.Background = lgb;
+            }
+            else
+            {
+                var rgb = new RadialGradientBrush { Center = new Point(0.5, 0.5), GradientOrigin = new Point(0.5, 0.5), RadiusX = 0.5, RadiusY = 0.5 };
+                GpuRenderer.PopulateGradientStops(rgb.GradientStops, fill);
+                swatch.Background = rgb;
+            }
 
-                // Opacity slider
-                var opRow = ScrubControls.CreateSmoothSlider("Opacity", Math.Round(fill.Opacity * 100), 0, 100, val =>
+            Action openColorOrExpand = new Action(() =>
+            {
+                if (fill.Type != PaintType.Solid)
                 {
-                    fill.Opacity = val / 100.0;
+                    // Automatic expansion for gradient options!
+                    fill.IsExpanded = true;
+                    SetEditingGradient(primary, fill);
                     InvalidateAndRefresh(primary);
-                }, "%");
-                cardStack.Children.Add(opRow);
-
-                // If Linear Gradient or Radial Gradient: Mount Figma-style Gradient Ramp & Controls
-                if (fill.Type == PaintType.LinearGradient || fill.Type == PaintType.RadialGradient)
+                    RefreshPropertyInspector();
+                }
+                else
                 {
-                    bool isEditingThis = (_editingGradientPaint == fill && _editingGradientLayer == primary);
-
-                    // Header row with "On-Canvas Roller" toggle button
-                    var toggleRow = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
-                    var rollerBtn = new Button
+                    ColorPickerPopup.ShowAt(swatch, fill.ColorHex ?? "#D9D9D9", newHex =>
                     {
-                        Template = CreateRoundedButtonTemplate(6),
-                        Content = isEditingThis ? "● Canvas Roller Active [Done]" : "✏ Edit on Canvas",
-                        FontSize = 10,
-                        FontWeight = FontWeights.SemiBold,
-                        Height = 22,
-                        Background = isEditingThis ? new SolidColorBrush(Color.FromRgb(20, 50, 110)) : new SolidColorBrush(Color.FromRgb(30, 36, 52)),
-                        Foreground = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(150, 165, 195)),
-                        BorderBrush = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(48, 58, 80)),
-                        BorderThickness = new Thickness(1),
-                        Cursor = Cursors.Hand,
-                        Padding = new Thickness(6, 0, 6, 0),
-                        ToolTip = isEditingThis ? "Click to exit on-canvas gradient editing (or press Esc)" : "Activate Figma on-canvas gradient handles & rollers"
-                    };
-
-                    GradientRampControl rampCtrl = null;
-                    rollerBtn.Click += (s, e) =>
-                    {
-                        if (_editingGradientPaint == fill)
-                            ClearEditingGradient();
-                        else
-                            SetEditingGradient(primary, fill, rampCtrl);
-                        RefreshPropertyInspector();
-                    };
-                    toggleRow.Children.Add(rollerBtn);
-                    cardStack.Children.Add(toggleRow);
-
-                    rampCtrl = new GradientRampControl(fill, () =>
-                    {
-                        SetEditingGradient(primary, fill, rampCtrl);
-                        InvalidateAndRefresh(primary);
-                    }, () =>
-                    {
-                        SetEditingGradient(primary, fill, rampCtrl);
+                        fill.ColorHex = newHex;
                         InvalidateAndRefresh(primary);
                         RefreshPropertyInspector();
                     });
-
-                    rampCtrl.PreviewMouseDown += (s, e) =>
-                    {
-                        if (_editingGradientPaint != fill)
-                        {
-                            SetEditingGradient(primary, fill, rampCtrl);
-                            RefreshPropertyInspector();
-                        }
-                    };
-
-                    cardStack.Children.Add(rampCtrl);
                 }
+            });
 
-                card.Child = cardStack;
-                _propertyInspectorStack.Children.Add(card);
+            swatch.MouseLeftButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                openColorOrExpand();
+            };
+
+            // 3. Eye Button
+            var eyeBtn = new Button
+            {
+                Template = CreateRoundedButtonTemplate(4),
+                Content = fill.Enabled ? "👁" : "—",
+                FontSize = 10,
+                Width = 20,
+                Height = 20,
+                Background = fill.Enabled ? new SolidColorBrush(Color.FromRgb(35, 42, 60)) : Brushes.Transparent,
+                Foreground = fill.Enabled ? Brushes.White : new SolidColorBrush(Color.FromRgb(100, 110, 130)),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = fill.Enabled ? "Disable fill" : "Enable fill",
+                Margin = new Thickness(2, 0, 2, 0)
+            };
+            eyeBtn.Click += (s, e) =>
+            {
+                fill.Enabled = !fill.Enabled;
+                InvalidateAndRefresh(primary);
+                RefreshPropertyInspector();
+            };
+
+            // 4. Chevron Button
+            var chevronBtn = new Button
+            {
+                Template = CreateRoundedButtonTemplate(4),
+                Content = fill.IsExpanded ? "▼" : "▶",
+                FontSize = 8.5,
+                Width = 18,
+                Height = 20,
+                Background = Brushes.Transparent,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = fill.IsExpanded ? "Collapse fill attributes" : "Expand all fill options"
+            };
+            chevronBtn.Click += (s, e) =>
+            {
+                fill.IsExpanded = !fill.IsExpanded;
+                if (fill.IsExpanded && fill.Type != PaintType.Solid)
+                {
+                    SetEditingGradient(primary, fill);
+                }
+                RefreshPropertyInspector();
+            };
+
+            // 5. Delete Button
+            var delBtn = new Button
+            {
+                Template = CreateRoundedButtonTemplate(4),
+                Content = "✕",
+                FontSize = 9.5,
+                Width = 18,
+                Height = 20,
+                Background = Brushes.Transparent,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 170)),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Remove fill"
+            };
+            delBtn.Click += (s, e) =>
+            {
+                if (fillIdx < primary.Fills.Count)
+                {
+                    primary.Fills.RemoveAt(fillIdx);
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                }
+            };
+
+            if (!fill.IsExpanded)
+            {
+                // SINGLE LINE LIST ITEM (Compact view with editable color only)
+                var row = new DockPanel { LastChildFill = true, Height = 22 };
+                DockPanel.SetDock(grip, Dock.Left);
+                row.Children.Add(grip);
+
+                DockPanel.SetDock(swatch, Dock.Left);
+                row.Children.Add(swatch);
+
+                DockPanel.SetDock(delBtn, Dock.Right);
+                row.Children.Add(delBtn);
+
+                DockPanel.SetDock(chevronBtn, Dock.Right);
+                row.Children.Add(chevronBtn);
+
+                DockPanel.SetDock(eyeBtn, Dock.Right);
+                row.Children.Add(eyeBtn);
+
+                var opText = new TextBlock
+                {
+                    Text = Math.Round(fill.Opacity * 100) + "%",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0, 6, 0),
+                    Width = 36,
+                    TextAlignment = TextAlignment.Right,
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Click to edit opacity"
+                };
+                opText.MouseLeftButtonUp += (s, e) =>
+                {
+                    fill.IsExpanded = true;
+                    RefreshPropertyInspector();
+                };
+                DockPanel.SetDock(opText, Dock.Right);
+                row.Children.Add(opText);
+
+                string labelText = (fill.Type == PaintType.Solid)
+                    ? (fill.ColorHex ?? "#D9D9D9").ToUpper()
+                    : ((fill.Type == PaintType.LinearGradient) ? "Linear Gradient" : "Radial Gradient");
+
+                var labelBlock = new TextBlock
+                {
+                    Text = labelText,
+                    FontSize = 10,
+                    FontWeight = (fill.Type == PaintType.Solid) ? FontWeights.Normal : FontWeights.SemiBold,
+                    Foreground = (fill.Type == PaintType.Solid) ? new SolidColorBrush(Color.FromRgb(215, 225, 245)) : new SolidColorBrush(Color.FromRgb(56, 189, 248)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Cursor = Cursors.Hand,
+                    ToolTip = (fill.Type != PaintType.Solid) ? "Click to open gradient options" : "Click to choose color"
+                };
+                labelBlock.MouseLeftButtonUp += (s, e) =>
+                {
+                    e.Handled = true;
+                    openColorOrExpand();
+                };
+                row.Children.Add(labelBlock);
+
+                card.Child = row;
+                return card;
             }
+
+            // EXPANDED VIEW WITH ALL OPTIONS
+            var topRow = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 6) };
+            DockPanel.SetDock(grip, Dock.Left);
+            topRow.Children.Add(grip);
+
+            DockPanel.SetDock(swatch, Dock.Left);
+            topRow.Children.Add(swatch);
+
+            DockPanel.SetDock(delBtn, Dock.Right);
+            topRow.Children.Add(delBtn);
+
+            DockPanel.SetDock(chevronBtn, Dock.Right);
+            topRow.Children.Add(chevronBtn);
+
+            DockPanel.SetDock(eyeBtn, Dock.Right);
+            topRow.Children.Add(eyeBtn);
+
+            var typeCombo = CreateModernComboBox(22);
+            typeCombo.Margin = new Thickness(2, 0, 4, 0);
+            typeCombo.Items.Add(CreateModernComboBoxItem("Solid"));
+            typeCombo.Items.Add(CreateModernComboBoxItem("Linear Gradient"));
+            typeCombo.Items.Add(CreateModernComboBoxItem("Radial Gradient"));
+            typeCombo.SelectedIndex = (fill.Type == PaintType.LinearGradient) ? 1 : (fill.Type == PaintType.RadialGradient ? 2 : 0);
+            typeCombo.SelectionChanged += (s, e) =>
+            {
+                if (typeCombo.SelectedIndex == 1)
+                {
+                    fill.Type = PaintType.LinearGradient;
+                    if (fill.GradientStops == null || fill.GradientStops.Count == 0)
+                    {
+                        fill.GradientStops = new List<GradientStopData>
+                        {
+                            new GradientStopData(0.0, fill.ColorHex ?? "#D9D9D9", 1.0),
+                            new GradientStopData(1.0, "#4B5563", 1.0)
+                        };
+                    }
+                    fill.IsExpanded = true;
+                    SetEditingGradient(primary, fill);
+                }
+                else if (typeCombo.SelectedIndex == 2)
+                {
+                    fill.Type = PaintType.RadialGradient;
+                    if (fill.GradientStops == null || fill.GradientStops.Count == 0)
+                    {
+                        fill.GradientStops = new List<GradientStopData>
+                        {
+                            new GradientStopData(0.0, fill.ColorHex ?? "#D9D9D9", 1.0),
+                            new GradientStopData(1.0, "#1F2937", 1.0)
+                        };
+                    }
+                    fill.IsExpanded = true;
+                    SetEditingGradient(primary, fill);
+                }
+                else
+                {
+                    fill.Type = PaintType.Solid;
+                    if (_editingGradientPaint == fill) ClearEditingGradient();
+                }
+                InvalidateAndRefresh(primary);
+                RefreshPropertyInspector();
+            };
+            topRow.Children.Add(typeCombo);
+            cardStack.Children.Add(topRow);
+
+            var opRow = ScrubControls.CreateSmoothSlider("Opacity", Math.Round(fill.Opacity * 100), 0, 100, val =>
+            {
+                fill.Opacity = val / 100.0;
+                InvalidateAndRefresh(primary);
+            }, "%");
+            cardStack.Children.Add(opRow);
+
+            if (fill.Type == PaintType.LinearGradient || fill.Type == PaintType.RadialGradient)
+            {
+                bool isEditingThis = (_editingGradientPaint == fill && _editingGradientLayer == primary);
+
+                var toggleRow = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
+                var rollerBtn = new Button
+                {
+                    Template = CreateRoundedButtonTemplate(6),
+                    Content = isEditingThis ? "● Canvas Roller Active [Done]" : "✏ Edit on Canvas",
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Height = 22,
+                    Background = isEditingThis ? new SolidColorBrush(Color.FromRgb(20, 50, 110)) : new SolidColorBrush(Color.FromRgb(30, 36, 52)),
+                    Foreground = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(150, 165, 195)),
+                    BorderBrush = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(48, 58, 80)),
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(6, 0, 6, 0),
+                    ToolTip = isEditingThis ? "Click to exit on-canvas gradient editing (or press Esc)" : "Activate Figma on-canvas gradient handles & rollers"
+                };
+
+                GradientRampControl rampCtrl = null;
+                rollerBtn.Click += (s, e) =>
+                {
+                    if (_editingGradientPaint == fill)
+                        ClearEditingGradient();
+                    else
+                        SetEditingGradient(primary, fill, rampCtrl);
+                    RefreshPropertyInspector();
+                };
+                toggleRow.Children.Add(rollerBtn);
+                cardStack.Children.Add(toggleRow);
+
+                rampCtrl = new GradientRampControl(fill, () =>
+                {
+                    SetEditingGradient(primary, fill, rampCtrl);
+                    InvalidateAndRefresh(primary);
+                }, () =>
+                {
+                    SetEditingGradient(primary, fill, rampCtrl);
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                });
+
+                rampCtrl.PreviewMouseDown += (s, e) =>
+                {
+                    if (_editingGradientPaint != fill)
+                    {
+                        SetEditingGradient(primary, fill, rampCtrl);
+                        RefreshPropertyInspector();
+                    }
+                };
+
+                cardStack.Children.Add(rampCtrl);
+            }
+
+            card.Child = cardStack;
+            return card;
         }
 
         private void BuildStrokesSection(LayerNode primary)
@@ -7874,355 +8124,621 @@ namespace Kerf.UI
                 return;
             }
 
-            for (int i = 0; i < primary.Strokes.Count; i++)
+            var strokesContainer = new StackPanel();
+
+            if (_isDraggingStrokeList && _draggedStrokeIndex >= 0 && _dragStrokeDropIndex >= 0 && _draggedStrokeIndex < primary.Strokes.Count)
             {
-                int strokeIdx = i;
-                var stroke = primary.Strokes[strokeIdx];
-                if (stroke.Paint == null) stroke.Paint = Paint.Solid("#000000");
+                var draggedItem = primary.Strokes[_draggedStrokeIndex];
+                int n = primary.Strokes.Count;
+                int dropIdx = Math.Max(0, Math.Min(n - 1, _dragStrokeDropIndex));
 
-                var card = new Border
+                var displaced = new List<StrokeData>();
+                for (int k = 0; k < n; k++)
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66)),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(5),
-                    Padding = new Thickness(6),
-                    Margin = new Thickness(0, 0, 0, 6)
-                };
-
-                var cardStack = new StackPanel();
-
-                // Top row: Eye, Swatch, Width, Delete
-                var topRow = new DockPanel { LastChildFill = true };
-
-                var eyeBtn = new Button
-                {
-                    Template = CreateRoundedButtonTemplate(4),
-                    Content = stroke.Enabled ? "👁" : "—",
-                    FontSize = 10,
-                    Width = 22,
-                    Height = 22,
-                    Background = stroke.Enabled ? new SolidColorBrush(Color.FromRgb(35, 42, 60)) : Brushes.Transparent,
-                    Foreground = stroke.Enabled ? Brushes.White : new SolidColorBrush(Color.FromRgb(100, 110, 130)),
-                    BorderThickness = new Thickness(0),
-                    Cursor = Cursors.Hand,
-                    ToolTip = stroke.Enabled ? "Disable stroke" : "Enable stroke"
-                };
-                eyeBtn.Click += (s, e) =>
-                {
-                    stroke.Enabled = !stroke.Enabled;
-                    InvalidateAndRefresh(primary);
-                    RefreshPropertyInspector();
-                };
-                DockPanel.SetDock(eyeBtn, Dock.Left);
-                topRow.Children.Add(eyeBtn);
-
-                var delBtn = new Button
-                {
-                    Template = CreateRoundedButtonTemplate(4),
-                    Content = "✕",
-                    FontSize = 10,
-                    Width = 20,
-                    Height = 22,
-                    Background = Brushes.Transparent,
-                    Foreground = new SolidColorBrush(Color.FromRgb(150, 160, 180)),
-                    BorderThickness = new Thickness(0),
-                    Cursor = Cursors.Hand,
-                    ToolTip = "Remove stroke"
-                };
-                delBtn.Click += (s, e) =>
-                {
-                    if (strokeIdx < primary.Strokes.Count)
-                    {
-                        primary.Strokes.RemoveAt(strokeIdx);
-                        InvalidateAndRefresh(primary);
-                        RefreshPropertyInspector();
-                    }
-                };
-                DockPanel.SetDock(delBtn, Dock.Right);
-                topRow.Children.Add(delBtn);
-
-                var swatch = new Border
-                {
-                    Width = 24,
-                    Height = 22,
-                    CornerRadius = new CornerRadius(3),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(60, 70, 95)),
-                    BorderThickness = new Thickness(1),
-                    Margin = new Thickness(4, 0, 6, 0),
-                    Cursor = Cursors.Hand,
-                    ToolTip = "Choose stroke color/gradient"
-                };
-                if (stroke.Paint.Type == PaintType.Solid)
-                {
-                    swatch.Background = new SolidColorBrush(GpuRenderer.ParseHexColor(stroke.Paint.ColorHex, stroke.Paint.Opacity));
+                    if (k != _draggedStrokeIndex) displaced.Add(primary.Strokes[k]);
                 }
-                else if (stroke.Paint.Type == PaintType.LinearGradient)
-                {
-                    var lgb = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
-                    GpuRenderer.PopulateGradientStops(lgb.GradientStops, stroke.Paint);
-                    swatch.Background = lgb;
-                }
-                else
-                {
-                    var rgb = new RadialGradientBrush { Center = new Point(0.5, 0.5), GradientOrigin = new Point(0.5, 0.5), RadiusX = 0.5, RadiusY = 0.5 };
-                    GpuRenderer.PopulateGradientStops(rgb.GradientStops, stroke.Paint);
-                    swatch.Background = rgb;
-                }
+                displaced.Insert(Math.Min(displaced.Count, dropIdx), draggedItem);
 
-                swatch.MouseLeftButtonUp += (s, e) =>
+                for (int k = 0; k < displaced.Count; k++)
                 {
-                    e.Handled = true;
-                    string initialColor = stroke.Paint.ColorHex ?? "#000000";
-                    if (stroke.Paint.GradientStops != null && stroke.Paint.GradientStops.Count > 0)
-                        initialColor = stroke.Paint.GradientStops[0].ColorHex;
-
-                    ColorPickerPopup.ShowAt(swatch, initialColor, newHex =>
+                    var stroke = displaced[k];
+                    if (stroke == draggedItem)
                     {
-                        stroke.Paint.ColorHex = newHex;
-                        if (stroke.Paint.GradientStops != null && stroke.Paint.GradientStops.Count > 0)
-                        {
-                            stroke.Paint.GradientStops[0].ColorHex = newHex;
-                        }
-                        InvalidateAndRefresh(primary);
-                        RefreshPropertyInspector();
-                    });
-                };
-                DockPanel.SetDock(swatch, Dock.Left);
-                topRow.Children.Add(swatch);
-
-                // Stroke Type Combo
-                var strokeTypeCombo = CreateModernComboBox(22, 65);
-                strokeTypeCombo.Margin = new Thickness(0, 0, 4, 0);
-                strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Solid"));
-                strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Linear"));
-                strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Radial"));
-                strokeTypeCombo.SelectedIndex = (stroke.Paint.Type == PaintType.LinearGradient) ? 1 : (stroke.Paint.Type == PaintType.RadialGradient ? 2 : 0);
-                strokeTypeCombo.SelectionChanged += (s, e) =>
-                {
-                    if (strokeTypeCombo.SelectedIndex == 1)
-                    {
-                        stroke.Paint.Type = PaintType.LinearGradient;
-                        if (stroke.Paint.GradientStops == null || stroke.Paint.GradientStops.Count == 0)
-                        {
-                            stroke.Paint.GradientStops = new List<GradientStopData>
-                            {
-                                new GradientStopData(0.0, stroke.Paint.ColorHex ?? "#000000", 1.0),
-                                new GradientStopData(1.0, "#6366F1", 1.0)
-                            };
-                        }
-                        SetEditingGradient(primary, stroke.Paint);
-                    }
-                    else if (strokeTypeCombo.SelectedIndex == 2)
-                    {
-                        stroke.Paint.Type = PaintType.RadialGradient;
-                        if (stroke.Paint.GradientStops == null || stroke.Paint.GradientStops.Count == 0)
-                        {
-                            stroke.Paint.GradientStops = new List<GradientStopData>
-                            {
-                                new GradientStopData(0.0, stroke.Paint.ColorHex ?? "#000000", 1.0),
-                                new GradientStopData(1.0, "#38BDF8", 1.0)
-                            };
-                        }
-                        SetEditingGradient(primary, stroke.Paint);
+                        strokesContainer.Children.Add(CreateSkeletonSlot("Drop Stroke Here (Position " + (k + 1) + ")"));
+                        var ghost = BuildStrokeCard(primary, stroke, _draggedStrokeIndex, strokesContainer, true);
+                        ghost.Opacity = 0.65;
+                        ghost.BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177));
+                        strokesContainer.Children.Add(ghost);
                     }
                     else
                     {
-                        stroke.Paint.Type = PaintType.Solid;
-                        if (_editingGradientPaint == stroke.Paint) ClearEditingGradient();
+                        int origIdx = primary.Strokes.IndexOf(stroke);
+                        strokesContainer.Children.Add(BuildStrokeCard(primary, stroke, origIdx, strokesContainer, false));
                     }
-                    InvalidateAndRefresh(primary);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < primary.Strokes.Count; i++)
+                {
+                    strokesContainer.Children.Add(BuildStrokeCard(primary, primary.Strokes[i], i, strokesContainer, false));
+                }
+            }
+
+            _propertyInspectorStack.Children.Add(strokesContainer);
+        }
+
+        private Border BuildStrokeCard(LayerNode primary, StrokeData stroke, int strokeIdx, StackPanel strokesContainer, bool isGhost)
+        {
+            if (stroke.Paint == null) stroke.Paint = Paint.Solid("#000000");
+
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(stroke.IsExpanded ? 6 : 4, stroke.IsExpanded ? 6 : 2, stroke.IsExpanded ? 6 : 4, stroke.IsExpanded ? 6 : 2),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+
+            var cardStack = new StackPanel();
+
+            // 1. Grip Handle
+            var grip = CreateDragGripHandle();
+            if (!isGhost)
+            {
+                grip.PreviewMouseLeftButtonDown += (s, e) =>
+                {
+                    _draggedStrokeIndex = strokeIdx;
+                    _dragStrokeDropIndex = strokeIdx;
+                    _dragStrokeStartMouse = e.GetPosition(_propertyInspectorStack);
+                    grip.CaptureMouse();
+                };
+                grip.PreviewMouseMove += (s, e) =>
+                {
+                    if (e.LeftButton == MouseButtonState.Pressed && _draggedStrokeIndex >= 0)
+                    {
+                        Point cur = e.GetPosition(_propertyInspectorStack);
+                        if (!_isDraggingStrokeList && Math.Abs(cur.Y - _dragStrokeStartMouse.Y) > 3)
+                        {
+                            _isDraggingStrokeList = true;
+                        }
+
+                        if (_isDraggingStrokeList)
+                        {
+                            Point posInList = e.GetPosition(strokesContainer);
+                            double totalH = Math.Max(1.0, strokesContainer.ActualHeight);
+                            int count = primary.Strokes.Count;
+                            double slotH = totalH / count;
+                            int newDrop = (int)Math.Floor(posInList.Y / slotH);
+                            newDrop = Math.Max(0, Math.Min(count - 1, newDrop));
+                            if (newDrop != _dragStrokeDropIndex)
+                            {
+                                _dragStrokeDropIndex = newDrop;
+                                RefreshPropertyInspector();
+                            }
+                        }
+                    }
+                };
+                grip.PreviewMouseLeftButtonUp += (s, e) =>
+                {
+                    if (_isDraggingStrokeList && _draggedStrokeIndex >= 0 && _dragStrokeDropIndex >= 0 && _draggedStrokeIndex != _dragStrokeDropIndex)
+                    {
+                        var item = primary.Strokes[_draggedStrokeIndex];
+                        primary.Strokes.RemoveAt(_draggedStrokeIndex);
+                        primary.Strokes.Insert(Math.Min(primary.Strokes.Count, _dragStrokeDropIndex), item);
+                        InvalidateAndRefresh(primary);
+                    }
+                    grip.ReleaseMouseCapture();
+                    _isDraggingStrokeList = false;
+                    _draggedStrokeIndex = -1;
+                    _dragStrokeDropIndex = -1;
                     RefreshPropertyInspector();
                 };
-                DockPanel.SetDock(strokeTypeCombo, Dock.Left);
-                topRow.Children.Add(strokeTypeCombo);
+            }
 
-                double startStrokeW = stroke.Width;
-                var widthField = ScrubControls.CreateScrubField("Width", stroke.Width, val =>
+            // 2. Swatch
+            var swatch = new Border
+            {
+                Width = 20,
+                Height = 20,
+                CornerRadius = new CornerRadius(3),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(60, 70, 95)),
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(2, 0, 6, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Choose stroke color/gradient"
+            };
+            if (stroke.Paint.Type == PaintType.Solid)
+            {
+                swatch.Background = new SolidColorBrush(GpuRenderer.ParseHexColor(stroke.Paint.ColorHex, stroke.Paint.Opacity));
+            }
+            else if (stroke.Paint.Type == PaintType.LinearGradient)
+            {
+                var lgb = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
+                GpuRenderer.PopulateGradientStops(lgb.GradientStops, stroke.Paint);
+                swatch.Background = lgb;
+            }
+            else
+            {
+                var rgb = new RadialGradientBrush { Center = new Point(0.5, 0.5), GradientOrigin = new Point(0.5, 0.5), RadiusX = 0.5, RadiusY = 0.5 };
+                GpuRenderer.PopulateGradientStops(rgb.GradientStops, stroke.Paint);
+                swatch.Background = rgb;
+            }
+
+            Action openStrokeColorOrExpand = new Action(() =>
+            {
+                if (stroke.Paint.Type != PaintType.Solid)
                 {
-                    stroke.Width = Math.Max(0, val);
-                    stroke.Enabled = (stroke.Width > 0);
+                    stroke.IsExpanded = true;
+                    SetEditingGradient(primary, stroke.Paint);
                     InvalidateAndRefresh(primary);
-                    if (_currentStudioMode == StudioMode.Animate)
-                    {
-                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeWidth, stroke.Width);
-                    }
-                }, min: 0, max: 200, suffix: "px", onDragComplete: () =>
+                    RefreshPropertyInspector();
+                }
+                else
                 {
-                    double finalW = stroke.Width;
-                    if (Math.Abs(finalW - startStrokeW) > 1e-6)
+                    ColorPickerPopup.ShowAt(swatch, stroke.Paint.ColorHex ?? "#000000", newHex =>
                     {
-                        if (_currentStudioMode == StudioMode.Animate)
-                        {
-                            CommitKeyframeValueChange(primary, PropKey.StrokeWidth, startStrokeW, finalW);
-                        }
-                        startStrokeW = finalW;
-                    }
-                });
-                topRow.Children.Add(CreateAnimatedPropertyField(widthField, primary, PropKey.StrokeWidth));
-
-                cardStack.Children.Add(topRow);
-
-                // If Linear or Radial Gradient: Mount Figma-style Gradient Ramp & Controls
-                if (stroke.Paint.Type == PaintType.LinearGradient || stroke.Paint.Type == PaintType.RadialGradient)
-                {
-                    bool isEditingThis = (_editingGradientPaint == stroke.Paint && _editingGradientLayer == primary);
-
-                    var toggleRow = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
-                    var rollerBtn = new Button
-                    {
-                        Template = CreateRoundedButtonTemplate(6),
-                        Content = isEditingThis ? "● Canvas Roller Active [Done]" : "✏ Edit on Canvas",
-                        FontSize = 10,
-                        FontWeight = FontWeights.SemiBold,
-                        Height = 22,
-                        Background = isEditingThis ? new SolidColorBrush(Color.FromRgb(20, 50, 110)) : new SolidColorBrush(Color.FromRgb(30, 36, 52)),
-                        Foreground = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(150, 165, 195)),
-                        BorderBrush = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(48, 58, 80)),
-                        BorderThickness = new Thickness(1),
-                        Cursor = Cursors.Hand,
-                        Padding = new Thickness(6, 0, 6, 0),
-                        ToolTip = isEditingThis ? "Click to exit on-canvas gradient editing (or press Esc)" : "Activate Figma on-canvas gradient handles & rollers"
-                    };
-
-                    GradientRampControl strokeRamp = null;
-                    rollerBtn.Click += (s, e) =>
-                    {
-                        if (_editingGradientPaint == stroke.Paint)
-                            ClearEditingGradient();
-                        else
-                            SetEditingGradient(primary, stroke.Paint, strokeRamp);
-                        RefreshPropertyInspector();
-                    };
-                    toggleRow.Children.Add(rollerBtn);
-                    cardStack.Children.Add(toggleRow);
-
-                    strokeRamp = new GradientRampControl(stroke.Paint, () =>
-                    {
-                        SetEditingGradient(primary, stroke.Paint, strokeRamp);
-                        InvalidateAndRefresh(primary);
-                    }, () =>
-                    {
-                        SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                        stroke.Paint.ColorHex = newHex;
                         InvalidateAndRefresh(primary);
                         RefreshPropertyInspector();
                     });
-
-                    strokeRamp.PreviewMouseDown += (s, e) =>
-                    {
-                        if (_editingGradientPaint != stroke.Paint)
-                        {
-                            SetEditingGradient(primary, stroke.Paint, strokeRamp);
-                            RefreshPropertyInspector();
-                        }
-                    };
-
-                    cardStack.Children.Add(strokeRamp);
                 }
+            });
 
-                // Alignment & Cap row
-                var alignRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
-                alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
-                alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            swatch.MouseLeftButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                openStrokeColorOrExpand();
+            };
 
-                var alignCombo = CreateModernComboBox(22);
-                alignCombo.Items.Add(CreateModernComboBoxItem("Center"));
-                alignCombo.Items.Add(CreateModernComboBoxItem("Inside"));
-                alignCombo.Items.Add(CreateModernComboBoxItem("Outside"));
-                alignCombo.SelectedIndex = (stroke.Alignment == StrokeAlignment.Inside) ? 1 : (stroke.Alignment == StrokeAlignment.Outside ? 2 : 0);
-                alignCombo.SelectionChanged += (s, e) =>
+            // 3. Eye Button
+            var eyeBtn = new Button
+            {
+                Template = CreateRoundedButtonTemplate(4),
+                Content = stroke.Enabled ? "👁" : "—",
+                FontSize = 10,
+                Width = 20,
+                Height = 20,
+                Background = stroke.Enabled ? new SolidColorBrush(Color.FromRgb(35, 42, 60)) : Brushes.Transparent,
+                Foreground = stroke.Enabled ? Brushes.White : new SolidColorBrush(Color.FromRgb(100, 110, 130)),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = stroke.Enabled ? "Disable stroke" : "Enable stroke",
+                Margin = new Thickness(2, 0, 2, 0)
+            };
+            eyeBtn.Click += (s, e) =>
+            {
+                stroke.Enabled = !stroke.Enabled;
+                InvalidateAndRefresh(primary);
+                RefreshPropertyInspector();
+            };
+
+            // 4. Chevron Button
+            var chevronBtn = new Button
+            {
+                Template = CreateRoundedButtonTemplate(4),
+                Content = stroke.IsExpanded ? "▼" : "▶",
+                FontSize = 8.5,
+                Width = 18,
+                Height = 20,
+                Background = Brushes.Transparent,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = stroke.IsExpanded ? "Collapse stroke attributes" : "Expand all stroke options"
+            };
+            chevronBtn.Click += (s, e) =>
+            {
+                stroke.IsExpanded = !stroke.IsExpanded;
+                if (stroke.IsExpanded && stroke.Paint.Type != PaintType.Solid)
                 {
-                    if (alignCombo.SelectedIndex == 1) stroke.Alignment = StrokeAlignment.Inside;
-                    else if (alignCombo.SelectedIndex == 2) stroke.Alignment = StrokeAlignment.Outside;
-                    else stroke.Alignment = StrokeAlignment.Center;
+                    SetEditingGradient(primary, stroke.Paint);
+                }
+                RefreshPropertyInspector();
+            };
+
+            // 5. Delete Button
+            var delBtn = new Button
+            {
+                Template = CreateRoundedButtonTemplate(4),
+                Content = "✕",
+                FontSize = 9.5,
+                Width = 18,
+                Height = 20,
+                Background = Brushes.Transparent,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 170)),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Remove stroke"
+            };
+            delBtn.Click += (s, e) =>
+            {
+                if (strokeIdx < primary.Strokes.Count)
+                {
+                    primary.Strokes.RemoveAt(strokeIdx);
                     InvalidateAndRefresh(primary);
-                };
-                Grid.SetColumn(alignCombo, 0);
-                alignRow.Children.Add(alignCombo);
+                    RefreshPropertyInspector();
+                }
+            };
 
-                var capCombo = CreateModernComboBox(22);
-                capCombo.Items.Add(CreateModernComboBoxItem("Flat Cap"));
-                capCombo.Items.Add(CreateModernComboBoxItem("Round Cap"));
-                capCombo.Items.Add(CreateModernComboBoxItem("Square Cap"));
-                capCombo.SelectedIndex = (stroke.Cap == StrokeCap.Round) ? 1 : (stroke.Cap == StrokeCap.Square ? 2 : 0);
-                capCombo.SelectionChanged += (s, e) =>
+            if (!stroke.IsExpanded)
+            {
+                // SINGLE LINE LIST ITEM (Compact view with editable color only)
+                var row = new DockPanel { LastChildFill = true, Height = 22 };
+                DockPanel.SetDock(grip, Dock.Left);
+                row.Children.Add(grip);
+
+                DockPanel.SetDock(swatch, Dock.Left);
+                row.Children.Add(swatch);
+
+                DockPanel.SetDock(delBtn, Dock.Right);
+                row.Children.Add(delBtn);
+
+                DockPanel.SetDock(chevronBtn, Dock.Right);
+                row.Children.Add(chevronBtn);
+
+                DockPanel.SetDock(eyeBtn, Dock.Right);
+                row.Children.Add(eyeBtn);
+
+                var wText = new TextBlock
                 {
-                    if (capCombo.SelectedIndex == 1) stroke.Cap = StrokeCap.Round;
-                    else if (capCombo.SelectedIndex == 2) stroke.Cap = StrokeCap.Square;
-                    else stroke.Cap = StrokeCap.Flat;
-                    InvalidateAndRefresh(primary);
-                };
-                Grid.SetColumn(capCombo, 2);
-                alignRow.Children.Add(capCombo);
-
-                cardStack.Children.Add(alignRow);
-
-                // --- STROKE EFFECTS COLLAPSIBLE PANEL ---
-                bool isTrimmed = (stroke.TrimStart > 0.001 || stroke.TrimEnd < 0.999 || Math.Abs(stroke.TrimOffset) > 0.001);
-                bool isTapered = (stroke.TaperStart > 0.001 || stroke.TaperEnd > 0.001 || stroke.TaperStartWidth > 0.001 || stroke.TaperEndWidth > 0.001);
-                bool isEffectUsed = isTrimmed || isTapered;
-                bool isEffectsExpanded = stroke.IsEffectsExpanded.HasValue ? stroke.IsEffectsExpanded.Value : isEffectUsed;
-
-                var effectsToggleRow = new Border
-                {
-                    Margin = new Thickness(0, 6, 0, 2),
-                    Padding = new Thickness(6, 4, 6, 4),
-                    Background = new SolidColorBrush(Color.FromRgb(26, 32, 46)),
-                    CornerRadius = new CornerRadius(4),
-                    Cursor = Cursors.Hand
-                };
-
-                var toggleGrid = new Grid();
-                toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Arrow
-                toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Title
-                toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Badge / Reset
-
-                var arrowText = new TextBlock
-                {
-                    Text = isEffectsExpanded ? "▼" : "▶",
-                    FontSize = 8.5,
+                    Text = Math.Round(stroke.Width, 1) + "px",
+                    FontSize = 10,
                     Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
-                    Margin = new Thickness(0, 0, 6, 0),
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0, 6, 0),
+                    Width = 36,
+                    TextAlignment = TextAlignment.Right,
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Click to edit stroke options"
                 };
-                Grid.SetColumn(arrowText, 0);
-                toggleGrid.Children.Add(arrowText);
-
-                var effectsTitle = new TextBlock
+                wText.MouseLeftButtonUp += (s, e) =>
                 {
-                    Text = "STROKE EFFECTS",
+                    stroke.IsExpanded = true;
+                    RefreshPropertyInspector();
+                };
+                DockPanel.SetDock(wText, Dock.Right);
+                row.Children.Add(wText);
+
+                string labelText = (stroke.Paint.Type == PaintType.Solid)
+                    ? (stroke.Paint.ColorHex ?? "#000000").ToUpper()
+                    : ((stroke.Paint.Type == PaintType.LinearGradient) ? "Linear Gradient" : "Radial Gradient");
+
+                var labelBlock = new TextBlock
+                {
+                    Text = labelText,
+                    FontSize = 10,
+                    FontWeight = (stroke.Paint.Type == PaintType.Solid) ? FontWeights.Normal : FontWeights.SemiBold,
+                    Foreground = (stroke.Paint.Type == PaintType.Solid) ? new SolidColorBrush(Color.FromRgb(215, 225, 245)) : new SolidColorBrush(Color.FromRgb(56, 189, 248)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Cursor = Cursors.Hand,
+                    ToolTip = (stroke.Paint.Type != PaintType.Solid) ? "Click to open gradient options" : "Click to choose color"
+                };
+                labelBlock.MouseLeftButtonUp += (s, e) =>
+                {
+                    e.Handled = true;
+                    openStrokeColorOrExpand();
+                };
+                row.Children.Add(labelBlock);
+
+                card.Child = row;
+                return card;
+            }
+
+            // EXPANDED VIEW WITH ALL OPTIONS
+            var topRow = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 6) };
+            DockPanel.SetDock(grip, Dock.Left);
+            topRow.Children.Add(grip);
+
+            DockPanel.SetDock(swatch, Dock.Left);
+            topRow.Children.Add(swatch);
+
+            DockPanel.SetDock(delBtn, Dock.Right);
+            topRow.Children.Add(delBtn);
+
+            DockPanel.SetDock(chevronBtn, Dock.Right);
+            topRow.Children.Add(chevronBtn);
+
+            DockPanel.SetDock(eyeBtn, Dock.Right);
+            topRow.Children.Add(eyeBtn);
+
+            var strokeTypeCombo = CreateModernComboBox(22, 65);
+            strokeTypeCombo.Margin = new Thickness(2, 0, 4, 0);
+            strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Solid"));
+            strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Linear"));
+            strokeTypeCombo.Items.Add(CreateModernComboBoxItem("Radial"));
+            strokeTypeCombo.SelectedIndex = (stroke.Paint.Type == PaintType.LinearGradient) ? 1 : (stroke.Paint.Type == PaintType.RadialGradient ? 2 : 0);
+            strokeTypeCombo.SelectionChanged += (s, e) =>
+            {
+                if (strokeTypeCombo.SelectedIndex == 1)
+                {
+                    stroke.Paint.Type = PaintType.LinearGradient;
+                    if (stroke.Paint.GradientStops == null || stroke.Paint.GradientStops.Count == 0)
+                    {
+                        stroke.Paint.GradientStops = new List<GradientStopData>
+                        {
+                            new GradientStopData(0.0, stroke.Paint.ColorHex ?? "#000000", 1.0),
+                            new GradientStopData(1.0, "#6366F1", 1.0)
+                        };
+                    }
+                    stroke.IsExpanded = true;
+                    SetEditingGradient(primary, stroke.Paint);
+                }
+                else if (strokeTypeCombo.SelectedIndex == 2)
+                {
+                    stroke.Paint.Type = PaintType.RadialGradient;
+                    if (stroke.Paint.GradientStops == null || stroke.Paint.GradientStops.Count == 0)
+                    {
+                        stroke.Paint.GradientStops = new List<GradientStopData>
+                        {
+                            new GradientStopData(0.0, stroke.Paint.ColorHex ?? "#000000", 1.0),
+                            new GradientStopData(1.0, "#38BDF8", 1.0)
+                        };
+                    }
+                    stroke.IsExpanded = true;
+                    SetEditingGradient(primary, stroke.Paint);
+                }
+                else
+                {
+                    stroke.Paint.Type = PaintType.Solid;
+                    if (_editingGradientPaint == stroke.Paint) ClearEditingGradient();
+                }
+                InvalidateAndRefresh(primary);
+                RefreshPropertyInspector();
+            };
+            DockPanel.SetDock(strokeTypeCombo, Dock.Left);
+            topRow.Children.Add(strokeTypeCombo);
+
+            double startStrokeW = stroke.Width;
+            var widthField = ScrubControls.CreateScrubField("Width", stroke.Width, val =>
+            {
+                stroke.Width = Math.Max(0, val);
+                stroke.Enabled = (stroke.Width > 0);
+                InvalidateAndRefresh(primary);
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    AutoKeyPropertyLivePreview(primary, PropKey.StrokeWidth, stroke.Width);
+                }
+            }, min: 0, max: 200, suffix: "px", onDragComplete: () =>
+            {
+                double finalW = stroke.Width;
+                if (Math.Abs(finalW - startStrokeW) > 1e-6)
+                {
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        CommitKeyframeValueChange(primary, PropKey.StrokeWidth, startStrokeW, finalW);
+                    }
+                    startStrokeW = finalW;
+                }
+            });
+            topRow.Children.Add(CreateAnimatedPropertyField(widthField, primary, PropKey.StrokeWidth));
+
+            cardStack.Children.Add(topRow);
+
+            if (stroke.Paint.Type == PaintType.LinearGradient || stroke.Paint.Type == PaintType.RadialGradient)
+            {
+                bool isEditingThis = (_editingGradientPaint == stroke.Paint && _editingGradientLayer == primary);
+
+                var toggleRow = new DockPanel { Margin = new Thickness(0, 2, 0, 4) };
+                var rollerBtn = new Button
+                {
+                    Template = CreateRoundedButtonTemplate(6),
+                    Content = isEditingThis ? "● Canvas Roller Active [Done]" : "✏ Edit on Canvas",
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Height = 22,
+                    Background = isEditingThis ? new SolidColorBrush(Color.FromRgb(20, 50, 110)) : new SolidColorBrush(Color.FromRgb(30, 36, 52)),
+                    Foreground = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(150, 165, 195)),
+                    BorderBrush = isEditingThis ? new SolidColorBrush(Color.FromRgb(56, 189, 248)) : new SolidColorBrush(Color.FromRgb(48, 58, 80)),
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(6, 0, 6, 0),
+                    ToolTip = isEditingThis ? "Click to exit on-canvas gradient editing (or press Esc)" : "Activate Figma on-canvas gradient handles & rollers"
+                };
+
+                GradientRampControl strokeRamp = null;
+                rollerBtn.Click += (s, e) =>
+                {
+                    if (_editingGradientPaint == stroke.Paint)
+                        ClearEditingGradient();
+                    else
+                        SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                    RefreshPropertyInspector();
+                };
+                toggleRow.Children.Add(rollerBtn);
+                cardStack.Children.Add(toggleRow);
+
+                strokeRamp = new GradientRampControl(stroke.Paint, () =>
+                {
+                    SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                    InvalidateAndRefresh(primary);
+                }, () =>
+                {
+                    SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                });
+
+                strokeRamp.PreviewMouseDown += (s, e) =>
+                {
+                    if (_editingGradientPaint != stroke.Paint)
+                    {
+                        SetEditingGradient(primary, stroke.Paint, strokeRamp);
+                        RefreshPropertyInspector();
+                    }
+                };
+
+                cardStack.Children.Add(strokeRamp);
+            }
+
+            // Alignment & Cap row
+            var alignRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+            alignRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var alignCombo = CreateModernComboBox(22);
+            alignCombo.Items.Add(CreateModernComboBoxItem("Center"));
+            alignCombo.Items.Add(CreateModernComboBoxItem("Inside"));
+            alignCombo.Items.Add(CreateModernComboBoxItem("Outside"));
+            alignCombo.SelectedIndex = (stroke.Alignment == StrokeAlignment.Inside) ? 1 : (stroke.Alignment == StrokeAlignment.Outside ? 2 : 0);
+            alignCombo.SelectionChanged += (s, e) =>
+            {
+                if (alignCombo.SelectedIndex == 1) stroke.Alignment = StrokeAlignment.Inside;
+                else if (alignCombo.SelectedIndex == 2) stroke.Alignment = StrokeAlignment.Outside;
+                else stroke.Alignment = StrokeAlignment.Center;
+                InvalidateAndRefresh(primary);
+            };
+            Grid.SetColumn(alignCombo, 0);
+            alignRow.Children.Add(alignCombo);
+
+            var capCombo = CreateModernComboBox(22);
+            capCombo.Items.Add(CreateModernComboBoxItem("Flat Cap"));
+            capCombo.Items.Add(CreateModernComboBoxItem("Round Cap"));
+            capCombo.Items.Add(CreateModernComboBoxItem("Square Cap"));
+            capCombo.SelectedIndex = (stroke.Cap == StrokeCap.Round) ? 1 : (stroke.Cap == StrokeCap.Square ? 2 : 0);
+            capCombo.SelectionChanged += (s, e) =>
+            {
+                if (capCombo.SelectedIndex == 1) stroke.Cap = StrokeCap.Round;
+                else if (capCombo.SelectedIndex == 2) stroke.Cap = StrokeCap.Square;
+                else stroke.Cap = StrokeCap.Flat;
+                InvalidateAndRefresh(primary);
+            };
+            Grid.SetColumn(capCombo, 2);
+            alignRow.Children.Add(capCombo);
+
+            cardStack.Children.Add(alignRow);
+
+            // --- STROKE EFFECTS COLLAPSIBLE PANEL ---
+            bool isTrimmed = (stroke.TrimStart > 0.001 || stroke.TrimEnd < 0.999 || Math.Abs(stroke.TrimOffset) > 0.001);
+            bool isTapered = (stroke.TaperStart > 0.001 || stroke.TaperEnd > 0.001 || stroke.TaperStartWidth > 0.001 || stroke.TaperEndWidth > 0.001);
+            bool isEffectUsed = isTrimmed || isTapered;
+            bool isEffectsExpanded = stroke.IsEffectsExpanded.HasValue ? stroke.IsEffectsExpanded.Value : isEffectUsed;
+
+            var effectsToggleRow = new Border
+            {
+                Margin = new Thickness(0, 6, 0, 2),
+                Padding = new Thickness(6, 4, 6, 4),
+                Background = new SolidColorBrush(Color.FromRgb(26, 32, 46)),
+                CornerRadius = new CornerRadius(4),
+                Cursor = Cursors.Hand
+            };
+
+            var toggleGrid = new Grid();
+            toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            toggleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var arrowText = new TextBlock
+            {
+                Text = isEffectsExpanded ? "▼" : "▶",
+                FontSize = 8.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(arrowText, 0);
+            toggleGrid.Children.Add(arrowText);
+
+            var effectsTitle = new TextBlock
+            {
+                Text = "STROKE EFFECTS",
+                FontSize = 9.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = isEffectUsed ? new SolidColorBrush(Color.FromRgb(70, 239, 177)) : new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(effectsTitle, 1);
+            toggleGrid.Children.Add(effectsTitle);
+
+            if (isEffectUsed)
+            {
+                var rightStack = new StackPanel { Orientation = Orientation.Horizontal };
+                var activeBadge = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(50, 70, 239, 177)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(4, 1, 4, 1),
+                    Margin = new Thickness(0, 0, 4, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = "Active",
+                        FontSize = 8,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(Color.FromRgb(70, 239, 177))
+                    }
+                };
+                rightStack.Children.Add(activeBadge);
+
+                var resetAllBtn = new Button
+                {
+                    Template = CreateRoundedButtonTemplate(3),
+                    Content = "Reset",
+                    FontSize = 9,
+                    Height = 16,
+                    Padding = new Thickness(4, 0, 4, 0),
+                    Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                    Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Reset all trim path and taper effects"
+                };
+                resetAllBtn.Click += (s, e) =>
+                {
+                    stroke.TrimStart = 0.0;
+                    stroke.TrimEnd = 1.0;
+                    stroke.TrimOffset = 0.0;
+                    stroke.TaperStart = 0.0;
+                    stroke.TaperEnd = 0.0;
+                    stroke.TaperStartWidth = 0.0;
+                    stroke.TaperEndWidth = 0.0;
+                    stroke.IsEffectsExpanded = false;
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                };
+                rightStack.Children.Add(resetAllBtn);
+
+                Grid.SetColumn(rightStack, 2);
+                toggleGrid.Children.Add(rightStack);
+            }
+
+            effectsToggleRow.Child = toggleGrid;
+            effectsToggleRow.MouseLeftButtonDown += (s, e) =>
+            {
+                stroke.IsEffectsExpanded = !isEffectsExpanded;
+                RefreshPropertyInspector();
+            };
+
+            cardStack.Children.Add(effectsToggleRow);
+
+            if (isEffectsExpanded)
+            {
+                var effectsContainer = new StackPanel { Margin = new Thickness(6, 4, 0, 2) };
+
+                // --- TRIM PATH CONTROLS ---
+                var trimHeader = new Grid { Margin = new Thickness(0, 6, 0, 4) };
+                trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var trimTitle = new TextBlock
+                {
+                    Text = "TRIM PATH",
                     FontSize = 9.5,
                     FontWeight = FontWeights.SemiBold,
-                    Foreground = isEffectUsed ? new SolidColorBrush(Color.FromRgb(70, 239, 177)) : new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                    Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
                     VerticalAlignment = VerticalAlignment.Center
                 };
-                Grid.SetColumn(effectsTitle, 1);
-                toggleGrid.Children.Add(effectsTitle);
+                Grid.SetColumn(trimTitle, 0);
+                trimHeader.Children.Add(trimTitle);
 
-                if (isEffectUsed)
+                if (isTrimmed)
                 {
-                    var rightStack = new StackPanel { Orientation = Orientation.Horizontal };
-                    var activeBadge = new Border
-                    {
-                        Background = new SolidColorBrush(Color.FromArgb(50, 70, 239, 177)),
-                        BorderBrush = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
-                        BorderThickness = new Thickness(1),
-                        CornerRadius = new CornerRadius(3),
-                        Padding = new Thickness(4, 1, 4, 1),
-                        Margin = new Thickness(0, 0, 4, 0),
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Child = new TextBlock
-                        {
-                            Text = "Active",
-                            FontSize = 8,
-                            FontWeight = FontWeights.SemiBold,
-                            Foreground = new SolidColorBrush(Color.FromRgb(70, 239, 177))
-                        }
-                    };
-                    rightStack.Children.Add(activeBadge);
-
-                    var resetAllBtn = new Button
+                    var resetTrimBtn = new Button
                     {
                         Template = CreateRoundedButtonTemplate(3),
                         Content = "Reset",
@@ -8233,304 +8749,240 @@ namespace Kerf.UI
                         Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
                         BorderThickness = new Thickness(0),
                         Cursor = Cursors.Hand,
-                        ToolTip = "Reset all trim path and taper effects"
+                        ToolTip = "Reset trim path to full outline (0% - 100%)"
                     };
-                    resetAllBtn.Click += (s, e) =>
+                    resetTrimBtn.Click += (s, e) =>
                     {
                         stroke.TrimStart = 0.0;
                         stroke.TrimEnd = 1.0;
                         stroke.TrimOffset = 0.0;
+                        if (stroke.TaperStart <= 0.001 && stroke.TaperEnd <= 0.001 && stroke.TaperStartWidth <= 0.001 && stroke.TaperEndWidth <= 0.001)
+                        {
+                            stroke.IsEffectsExpanded = false;
+                        }
+                        InvalidateAndRefresh(primary);
+                        RefreshPropertyInspector();
+                    };
+                    Grid.SetColumn(resetTrimBtn, 1);
+                    trimHeader.Children.Add(resetTrimBtn);
+                }
+                effectsContainer.Children.Add(trimHeader);
+
+                var trimStartEndGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                double startTrimS = stroke.TrimStart;
+                var trimStartField = ScrubControls.CreateScrubField("Start", Math.Round(stroke.TrimStart * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TrimStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimStart, stroke.TrimStart);
+                    }
+                }), 0.0, 100.0, 1.0, "%", "Trim Start percentage", 1, new Action(() =>
+                {
+                    double finalTrimS = stroke.TrimStart;
+                    if (Math.Abs(finalTrimS - startTrimS) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimStart, startTrimS, finalTrimS);
+                        }
+                        startTrimS = finalTrimS;
+                    }
+                }));
+                var animTrimStart = CreateAnimatedPropertyField(trimStartField, primary, PropKey.StrokeTrimStart);
+                Grid.SetColumn(animTrimStart, 0);
+                trimStartEndGrid.Children.Add(animTrimStart);
+
+                double startTrimE = stroke.TrimEnd;
+                var trimEndField = ScrubControls.CreateScrubField("End", Math.Round(stroke.TrimEnd * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TrimEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimEnd, stroke.TrimEnd);
+                    }
+                }), 0.0, 100.0, 1.0, "%", "Trim End percentage", 1, new Action(() =>
+                {
+                    double finalTrimE = stroke.TrimEnd;
+                    if (Math.Abs(finalTrimE - startTrimE) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimEnd, startTrimE, finalTrimE);
+                        }
+                        startTrimE = finalTrimE;
+                    }
+                }));
+                var animTrimEnd = CreateAnimatedPropertyField(trimEndField, primary, PropKey.StrokeTrimEnd);
+                Grid.SetColumn(animTrimEnd, 2);
+                trimStartEndGrid.Children.Add(animTrimEnd);
+
+                effectsContainer.Children.Add(trimStartEndGrid);
+
+                double startTrimOff = stroke.TrimOffset;
+                var trimOffsetField = ScrubControls.CreateScrubField("Offset", Math.Round(stroke.TrimOffset * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TrimOffset = val / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimOffset, stroke.TrimOffset);
+                    }
+                }), -360.0, 360.0, 1.0, "%", "Trim Offset shift percentage", 1, new Action(() =>
+                {
+                    double finalTrimOff = stroke.TrimOffset;
+                    if (Math.Abs(finalTrimOff - startTrimOff) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimOffset, startTrimOff, finalTrimOff);
+                        }
+                        startTrimOff = finalTrimOff;
+                    }
+                }));
+                var animTrimOffset = CreateAnimatedPropertyField(trimOffsetField, primary, PropKey.StrokeTrimOffset);
+                effectsContainer.Children.Add(animTrimOffset);
+
+                // --- STROKE TAPER CONTROLS ---
+                var taperHeader = new Grid { Margin = new Thickness(0, 6, 0, 4) };
+                taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var taperTitle = new TextBlock
+                {
+                    Text = "STROKE TAPER",
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(taperTitle, 0);
+                taperHeader.Children.Add(taperTitle);
+
+                if (isTapered)
+                {
+                    var resetTaperBtn = new Button
+                    {
+                        Template = CreateRoundedButtonTemplate(3),
+                        Content = "Reset",
+                        FontSize = 9,
+                        Height = 16,
+                        Padding = new Thickness(4, 0, 4, 0),
+                        Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                        Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                        BorderThickness = new Thickness(0),
+                        Cursor = Cursors.Hand,
+                        ToolTip = "Reset taper lengths and tips to uniform stroke"
+                    };
+                    resetTaperBtn.Click += (s, e) =>
+                    {
                         stroke.TaperStart = 0.0;
                         stroke.TaperEnd = 0.0;
                         stroke.TaperStartWidth = 0.0;
                         stroke.TaperEndWidth = 0.0;
-                        stroke.IsEffectsExpanded = false;
+                        if (stroke.TrimStart <= 0.001 && stroke.TrimEnd >= 0.999 && Math.Abs(stroke.TrimOffset) <= 0.001)
+                        {
+                            stroke.IsEffectsExpanded = false;
+                        }
                         InvalidateAndRefresh(primary);
                         RefreshPropertyInspector();
                     };
-                    rightStack.Children.Add(resetAllBtn);
-
-                    Grid.SetColumn(rightStack, 2);
-                    toggleGrid.Children.Add(rightStack);
+                    Grid.SetColumn(resetTaperBtn, 1);
+                    taperHeader.Children.Add(resetTaperBtn);
                 }
+                effectsContainer.Children.Add(taperHeader);
 
-                effectsToggleRow.Child = toggleGrid;
-                effectsToggleRow.MouseLeftButtonDown += (s, e) =>
+                var taperGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                double startTaperS = stroke.TaperStart;
+                var taperStartField = ScrubControls.CreateScrubField("Start Length", Math.Round(stroke.TaperStart * 100.0, 1), new Action<double>(val =>
                 {
-                    stroke.IsEffectsExpanded = !isEffectsExpanded;
-                    RefreshPropertyInspector();
-                };
-
-                cardStack.Children.Add(effectsToggleRow);
-
-                if (isEffectsExpanded)
+                    stroke.TaperStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperStart, stroke.TaperStart);
+                    }
+                }), 0.0, 100.0, 1.0, "%", "Taper Start length fraction", 1, new Action(() =>
                 {
-                    var effectsContainer = new StackPanel { Margin = new Thickness(6, 4, 0, 2) };
-
-                    // --- TRIM PATH CONTROLS ---
-                    var trimHeader = new Grid { Margin = new Thickness(0, 6, 0, 4) };
-                    trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                    var trimTitle = new TextBlock
+                    double finalTaperS = stroke.TaperStart;
+                    if (Math.Abs(finalTaperS - startTaperS) > 1e-6)
                     {
-                        Text = "TRIM PATH",
-                        FontSize = 9.5,
-                        FontWeight = FontWeights.SemiBold,
-                        Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
-                        VerticalAlignment = VerticalAlignment.Center
-                    };
-                    Grid.SetColumn(trimTitle, 0);
-                    trimHeader.Children.Add(trimTitle);
-
-                    if (isTrimmed)
-                    {
-                        var resetTrimBtn = new Button
+                        if (_currentStudioMode == StudioMode.Animate)
                         {
-                            Template = CreateRoundedButtonTemplate(3),
-                            Content = "Reset",
-                            FontSize = 9,
-                            Height = 16,
-                            Padding = new Thickness(4, 0, 4, 0),
-                            Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
-                            Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
-                            BorderThickness = new Thickness(0),
-                            Cursor = Cursors.Hand,
-                            ToolTip = "Reset trim path to full outline (0% - 100%)"
-                        };
-                        resetTrimBtn.Click += (s, e) =>
-                        {
-                            stroke.TrimStart = 0.0;
-                            stroke.TrimEnd = 1.0;
-                            stroke.TrimOffset = 0.0;
-                            if (stroke.TaperStart <= 0.001 && stroke.TaperEnd <= 0.001 && stroke.TaperStartWidth <= 0.001 && stroke.TaperEndWidth <= 0.001)
-                            {
-                                stroke.IsEffectsExpanded = false;
-                            }
-                            InvalidateAndRefresh(primary);
-                            RefreshPropertyInspector();
-                        };
-                        Grid.SetColumn(resetTrimBtn, 1);
-                        trimHeader.Children.Add(resetTrimBtn);
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTaperStart, startTaperS, finalTaperS);
+                        }
+                        startTaperS = finalTaperS;
                     }
-                    effectsContainer.Children.Add(trimHeader);
+                }));
+                var animTaperStart = CreateAnimatedPropertyField(taperStartField, primary, PropKey.StrokeTaperStart);
+                Grid.SetColumn(animTaperStart, 0);
+                taperGrid.Children.Add(animTaperStart);
 
-                    var trimStartEndGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-                    trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
-                    trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                    double startTrimS = stroke.TrimStart;
-                    var trimStartField = ScrubControls.CreateScrubField("Start", Math.Round(stroke.TrimStart * 100.0, 1), new Action<double>(val =>
+                double startTaperE = stroke.TaperEnd;
+                var taperEndField = ScrubControls.CreateScrubField("End Length", Math.Round(stroke.TaperEnd * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TaperEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
                     {
-                        stroke.TrimStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                        InvalidateAndRefresh(primary);
-                        if (_currentStudioMode == StudioMode.Animate)
-                        {
-                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimStart, stroke.TrimStart);
-                        }
-                    }), 0.0, 100.0, 1.0, "%", "Trim Start percentage", 1, new Action(() =>
-                    {
-                        double finalTrimS = stroke.TrimStart;
-                        if (Math.Abs(finalTrimS - startTrimS) > 1e-6)
-                        {
-                            if (_currentStudioMode == StudioMode.Animate)
-                            {
-                                CommitKeyframeValueChange(primary, PropKey.StrokeTrimStart, startTrimS, finalTrimS);
-                            }
-                            startTrimS = finalTrimS;
-                        }
-                    }));
-                    var animTrimStart = CreateAnimatedPropertyField(trimStartField, primary, PropKey.StrokeTrimStart);
-                    Grid.SetColumn(animTrimStart, 0);
-                    trimStartEndGrid.Children.Add(animTrimStart);
-
-                    double startTrimE = stroke.TrimEnd;
-                    var trimEndField = ScrubControls.CreateScrubField("End", Math.Round(stroke.TrimEnd * 100.0, 1), new Action<double>(val =>
-                    {
-                        stroke.TrimEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                        InvalidateAndRefresh(primary);
-                        if (_currentStudioMode == StudioMode.Animate)
-                        {
-                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimEnd, stroke.TrimEnd);
-                        }
-                    }), 0.0, 100.0, 1.0, "%", "Trim End percentage", 1, new Action(() =>
-                    {
-                        double finalTrimE = stroke.TrimEnd;
-                        if (Math.Abs(finalTrimE - startTrimE) > 1e-6)
-                        {
-                            if (_currentStudioMode == StudioMode.Animate)
-                            {
-                                CommitKeyframeValueChange(primary, PropKey.StrokeTrimEnd, startTrimE, finalTrimE);
-                            }
-                            startTrimE = finalTrimE;
-                        }
-                    }));
-                    var animTrimEnd = CreateAnimatedPropertyField(trimEndField, primary, PropKey.StrokeTrimEnd);
-                    Grid.SetColumn(animTrimEnd, 2);
-                    trimStartEndGrid.Children.Add(animTrimEnd);
-
-                    effectsContainer.Children.Add(trimStartEndGrid);
-
-                    double startTrimOff = stroke.TrimOffset;
-                    var trimOffsetField = ScrubControls.CreateScrubField("Offset", Math.Round(stroke.TrimOffset * 100.0, 1), new Action<double>(val =>
-                    {
-                        stroke.TrimOffset = val / 100.0;
-                        InvalidateAndRefresh(primary);
-                        if (_currentStudioMode == StudioMode.Animate)
-                        {
-                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimOffset, stroke.TrimOffset);
-                        }
-                    }), -360.0, 360.0, 1.0, "%", "Trim Offset shift percentage", 1, new Action(() =>
-                    {
-                        double finalTrimOff = stroke.TrimOffset;
-                        if (Math.Abs(finalTrimOff - startTrimOff) > 1e-6)
-                        {
-                            if (_currentStudioMode == StudioMode.Animate)
-                            {
-                                CommitKeyframeValueChange(primary, PropKey.StrokeTrimOffset, startTrimOff, finalTrimOff);
-                            }
-                            startTrimOff = finalTrimOff;
-                        }
-                    }));
-                    var animTrimOffset = CreateAnimatedPropertyField(trimOffsetField, primary, PropKey.StrokeTrimOffset);
-                    effectsContainer.Children.Add(animTrimOffset);
-
-                    // --- STROKE TAPER CONTROLS ---
-                    var taperHeader = new Grid { Margin = new Thickness(0, 6, 0, 4) };
-                    taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                    var taperTitle = new TextBlock
-                    {
-                        Text = "STROKE TAPER",
-                        FontSize = 9.5,
-                        FontWeight = FontWeights.SemiBold,
-                        Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
-                        VerticalAlignment = VerticalAlignment.Center
-                    };
-                    Grid.SetColumn(taperTitle, 0);
-                    taperHeader.Children.Add(taperTitle);
-
-                    if (isTapered)
-                    {
-                        var resetTaperBtn = new Button
-                        {
-                            Template = CreateRoundedButtonTemplate(3),
-                            Content = "Reset",
-                            FontSize = 9,
-                            Height = 16,
-                            Padding = new Thickness(4, 0, 4, 0),
-                            Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
-                            Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
-                            BorderThickness = new Thickness(0),
-                            Cursor = Cursors.Hand,
-                            ToolTip = "Reset taper lengths and tips to uniform stroke"
-                        };
-                        resetTaperBtn.Click += (s, e) =>
-                        {
-                            stroke.TaperStart = 0.0;
-                            stroke.TaperEnd = 0.0;
-                            stroke.TaperStartWidth = 0.0;
-                            stroke.TaperEndWidth = 0.0;
-                            if (stroke.TrimStart <= 0.001 && stroke.TrimEnd >= 0.999 && Math.Abs(stroke.TrimOffset) <= 0.001)
-                            {
-                                stroke.IsEffectsExpanded = false;
-                            }
-                            InvalidateAndRefresh(primary);
-                            RefreshPropertyInspector();
-                        };
-                        Grid.SetColumn(resetTaperBtn, 1);
-                        taperHeader.Children.Add(resetTaperBtn);
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperEnd, stroke.TaperEnd);
                     }
-                    effectsContainer.Children.Add(taperHeader);
-
-                    var taperGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-                    taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
-                    taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                    double startTaperS = stroke.TaperStart;
-                    var taperStartField = ScrubControls.CreateScrubField("Start Length", Math.Round(stroke.TaperStart * 100.0, 1), new Action<double>(val =>
+                }), 0.0, 100.0, 1.0, "%", "Taper End length fraction", 1, new Action(() =>
+                {
+                    double finalTaperE = stroke.TaperEnd;
+                    if (Math.Abs(finalTaperE - startTaperE) > 1e-6)
                     {
-                        stroke.TaperStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                        InvalidateAndRefresh(primary);
                         if (_currentStudioMode == StudioMode.Animate)
                         {
-                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperStart, stroke.TaperStart);
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTaperEnd, startTaperE, finalTaperE);
                         }
-                    }), 0.0, 100.0, 1.0, "%", "Taper Start length fraction", 1, new Action(() =>
-                    {
-                        double finalTaperS = stroke.TaperStart;
-                        if (Math.Abs(finalTaperS - startTaperS) > 1e-6)
-                        {
-                            if (_currentStudioMode == StudioMode.Animate)
-                            {
-                                CommitKeyframeValueChange(primary, PropKey.StrokeTaperStart, startTaperS, finalTaperS);
-                            }
-                            startTaperS = finalTaperS;
-                        }
-                    }));
-                    var animTaperStart = CreateAnimatedPropertyField(taperStartField, primary, PropKey.StrokeTaperStart);
-                    Grid.SetColumn(animTaperStart, 0);
-                    taperGrid.Children.Add(animTaperStart);
+                        startTaperE = finalTaperE;
+                    }
+                }));
+                var animTaperEnd = CreateAnimatedPropertyField(taperEndField, primary, PropKey.StrokeTaperEnd);
+                Grid.SetColumn(animTaperEnd, 2);
+                taperGrid.Children.Add(animTaperEnd);
 
-                    double startTaperE = stroke.TaperEnd;
-                    var taperEndField = ScrubControls.CreateScrubField("End Length", Math.Round(stroke.TaperEnd * 100.0, 1), new Action<double>(val =>
-                    {
-                        stroke.TaperEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                        InvalidateAndRefresh(primary);
-                        if (_currentStudioMode == StudioMode.Animate)
-                        {
-                            AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperEnd, stroke.TaperEnd);
-                        }
-                    }), 0.0, 100.0, 1.0, "%", "Taper End length fraction", 1, new Action(() =>
-                    {
-                        double finalTaperE = stroke.TaperEnd;
-                        if (Math.Abs(finalTaperE - startTaperE) > 1e-6)
-                        {
-                            if (_currentStudioMode == StudioMode.Animate)
-                            {
-                                CommitKeyframeValueChange(primary, PropKey.StrokeTaperEnd, startTaperE, finalTaperE);
-                            }
-                            startTaperE = finalTaperE;
-                        }
-                    }));
-                    var animTaperEnd = CreateAnimatedPropertyField(taperEndField, primary, PropKey.StrokeTaperEnd);
-                    Grid.SetColumn(animTaperEnd, 2);
-                    taperGrid.Children.Add(animTaperEnd);
+                effectsContainer.Children.Add(taperGrid);
 
-                    effectsContainer.Children.Add(taperGrid);
+                var taperTipGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                    var taperTipGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-                    taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
-                    taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                var startTipField = ScrubControls.CreateScrubField("Start Tip", Math.Round(stroke.TaperStartWidth * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TaperStartWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                }), 0.0, 100.0, 1.0, "%", "Start tip thickness fraction (0% = sharp point)");
+                Grid.SetColumn(startTipField, 0);
+                taperTipGrid.Children.Add(startTipField);
 
-                    var startTipField = ScrubControls.CreateScrubField("Start Tip", Math.Round(stroke.TaperStartWidth * 100.0, 1), new Action<double>(val =>
-                    {
-                        stroke.TaperStartWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                        InvalidateAndRefresh(primary);
-                    }), 0.0, 100.0, 1.0, "%", "Start tip thickness fraction (0% = sharp point)");
-                    Grid.SetColumn(startTipField, 0);
-                    taperTipGrid.Children.Add(startTipField);
+                var endTipField = ScrubControls.CreateScrubField("End Tip", Math.Round(stroke.TaperEndWidth * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TaperEndWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                }), 0.0, 100.0, 1.0, "%", "End tip thickness fraction (0% = sharp point)");
+                Grid.SetColumn(endTipField, 2);
+                taperTipGrid.Children.Add(endTipField);
 
-                    var endTipField = ScrubControls.CreateScrubField("End Tip", Math.Round(stroke.TaperEndWidth * 100.0, 1), new Action<double>(val =>
-                    {
-                        stroke.TaperEndWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
-                        InvalidateAndRefresh(primary);
-                    }), 0.0, 100.0, 1.0, "%", "End tip thickness fraction (0% = sharp point)");
-                    Grid.SetColumn(endTipField, 2);
-                    taperTipGrid.Children.Add(endTipField);
+                effectsContainer.Children.Add(taperTipGrid);
 
-                    effectsContainer.Children.Add(taperTipGrid);
-
-                    cardStack.Children.Add(effectsContainer);
-                }
-
-                card.Child = cardStack;
-                _propertyInspectorStack.Children.Add(card);
+                cardStack.Children.Add(effectsContainer);
             }
+
+            card.Child = cardStack;
+            return card;
         }
 
         private FrameworkElement CreateFigCraftColorRow(string hexVal, double opacityVal, Action<string> onHexChange, Action<double> onOpacityChange)

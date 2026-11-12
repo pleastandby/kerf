@@ -101,14 +101,12 @@ namespace Kerf.UI
             var linearBtn = CreateTypePill("Linear", _paint.Type == PaintType.LinearGradient, () =>
             {
                 _paint.Type = PaintType.LinearGradient;
-                if (_angleRow != null) _angleRow.Visibility = Visibility.Visible;
                 NotifyChange();
                 BuildUi();
             });
             var radialBtn = CreateTypePill("Radial", _paint.Type == PaintType.RadialGradient, () =>
             {
                 _paint.Type = PaintType.RadialGradient;
-                if (_angleRow != null) _angleRow.Visibility = Visibility.Collapsed;
                 NotifyChange();
                 BuildUi();
             });
@@ -126,13 +124,14 @@ namespace Kerf.UI
 
             mainStack.Children.Add(toolRow);
 
-            // 2. LINEAR ANGLE CONTROLS
+            // 2. GRADIENT ANGLE & RADIAL POSITION CONTROLS
             _angleRow = BuildAngleRow();
-            if (_paint.Type != PaintType.LinearGradient)
-            {
-                _angleRow.Visibility = Visibility.Collapsed;
-            }
             mainStack.Children.Add(_angleRow);
+
+            if (_paint.Type == PaintType.RadialGradient)
+            {
+                mainStack.Children.Add(BuildRadialParamsRow());
+            }
 
             // 3. FIGMA-STYLE GRADIENT RAMP TRACK WITH EMBEDDED CIRCULAR HANDLES
             var stageContainer = new Grid
@@ -711,6 +710,42 @@ namespace Kerf.UI
             dock.Children.Add(flipBtn);
 
             return dock;
+        }
+
+        private FrameworkElement BuildRadialParamsRow()
+        {
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var cxField = ScrubControls.CreateScrubField("Center X", Math.Round(_paint.GradientCenter.X * 100.0, 1), new Action<double>(val =>
+            {
+                _paint.GradientCenter = new Point(val / 100.0, _paint.GradientCenter.Y);
+                NotifyChange();
+            }), -100.0, 200.0, 1.0, "%", "Radial Center X position");
+            Grid.SetColumn(cxField, 0);
+            grid.Children.Add(cxField);
+
+            var cyField = ScrubControls.CreateScrubField("Center Y", Math.Round(_paint.GradientCenter.Y * 100.0, 1), new Action<double>(val =>
+            {
+                _paint.GradientCenter = new Point(_paint.GradientCenter.X, val / 100.0);
+                NotifyChange();
+            }), -100.0, 200.0, 1.0, "%", "Radial Center Y position");
+            Grid.SetColumn(cyField, 2);
+            grid.Children.Add(cyField);
+
+            var radField = ScrubControls.CreateScrubField("Radius", Math.Round(_paint.GradientRadius * 100.0, 1), new Action<double>(val =>
+            {
+                _paint.GradientRadius = Math.Max(0.05, val / 100.0);
+                NotifyChange();
+            }), 5.0, 300.0, 1.0, "%", "Radial Gradient Radius magnitude");
+            Grid.SetColumn(radField, 4);
+            grid.Children.Add(radField);
+
+            return grid;
         }
 
         private void ApplyAngleInput()
