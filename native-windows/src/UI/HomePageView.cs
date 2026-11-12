@@ -175,6 +175,36 @@ namespace Kerf.UI
             }, 8);
             rightStack.Children.Add(newBtn);
 
+            // Help / Runtime Documentation button (rounded ? button)
+            var helpBtn = new Button
+            {
+                Content = "?",
+                Width = 32,
+                Height = 32,
+                FontSize = 15,
+                FontWeight = FontWeights.Bold,
+                Foreground = KerfBrand.MintBrush,
+                Background = KerfBrand.DarkSlateBrush,
+                BorderBrush = KerfBrand.TealBrush,
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = "Runtime Integration Guide (React, Next.js, Web, Native)",
+                Template = KerfBrand.CreateRoundedButtonTemplate(16),
+                Margin = new Thickness(10, 0, 0, 0)
+            };
+            helpBtn.MouseEnter += (s, e) =>
+            {
+                helpBtn.BorderBrush = KerfBrand.MintBrush;
+                helpBtn.Background = new SolidColorBrush(Color.FromRgb(36, 42, 58));
+            };
+            helpBtn.MouseLeave += (s, e) =>
+            {
+                helpBtn.BorderBrush = KerfBrand.TealBrush;
+                helpBtn.Background = KerfBrand.DarkSlateBrush;
+            };
+            helpBtn.Click += (s, e) => ShowRuntimeGuideDialog();
+            rightStack.Children.Add(helpBtn);
+
             DockPanel.SetDock(rightStack, Dock.Right);
             dock.Children.Add(rightStack);
 
@@ -316,6 +346,13 @@ namespace Kerf.UI
             cardsGrid.Children.Add(card3);
 
             stack.Children.Add(cardsGrid);
+
+            var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 18, 0, 0) };
+            var docsBtn = KerfBrand.CreatePrimaryButton("📖 View React & Web Runtime Integration Guide", () => ShowRuntimeGuideDialog(), 8);
+            docsBtn.Height = 32;
+            docsBtn.Padding = new Thickness(18, 0, 18, 0);
+            actionRow.Children.Add(docsBtn);
+            stack.Children.Add(actionRow);
 
             banner.Child = stack;
             return banner;
@@ -675,6 +712,14 @@ namespace Kerf.UI
             {
                 OpenProjectFile(dlg.FileName);
             }
+        }
+
+        private void ShowRuntimeGuideDialog()
+        {
+            var dlg = new Dialogs.RuntimeGuideDialog();
+            var win = Window.GetWindow(this);
+            if (win != null) dlg.Owner = win;
+            dlg.ShowDialog();
         }
     }
 }

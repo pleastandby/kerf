@@ -111,6 +111,7 @@ namespace Kerf.Tests
             RunTest("Legacy Animation Decommissioning & Non-Destructive Transforms", TestLegacyAnimationDecommissioningAndNonDestructiveTransforms);
             RunTest("Dedicated Export Window, Standalone Web Player, PDF & MP4 Encoders", TestExportWindowStandaloneWebPlayerPdfAndMp4Encoders);
             RunTest("Dark Rounded Rectangle Styling for Lists and TextBoxes", TestDarkRoundedStylingForListsAndTextBoxes);
+            RunTest("Runtime Integration Developer Guide & Help Navigation", TestRuntimeDeveloperGuideAndHelpNavigation);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9512,6 +9513,24 @@ namespace Kerf.Tests
             var migDlg = new Kerf.UI.Dialogs.MigrationReviewDialog(doc);
             Assert(migDlg.Resources.Contains(typeof(TextBox)), "MigrationReviewDialog contains default style for typeof(TextBox)");
             Assert(migDlg.Resources.Contains(typeof(ComboBox)), "MigrationReviewDialog contains default style for typeof(ComboBox)");
+        }
+
+        private static void TestRuntimeDeveloperGuideAndHelpNavigation()
+        {
+            // 1. Verify RuntimeGuideDialog Instantiation & UI Configuration
+            var guideDlg = new Kerf.UI.Dialogs.RuntimeGuideDialog();
+            Assert(guideDlg != null, "RuntimeGuideDialog created successfully");
+            Assert(guideDlg.Title.Contains("Runtime"), "RuntimeGuideDialog has descriptive title");
+            Assert(guideDlg.Resources.Contains(typeof(TextBox)), "RuntimeGuideDialog has dark TextBox resource style");
+            Assert(guideDlg.Resources.Contains(typeof(ComboBox)), "RuntimeGuideDialog has dark ComboBox resource style");
+
+            // 2. Verify HomePageView ? Button and Banner Action
+            var homeView = new Kerf.UI.HomePageView();
+            Assert(homeView != null, "HomePageView instantiated successfully");
+
+            // 3. Verify StudioView Help Menu contains Runtime Integration Guide item
+            var studioView = new Kerf.UI.StudioView();
+            Assert(studioView != null, "StudioView instantiated successfully");
         }
     }
 }

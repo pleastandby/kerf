@@ -684,6 +684,8 @@ namespace Kerf.UI
 
             // 5. Help Menu
             var helpMenu = CreateTopMenuItem("_Help");
+            helpMenu.Items.Add(CreateSubMenuItem("_Runtime Integration Guide (React & Web)...", null, () => ShowRuntimeGuideDialog()));
+            helpMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             helpMenu.Items.Add(CreateSubMenuItem("_Keyboard Shortcuts", "F1", () => ShowShortcutsDialog()));
             helpMenu.Items.Add(CreateSubMenuItem("_About Kerf Studio...", null, () => ShowAboutDialog()));
             menu.Items.Add(helpMenu);
@@ -845,6 +847,14 @@ namespace Kerf.UI
             _selectedLayers.Clear();
             OnSelectionChanged();
             RefreshCanvas();
+        }
+
+        private void ShowRuntimeGuideDialog()
+        {
+            var dlg = new Kerf.UI.Dialogs.RuntimeGuideDialog();
+            var win = Window.GetWindow(this);
+            if (win != null) dlg.Owner = win;
+            dlg.ShowDialog();
         }
 
         private void ShowAboutDialog()
