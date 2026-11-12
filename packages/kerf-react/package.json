@@ -6,7 +6,12 @@
   "author": "Kerf Technologies",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kerf-design/kerf.git"
+    "url": "git+https://github.com/pleastandby/kerf.git",
+    "directory": "packages/kerf-react"
+  },
+  "homepage": "https://github.com/pleastandby/kerf/tree/master/packages/kerf-react#readme",
+  "bugs": {
+    "url": "https://github.com/pleastandby/kerf/issues"
   },
   "keywords": [
     "kerf",

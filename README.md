@@ -4,6 +4,7 @@
 ![DirectX](https://img.shields.io/badge/Graphics-Direct3D%2011%20Hardware-green)
 ![Rust](https://img.shields.io/badge/Engine-Rust%201.99%20Native%20SIMD-dea584?logo=rust)
 ![C# / WPF](https://img.shields.io/badge/.NET%20Framework-4.8%20WPF-512BD4?logo=csharp)
+[![npm version](https://img.shields.io/npm/v/kerf-react.svg?logo=npm&color=CB3837)](https://www.npmjs.com/package/kerf-react)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **Kerf Studio** is a standalone, GPU-accelerated native Windows desktop application for professional vector design, Bézier path manipulation, and component layout. Built with a Direct3D 11 hardware-accelerated retained scene graph and a high-performance native Rust geometric kernel (`kerf_core.dll`), Kerf Studio delivers true 60+ FPS subpixel rendering, analytical mathematical Bézier solvers, and a creative suite experience inspired by After Effects and Figma.
@@ -97,11 +98,36 @@ Figma/
 │   │   ├── Tools/                 # BezierVectorEngine, AutoLayout, Booleans
 │   │   ├── IO/                    # StorageManager, SvgExporter, RasterExporter
 │   │   └── UI/                    # StudioView, HomePageView, MainWindow, SplashScreen, KerfLogo
-│   └── tests/                     # Automated Verification Test Suite (13/13 tests)
+│   └── tests/                     # Automated Verification Test Suite (81/81 tests)
 │       ├── TestRunner.cs
 │       └── TestRunner.exe
-└── testdata/                      # Test files & sample projects
+└── packages/                      # Distributed Runtime Packages
+    └── kerf-react/                # Official React runtime published to npm (kerf-react)
 ```
+
+---
+
+## 📦 Web & React Runtime (`kerf-react`)
+
+The official **Kerf React Runtime** is published on [npm](https://www.npmjs.com/package/kerf-react) for embedding interactive vector graphics, animations, and state machines in any web application:
+
+```bash
+npm install kerf-react
+```
+
+```tsx
+import { Kerf } from 'kerf-react';
+
+export function Banner() {
+  return (
+    <div style={{ width: 600, height: 400 }}>
+      <Kerf src="/animation.kfx" autoplay loop />
+    </div>
+  );
+}
+```
+
+See [packages/kerf-react](packages/kerf-react) for hook APIs (`useKerf`), interactive state machine inputs, and full documentation.
 
 ---
 
