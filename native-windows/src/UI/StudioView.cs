@@ -423,6 +423,8 @@ namespace Kerf.UI
             History = new CommandHistory();
             History.HistoryChanged += (s, e) => UpdateSaveStatus();
             _toolButtons = new Dictionary<ToolType, Button>();
+            Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
             InitializeStudioUI();
             InitializeAutosave();
         }
@@ -939,15 +941,12 @@ namespace Kerf.UI
             _titleTextBox = new TextBox
             {
                 Text = "Untitled Project",
-                FontSize = 13,
                 Width = 150,
                 Height = 26,
-                Background = KerfBrand.DarkSlateBrush,
-                Foreground = KerfBrand.TextWhiteBrush,
-                BorderBrush = KerfBrand.MintBrush,
                 Visibility = Visibility.Collapsed,
                 VerticalAlignment = VerticalAlignment.Center
             };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(_titleTextBox, 6, 13);
             _titleBlock.MouseLeftButtonUp += (s, e) =>
             {
                 _titleBlock.Visibility = Visibility.Collapsed;
@@ -15773,7 +15772,8 @@ namespace Kerf.UI
             if (stateMachine) _stateMachineInterpolationGraphCaption = caption; else _timelineInterpolationGraphCaption = caption;
             DockPanel.SetDock(caption, Dock.Left);
             header.Children.Add(caption);
-            var mode = new ComboBox { Width = 82, Height = 20, FontSize = 9, Padding = new Thickness(2, 0, 2, 0), Background = new SolidColorBrush(Color.FromRgb(36, 41, 52)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(61, 70, 85)), HorizontalAlignment = HorizontalAlignment.Right };
+            var mode = new ComboBox { Width = 82, Height = 20, FontSize = 9, HorizontalAlignment = HorizontalAlignment.Right };
+            KerfBrand.ApplyDarkRoundedComboBoxStyle(mode, 4);
             mode.Items.Add(new ComboBoxItem { Content = "Hold", Tag = InterpMode.Hold });
             mode.Items.Add(new ComboBoxItem { Content = "Linear", Tag = InterpMode.Linear });
             mode.Items.Add(new ComboBoxItem { Content = "Cubic", Tag = InterpMode.Cubic });
@@ -18518,10 +18518,13 @@ namespace Kerf.UI
                 Background = KerfBrand.FigmaPanelBrush,
                 Foreground = Brushes.White
             };
+            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            dialog.Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
             var owner = Window.GetWindow(this);
             if (owner != null) dialog.Owner = owner;
             var form = new StackPanel { Margin = new Thickness(18) };
-            var nameBox = new TextBox { Text = "newProperty", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush, Margin = new Thickness(0, 0, 0, 10) };
+            var nameBox = new TextBox { Text = "newProperty", Height = 28, Margin = new Thickness(0, 0, 0, 10) };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(nameBox, 6);
             form.Children.Add(CreateTransitionFormRow("Name", nameBox));
             var kindBox = CreateModernComboBox(30);
             foreach (var kind in new ViewModelPropertyKind[] { ViewModelPropertyKind.Boolean, ViewModelPropertyKind.Number, ViewModelPropertyKind.Trigger, ViewModelPropertyKind.Text })
@@ -18595,6 +18598,8 @@ namespace Kerf.UI
                 Background = KerfBrand.FigmaPanelBrush,
                 Foreground = Brushes.White
             };
+            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            dialog.Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
             var owner = Window.GetWindow(this);
             if (owner != null) dialog.Owner = owner;
 
@@ -18690,12 +18695,9 @@ namespace Kerf.UI
             var numValBox = new TextBox
             {
                 Text = "1.0",
-                Height = 28,
-                Padding = new Thickness(7, 4, 7, 4),
-                Background = KerfBrand.FigmaCanvasBrush,
-                Foreground = Brushes.White,
-                BorderBrush = KerfBrand.FigmaBorderBrush
+                Height = 28
             };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(numValBox, 6);
 
             var triggerHelp = new TextBlock
             {
@@ -18950,6 +18952,8 @@ namespace Kerf.UI
                 Background = KerfBrand.FigmaPanelBrush,
                 Foreground = Brushes.White
             };
+            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            dialog.Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
             var owner = Window.GetWindow(this);
             if (owner != null) dialog.Owner = owner;
 
@@ -19083,6 +19087,8 @@ namespace Kerf.UI
                 Background = KerfBrand.FigmaPanelBrush,
                 Foreground = Brushes.White
             };
+            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            dialog.Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
             var owner = Window.GetWindow(this);
             if (owner != null) dialog.Owner = owner;
             var form = new StackPanel { Margin = new Thickness(18) };
@@ -19100,7 +19106,8 @@ namespace Kerf.UI
             form.Children.Add(CreateTransitionFormRow("From", fromBox));
             form.Children.Add(CreateTransitionFormRow("To", toBox));
 
-            var durationBox = new TextBox { Text = "0.2", Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
+            var durationBox = new TextBox { Text = "0.2", Height = 28 };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(durationBox, 6);
             form.Children.Add(CreateTransitionFormRow("Blend (s)", durationBox));
 
             var interpolationBox = CreateModernComboBox(30);
@@ -19123,7 +19130,8 @@ namespace Kerf.UI
             foreach (var op in new ConditionOp[] { ConditionOp.Eq, ConditionOp.Ne, ConditionOp.Gt, ConditionOp.Ge, ConditionOp.Lt, ConditionOp.Le })
                 opBox.Items.Add(new ComboBoxItem { Content = op.ToString(), Tag = op });
             opBox.SelectedIndex = 0;
-            var valueBox = new TextBox { Text = "1", Width = 74, Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
+            var valueBox = new TextBox { Text = "1", Width = 74, Height = 28 };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(valueBox, 6);
             var conditionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
             conditionRow.Children.Add(opBox);
             conditionRow.Children.Add(valueBox);
@@ -19220,9 +19228,12 @@ namespace Kerf.UI
             if (transition == null || layer == null || _timelineController == null || _timelineController.ActiveStateMachine == null) return;
             var sm = _timelineController.ActiveStateMachine;
             var dialog = new Window { Title = "Transition", Width = 360, Height = 330, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = KerfBrand.FigmaPanelBrush, Foreground = Brushes.White };
+            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            dialog.Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
             var owner = Window.GetWindow(this); if (owner != null) dialog.Owner = owner;
             var form = new StackPanel { Margin = new Thickness(16) };
-            var duration = new TextBox { Text = transition.Duration.ToString("0.##", CultureInfo.InvariantCulture), Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
+            var duration = new TextBox { Text = transition.Duration.ToString("0.##", CultureInfo.InvariantCulture), Height = 28 };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(duration, 6);
             form.Children.Add(CreateTransitionFormRow("Blend (s)", duration));
             var interpolation = CreateModernComboBox(30);
             foreach (InterpMode mode in new[] { InterpMode.Hold, InterpMode.Linear, InterpMode.Cubic }) interpolation.Items.Add(new ComboBoxItem { Content = mode.ToString(), Tag = mode });
@@ -19252,7 +19263,8 @@ namespace Kerf.UI
             foreach (var op in new[] { ConditionOp.Eq, ConditionOp.Ne, ConditionOp.Gt, ConditionOp.Ge, ConditionOp.Lt, ConditionOp.Le }) operators.Items.Add(new ComboBoxItem { Content = op.ToString(), Tag = op });
             var initialOp = existingCondition != null ? (int)existingCondition.Op : 0;
             operators.SelectedIndex = Math.Max(0, Math.Min(5, initialOp));
-            var value = new TextBox { Text = existingCondition != null ? (existingCondition.TextValue ?? existingCondition.Value.ToString("0.##", CultureInfo.InvariantCulture)) : "1", Width = 100, Height = 28, Padding = new Thickness(7, 4, 7, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
+            var value = new TextBox { Text = existingCondition != null ? (existingCondition.TextValue ?? existingCondition.Value.ToString("0.##", CultureInfo.InvariantCulture)) : "1", Width = 100, Height = 28 };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(value, 6);
             var conditionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
             conditionRow.Children.Add(operators); conditionRow.Children.Add(value); form.Children.Add(conditionRow);
             bool reverseExists = layer.Transitions.Any(candidate => candidate != null && candidate != transition && candidate.FromState == transition.ToState && candidate.ToState == transition.FromState);
@@ -20708,9 +20720,11 @@ namespace Kerf.UI
         {
             if (state == null) return;
             var dialog = new Window { Title = "Rename State", Width = 300, Height = 135, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = KerfBrand.FigmaPanelBrush, Foreground = Brushes.White };
+            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
             var owner = Window.GetWindow(this); if (owner != null) dialog.Owner = owner;
             var stack = new StackPanel { Margin = new Thickness(14) };
-            var input = new TextBox { Text = state.Name, Height = 27, Padding = new Thickness(6, 4, 6, 4), Background = KerfBrand.FigmaCanvasBrush, Foreground = Brushes.White, BorderBrush = KerfBrand.FigmaBorderBrush };
+            var input = new TextBox { Text = state.Name, Height = 28 };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(input, 6);
             stack.Children.Add(input);
             var save = KerfBrand.CreatePrimaryButton("Save", () => { state.Name = input.Text.Trim(); if (History != null) History.MarkDirty(); BuildStateMachineStatesGraph(); dialog.Close(); }, 6);
             save.Height = 26;
@@ -21436,6 +21450,8 @@ namespace Kerf.UI
                 AllowsTransparency = true,
                 ResizeMode = ResizeMode.NoResize
             };
+            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            dialog.Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
             var win = Window.GetWindow(this);
             if (win != null) dialog.Owner = win;
 
@@ -21484,13 +21500,10 @@ namespace Kerf.UI
             {
                 Text = defaultName,
                 Height = 28,
-                Padding = new Thickness(8, 4, 8, 4),
                 Margin = new Thickness(0, 0, 0, 12),
-                Background = KerfBrand.FigmaCanvasBrush,
-                Foreground = Brushes.White,
-                BorderBrush = KerfBrand.FigmaBorderBrush,
                 FontSize = 11
             };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(nameBox, 6, 11);
             nameBox.SelectAll();
             root.Children.Add(nameBox);
 
@@ -21500,10 +21513,9 @@ namespace Kerf.UI
             {
                 Height = 28,
                 Margin = new Thickness(0, 0, 0, 12),
-                Background = KerfBrand.FigmaCanvasBrush,
-                Foreground = Brushes.White,
                 FontSize = 11
             };
+            KerfBrand.ApplyDarkRoundedComboBoxStyle(loopCombo, 6);
             loopCombo.Items.Add(new ComboBoxItem { Content = "Once (Play to end and hold)", Tag = LoopMode.OneShot });
             loopCombo.Items.Add(new ComboBoxItem { Content = "Loop (Repeat continuously)", Tag = LoopMode.Loop });
             loopCombo.Items.Add(new ComboBoxItem { Content = "PingPong (Back and forth)", Tag = LoopMode.PingPong });
@@ -21516,13 +21528,10 @@ namespace Kerf.UI
             {
                 Text = (_timelineController != null ? _timelineController.Duration : 2.0).ToString("0.00", CultureInfo.InvariantCulture),
                 Height = 28,
-                Padding = new Thickness(8, 4, 8, 4),
                 Margin = new Thickness(0, 0, 0, 16),
-                Background = KerfBrand.FigmaCanvasBrush,
-                Foreground = Brushes.White,
-                BorderBrush = KerfBrand.FigmaBorderBrush,
                 FontSize = 11
             };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(durBox, 6, 11);
             root.Children.Add(durBox);
 
             var btnRow = new DockPanel { LastChildFill = false };
@@ -21587,6 +21596,7 @@ namespace Kerf.UI
                 AllowsTransparency = true,
                 ResizeMode = ResizeMode.NoResize
             };
+            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
             var win = Window.GetWindow(this);
             if (win != null) dialog.Owner = win;
 
@@ -21633,13 +21643,10 @@ namespace Kerf.UI
             {
                 Text = clip.Name,
                 Height = 28,
-                Padding = new Thickness(8, 4, 8, 4),
                 Margin = new Thickness(0, 0, 0, 14),
-                Background = KerfBrand.FigmaCanvasBrush,
-                Foreground = Brushes.White,
-                BorderBrush = KerfBrand.FigmaBorderBrush,
                 FontSize = 11
             };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(nameBox, 6, 11);
             nameBox.SelectAll();
             root.Children.Add(nameBox);
 

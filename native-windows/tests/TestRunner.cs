@@ -110,6 +110,7 @@ namespace Kerf.Tests
             RunTest("Standalone Headless KerfPlayer Runtime SDK & Matrix Evaluation", TestStandaloneHeadlessKerfPlayerRuntime);
             RunTest("Legacy Animation Decommissioning & Non-Destructive Transforms", TestLegacyAnimationDecommissioningAndNonDestructiveTransforms);
             RunTest("Dedicated Export Window, Standalone Web Player, PDF & MP4 Encoders", TestExportWindowStandaloneWebPlayerPdfAndMp4Encoders);
+            RunTest("Dark Rounded Rectangle Styling for Lists and TextBoxes", TestDarkRoundedStylingForListsAndTextBoxes);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9474,6 +9475,43 @@ namespace Kerf.Tests
             {
                 try { Directory.Delete(tempDir, true); } catch { }
             }
+        }
+
+        private static void TestDarkRoundedStylingForListsAndTextBoxes()
+        {
+            // 1. Verify KerfBrand Dark Rounded TextBox Style & Factory
+            var tbStyle = KerfBrand.CreateDarkTextBoxStyle(6);
+            Assert(tbStyle != null, "KerfBrand.CreateDarkTextBoxStyle returns non-null Style");
+            Assert(tbStyle.TargetType == typeof(TextBox), "TextBox style targets typeof(TextBox)");
+
+            var tb = KerfBrand.CreateDarkRoundedTextBox("Hello World", 200, 28, 6);
+            Assert(tb != null, "CreateDarkRoundedTextBox returns non-null TextBox");
+            Assert(tb.Template != null, "Dark rounded TextBox has custom rounded ControlTemplate");
+            Assert(tb.Foreground == Brushes.White, "Dark rounded TextBox has white foreground");
+            Assert(tb.CaretBrush == Brushes.White, "Dark rounded TextBox has white caret brush");
+
+            // 2. Verify KerfBrand Dark Rounded ComboBox Style & Factory
+            var comboStyle = KerfBrand.CreateDarkComboBoxStyle(6);
+            Assert(comboStyle != null, "KerfBrand.CreateDarkComboBoxStyle returns non-null Style");
+            Assert(comboStyle.TargetType == typeof(ComboBox), "ComboBox style targets typeof(ComboBox)");
+
+            var combo = KerfBrand.CreateDarkComboBox(300, 28);
+            Assert(combo != null, "CreateDarkComboBox returns non-null ComboBox");
+            Assert(combo.Template != null, "Dark rounded ComboBox has custom rounded ControlTemplate");
+            Assert(combo.ItemContainerStyle != null, "Dark rounded ComboBox has custom ComboBoxItem style");
+            Assert(combo.Foreground == Brushes.White, "Dark rounded ComboBox has white text foreground");
+
+            // 3. Verify ExportDialog Resources inherit dark rounded styles
+            var doc = new KerfDocument { Name = "ExportStyleTest" };
+            var dlg = new Kerf.UI.Dialogs.ExportDialog(doc);
+            Assert(dlg.Resources.Contains(typeof(TextBox)), "ExportDialog contains default style for typeof(TextBox)");
+            Assert(dlg.Resources.Contains(typeof(ComboBox)), "ExportDialog contains default style for typeof(ComboBox)");
+            Assert(dlg.Background != null, "ExportDialog has obsidian dark background");
+
+            // 4. Verify MigrationReviewDialog Resources inherit dark rounded styles
+            var migDlg = new Kerf.UI.Dialogs.MigrationReviewDialog(doc);
+            Assert(migDlg.Resources.Contains(typeof(TextBox)), "MigrationReviewDialog contains default style for typeof(TextBox)");
+            Assert(migDlg.Resources.Contains(typeof(ComboBox)), "MigrationReviewDialog contains default style for typeof(ComboBox)");
         }
     }
 }

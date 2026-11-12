@@ -119,6 +119,8 @@ namespace Kerf.UI.Dialogs
             Background = new SolidColorBrush(Color.FromRgb(0x14, 0x07, 0x20)); // Obsidian #140720
             Foreground = Brushes.White;
             FontFamily = new FontFamily("-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif");
+            Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
 
             InitializeUI();
             SelectFormat(ExportFormatType.KfxRuntime);
@@ -549,7 +551,7 @@ namespace Kerf.UI.Dialogs
             });
 
             stack.Children.Add(CreateFieldLabel("Resolution Scale:"));
-            _pngScaleCombo = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 14) };
+            _pngScaleCombo = CreateStyledComboBox(260, new Thickness(0, 4, 0, 14));
             _pngScaleCombo.Items.Add("1x (Standard Resolution)");
             _pngScaleCombo.Items.Add("2x (High DPI / Retina)");
             _pngScaleCombo.Items.Add("3x (Ultra Mobile)");
@@ -558,7 +560,7 @@ namespace Kerf.UI.Dialogs
             stack.Children.Add(_pngScaleCombo);
 
             stack.Children.Add(CreateFieldLabel("Export Scope:"));
-            _pngScopeCombo = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 14) };
+            _pngScopeCombo = CreateStyledComboBox(260, new Thickness(0, 4, 0, 14));
             _pngScopeCombo.Items.Add("Entire Active Page");
             _pngScopeCombo.Items.Add("Selected Objects Only");
             _pngScopeCombo.SelectedIndex = (_studioView != null && _studioView.SelectedLayersCount > 0) ? 1 : 0;
@@ -617,7 +619,7 @@ namespace Kerf.UI.Dialogs
             stack.Children.Add(qualityRow);
 
             stack.Children.Add(CreateFieldLabel("Resolution Scale:"));
-            _jpegScaleCombo = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 14) };
+            _jpegScaleCombo = CreateStyledComboBox(260, new Thickness(0, 4, 0, 14));
             _jpegScaleCombo.Items.Add("1x (Standard Resolution)");
             _jpegScaleCombo.Items.Add("2x (High DPI / Retina)");
             _jpegScaleCombo.Items.Add("3x (Ultra Mobile)");
@@ -625,7 +627,7 @@ namespace Kerf.UI.Dialogs
             stack.Children.Add(_jpegScaleCombo);
 
             stack.Children.Add(CreateFieldLabel("Export Scope:"));
-            _jpegScopeCombo = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 14) };
+            _jpegScopeCombo = CreateStyledComboBox(260, new Thickness(0, 4, 0, 14));
             _jpegScopeCombo.Items.Add("Entire Active Page");
             _jpegScopeCombo.Items.Add("Selected Objects Only");
             _jpegScopeCombo.SelectedIndex = (_studioView != null && _studioView.SelectedLayersCount > 0) ? 1 : 0;
@@ -648,7 +650,7 @@ namespace Kerf.UI.Dialogs
             });
 
             stack.Children.Add(CreateFieldLabel("Export Scope:"));
-            _svgScopeCombo = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 14) };
+            _svgScopeCombo = CreateStyledComboBox(260, new Thickness(0, 4, 0, 14));
             _svgScopeCombo.Items.Add("Entire Active Page");
             _svgScopeCombo.Items.Add("Selected Objects Only");
             _svgScopeCombo.SelectedIndex = (_studioView != null && _studioView.SelectedLayersCount > 0) ? 1 : 0;
@@ -680,14 +682,14 @@ namespace Kerf.UI.Dialogs
             });
 
             stack.Children.Add(CreateFieldLabel("Resolution & Print Quality:"));
-            _pdfDpiCombo = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 14) };
+            _pdfDpiCombo = CreateStyledComboBox(260, new Thickness(0, 4, 0, 14));
             _pdfDpiCombo.Items.Add("150 DPI (Screen / Presentation)");
             _pdfDpiCombo.Items.Add("300 DPI (High-Resolution Print)");
             _pdfDpiCombo.SelectedIndex = 1;
             stack.Children.Add(_pdfDpiCombo);
 
             stack.Children.Add(CreateFieldLabel("Export Scope:"));
-            _pdfScopeCombo = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 14) };
+            _pdfScopeCombo = CreateStyledComboBox(260, new Thickness(0, 4, 0, 14));
             _pdfScopeCombo.Items.Add("Entire Active Page");
             _pdfScopeCombo.Items.Add("Selected Objects Only");
             _pdfScopeCombo.SelectedIndex = (_studioView != null && _studioView.SelectedLayersCount > 0) ? 1 : 0;
@@ -711,7 +713,7 @@ namespace Kerf.UI.Dialogs
 
             // Target Clip
             stack.Children.Add(CreateFieldLabel("Target Animation Clip:"));
-            _mp4ClipCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _mp4ClipCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             if (_document.Animation != null && _document.Animation.Clips != null && _document.Animation.Clips.Count > 0)
             {
                 foreach (var c in _document.Animation.Clips)
@@ -728,7 +730,7 @@ namespace Kerf.UI.Dialogs
 
             // Framerate (FPS) with Custom FPS option
             stack.Children.Add(CreateFieldLabel("Frame Rate (FPS):"));
-            _mp4FpsPresetCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 4) };
+            _mp4FpsPresetCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 4));
             _mp4FpsPresetCombo.Items.Add("12 fps (Stop Motion)");
             _mp4FpsPresetCombo.Items.Add("15 fps (Stylized)");
             _mp4FpsPresetCombo.Items.Add("23.976 fps (Cinematic Film)");
@@ -761,7 +763,7 @@ namespace Kerf.UI.Dialogs
 
             // Bitrate & Encoding Mode (After Effects / Media Encoder style)
             stack.Children.Add(CreateFieldLabel("Bitrate Encoding Mode:"));
-            _mp4BitrateModeCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _mp4BitrateModeCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             _mp4BitrateModeCombo.Items.Add("VBR, 1 Pass (Variable Bit Rate)");
             _mp4BitrateModeCombo.Items.Add("CBR (Constant Bit Rate)");
             _mp4BitrateModeCombo.Items.Add("VBR, 2 Pass (High Quality)");
@@ -769,7 +771,7 @@ namespace Kerf.UI.Dialogs
             stack.Children.Add(_mp4BitrateModeCombo);
 
             stack.Children.Add(CreateFieldLabel("Target Bitrate (Quality):"));
-            _mp4TargetBitrateCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 4) };
+            _mp4TargetBitrateCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 4));
             _mp4TargetBitrateCombo.Items.Add("Draft / Low (2 Mbps)");
             _mp4TargetBitrateCombo.Items.Add("Medium Web (6 Mbps)");
             _mp4TargetBitrateCombo.Items.Add("High Definition (12 Mbps - Recommended)");
@@ -800,7 +802,7 @@ namespace Kerf.UI.Dialogs
 
             // H.264 Profile & GOP
             stack.Children.Add(CreateFieldLabel("H.264 Profile:"));
-            _mp4ProfileCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _mp4ProfileCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             _mp4ProfileCombo.Items.Add("High Profile (CABAC, 8x8 Transform - Recommended)");
             _mp4ProfileCombo.Items.Add("Main Profile (Broadcast & Web standard)");
             _mp4ProfileCombo.Items.Add("Baseline Profile (Legacy & Mobile)");
@@ -808,7 +810,7 @@ namespace Kerf.UI.Dialogs
             stack.Children.Add(_mp4ProfileCombo);
 
             stack.Children.Add(CreateFieldLabel("Keyframe Distance (GOP Interval):"));
-            _mp4KeyframeIntervalCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _mp4KeyframeIntervalCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             _mp4KeyframeIntervalCombo.Items.Add("Automatic (Every 1 second / 1x FPS)");
             _mp4KeyframeIntervalCombo.Items.Add("Every 2 seconds (Web streaming)");
             _mp4KeyframeIntervalCombo.Items.Add("Every 0.5 seconds (Fast seeking)");
@@ -818,7 +820,7 @@ namespace Kerf.UI.Dialogs
 
             // Output Scale & Resolution
             stack.Children.Add(CreateFieldLabel("Resolution Scale:"));
-            _mp4ScaleCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _mp4ScaleCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             _mp4ScaleCombo.Items.Add("1.0x (100% Canvas Resolution)");
             _mp4ScaleCombo.Items.Add("0.5x (Half Resolution)");
             _mp4ScaleCombo.Items.Add("1.5x (1.5x Scaling)");
@@ -829,7 +831,7 @@ namespace Kerf.UI.Dialogs
 
             // Time Range / Work Area
             stack.Children.Add(CreateFieldLabel("Time Range:"));
-            _mp4TimeRangeCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 4) };
+            _mp4TimeRangeCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 4));
             _mp4TimeRangeCombo.Items.Add("Entire Clip Duration");
             _mp4TimeRangeCombo.Items.Add("Work Area / Custom Range");
             _mp4TimeRangeCombo.SelectedIndex = 0;
@@ -856,7 +858,7 @@ namespace Kerf.UI.Dialogs
 
             // Background Color
             stack.Children.Add(CreateFieldLabel("Background Color:"));
-            _mp4BackgroundCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 14) };
+            _mp4BackgroundCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 14));
             _mp4BackgroundCombo.Items.Add("Canvas Background Color");
             _mp4BackgroundCombo.Items.Add("Solid Black (#000000)");
             _mp4BackgroundCombo.Items.Add("Solid White (#FFFFFF)");
@@ -891,7 +893,7 @@ namespace Kerf.UI.Dialogs
 
             // Target Clip
             stack.Children.Add(CreateFieldLabel("Target Animation Clip:"));
-            _gifClipCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _gifClipCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             if (_document.Animation != null && _document.Animation.Clips != null && _document.Animation.Clips.Count > 0)
             {
                 foreach (var c in _document.Animation.Clips)
@@ -908,7 +910,7 @@ namespace Kerf.UI.Dialogs
 
             // Framerate (FPS)
             stack.Children.Add(CreateFieldLabel("Frame Rate (FPS):"));
-            _gifFpsCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 4) };
+            _gifFpsCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 4));
             _gifFpsCombo.Items.Add("10 fps (Compact File Size)");
             _gifFpsCombo.Items.Add("12 fps (Standard Animation)");
             _gifFpsCombo.Items.Add("15 fps (Smooth Web GIF - Recommended)");
@@ -936,7 +938,7 @@ namespace Kerf.UI.Dialogs
 
             // Looping Mode
             stack.Children.Add(CreateFieldLabel("Looping Count:"));
-            _gifLoopCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _gifLoopCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             _gifLoopCombo.Items.Add("Loop Forever (Infinite)");
             _gifLoopCombo.Items.Add("Play Once (No Loop)");
             _gifLoopCombo.Items.Add("Loop 2 Times");
@@ -947,7 +949,7 @@ namespace Kerf.UI.Dialogs
 
             // Color Palette Depth
             stack.Children.Add(CreateFieldLabel("Color Palette Quality:"));
-            _gifColorDepthCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _gifColorDepthCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             _gifColorDepthCombo.Items.Add("256 Colors (Maximum Quality)");
             _gifColorDepthCombo.Items.Add("128 Colors (Balanced Web)");
             _gifColorDepthCombo.Items.Add("64 Colors (Small File Size)");
@@ -975,7 +977,7 @@ namespace Kerf.UI.Dialogs
 
             // Resolution Scale
             stack.Children.Add(CreateFieldLabel("Resolution Scale:"));
-            _gifScaleCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 12) };
+            _gifScaleCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 12));
             _gifScaleCombo.Items.Add("1.0x (Original Resolution)");
             _gifScaleCombo.Items.Add("0.5x (Half Size - Recommended for Web)");
             _gifScaleCombo.Items.Add("0.25x (Quarter Size / Thumbnail)");
@@ -986,7 +988,7 @@ namespace Kerf.UI.Dialogs
 
             // Time Range
             stack.Children.Add(CreateFieldLabel("Time Range:"));
-            _gifTimeRangeCombo = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 4) };
+            _gifTimeRangeCombo = CreateStyledComboBox(300, new Thickness(0, 4, 0, 4));
             _gifTimeRangeCombo.Items.Add("Entire Clip Duration");
             _gifTimeRangeCombo.Items.Add("Work Area / Custom Range");
             _gifTimeRangeCombo.SelectedIndex = 0;
@@ -1545,20 +1547,30 @@ namespace Kerf.UI.Dialogs
 
         private TextBox CreateDarkTextBox(string initialText, double width = 120)
         {
-            return new TextBox
+            var tb = new TextBox
             {
                 Text = initialText,
                 Width = width,
-                Height = 26,
-                Background = new SolidColorBrush(Color.FromRgb(0x1F, 0x0A, 0x30)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x0C, 0x42, 0x47)),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(6, 3, 6, 3),
-                VerticalContentAlignment = VerticalAlignment.Center,
+                Height = 28,
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(0, 2, 0, 2)
             };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(tb, 6);
+            return tb;
+        }
+
+        private ComboBox CreateStyledComboBox(double width = 300, Thickness margin = default(Thickness))
+        {
+            var combo = new ComboBox
+            {
+                Width = width,
+                Height = 28,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = margin,
+                FontSize = 11.5
+            };
+            KerfBrand.ApplyDarkRoundedComboBoxStyle(combo, 6);
+            return combo;
         }
 
         private FrameworkElement CreateStatRow(string label, string val)

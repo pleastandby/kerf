@@ -34,6 +34,8 @@ namespace Kerf.UI
         public HomePageView()
         {
             _allProjects = new List<ProjectMetadata>();
+            Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
             InitializeUI();
             Loaded += (s, e) => RefreshProjects();
         }
@@ -507,16 +509,9 @@ namespace Kerf.UI
             {
                 Width = 240,
                 Height = 32,
-                Background = KerfBrand.DarkSlateBrush,
-                Foreground = KerfBrand.TextWhiteBrush,
-                BorderBrush = KerfBrand.TealBrush,
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(10, 6, 10, 6),
-                VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 13
+                VerticalAlignment = VerticalAlignment.Center
             };
-            _searchBox.GotFocus += (s, e) => _searchBox.BorderBrush = KerfBrand.MintBrush;
-            _searchBox.LostFocus += (s, e) => _searchBox.BorderBrush = KerfBrand.TealBrush;
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(_searchBox, 8, 13);
             _searchBox.TextChanged += (s, e) => FilterProjects();
             DockPanel.SetDock(_searchBox, Dock.Right);
             dock.Children.Add(_searchBox);

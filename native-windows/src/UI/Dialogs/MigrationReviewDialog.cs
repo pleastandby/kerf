@@ -43,7 +43,7 @@ namespace Kerf.UI.Dialogs
         private readonly Dictionary<string, ComboBox> _rebindCombos;
         private readonly Dictionary<string, OrphanResolution> _resolutions;
 
-        public MigrationReviewDialog(KerfDocument doc, MigrationReport report)
+        public MigrationReviewDialog(KerfDocument doc, MigrationReport report = null)
         {
             _doc = doc ?? new KerfDocument();
             _report = report ?? new MigrationReport();
@@ -61,6 +61,8 @@ namespace Kerf.UI.Dialogs
             Background = KerfBrand.ObsidianBrush;
             Foreground = KerfBrand.TextWhiteBrush;
             ResizeMode = ResizeMode.CanResizeWithGrip;
+            Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
+            Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
 
             BuildUI();
         }
@@ -324,11 +326,9 @@ namespace Kerf.UI.Dialogs
             var actionCombo = new ComboBox
             {
                 Height = 28,
-                Margin = new Thickness(0, 0, 0, 4),
-                Background = KerfBrand.FigmaPanelBrush,
-                Foreground = KerfBrand.TextWhiteBrush,
-                BorderBrush = KerfBrand.FigmaBorderBrush
+                Margin = new Thickness(0, 0, 0, 4)
             };
+            KerfBrand.ApplyDarkRoundedComboBoxStyle(actionCombo, 6);
 
             actionCombo.Items.Add(new ComboBoxItem { Content = "Keep Inactive (Safe)", Tag = OrphanResolutionAction.Keep });
             actionCombo.Items.Add(new ComboBoxItem { Content = "Rebind to Layer...", Tag = OrphanResolutionAction.Rebind });
@@ -338,11 +338,9 @@ namespace Kerf.UI.Dialogs
             var layerCombo = new ComboBox
             {
                 Height = 28,
-                Visibility = Visibility.Collapsed,
-                Background = KerfBrand.FigmaPanelBrush,
-                Foreground = KerfBrand.TextWhiteBrush,
-                BorderBrush = KerfBrand.FigmaBorderBrush
+                Visibility = Visibility.Collapsed
             };
+            KerfBrand.ApplyDarkRoundedComboBoxStyle(layerCombo, 6);
 
             for (int l = 0; l < _availableLayers.Count; l++)
             {

@@ -64,6 +64,7 @@ namespace Kerf.UI
         {
             Width = 240;
             Background = KerfBrand.DarkSlateBrush; // #0C4247
+            Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
 
             var mainStack = new StackPanel { Margin = new Thickness(12) };
 
@@ -250,15 +251,9 @@ namespace Kerf.UI
             _hexInput = new TextBox
             {
                 Height = 28,
-                FontSize = 12,
-                FontWeight = FontWeights.SemiBold,
-                Background = new SolidColorBrush(Color.FromRgb(28, 33, 48)),
-                Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(48, 56, 82)),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(6, 4, 6, 4),
-                VerticalContentAlignment = VerticalAlignment.Center
+                FontWeight = FontWeights.SemiBold
             };
+            KerfBrand.ApplyDarkRoundedTextBoxStyle(_hexInput, 6, 12);
             _hexInput.TextChanged += OnHexInputChanged;
             inputRow.Children.Add(_hexInput);
 
