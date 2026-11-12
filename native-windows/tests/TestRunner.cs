@@ -112,6 +112,7 @@ namespace Kerf.Tests
             RunTest("Dedicated Export Window, Standalone Web Player, PDF & MP4 Encoders", TestExportWindowStandaloneWebPlayerPdfAndMp4Encoders);
             RunTest("Dark Rounded Rectangle Styling for Lists and TextBoxes", TestDarkRoundedStylingForListsAndTextBoxes);
             RunTest("Runtime Integration Developer Guide & Help Navigation", TestRuntimeDeveloperGuideAndHelpNavigation);
+            RunTest("Advanced Stroke Engine: Outside Stroke Clipping, Trim Path & Stroke Tapering", TestAdvancedStrokeEngineOutsideClipTrimAndTaper);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9531,6 +9532,114 @@ namespace Kerf.Tests
             // 3. Verify StudioView Help Menu contains Runtime Integration Guide item
             var studioView = new Kerf.UI.StudioView();
             Assert(studioView != null, "StudioView instantiated successfully");
+        }
+
+        private static void TestAdvancedStrokeEngineOutsideClipTrimAndTaper()
+        {
+            // 1. Outside Stroke Alignment & Inverse Interior Exclusion Clip
+            var rectGeo = new RectangleGeometry(new Rect(50, 50, 100, 100));
+            var outsidePen = new Pen(Brushes.Black, 10.0);
+            var bounds = rectGeo.GetRenderBounds(outsidePen);
+            bounds.Inflate(40.0, 40.0);
+            var bigBox = new RectangleGeometry(bounds);
+            var outsideClip = new CombinedGeometry(GeometryCombineMode.Exclude, bigBox, rectGeo);
+
+            // Shape interior MUST be excluded (not contained in outside clip)
+            Assert(!outsideClip.FillContains(new Point(100, 100)), "Outside stroke clip excludes center of shape interior");
+            Assert(!outsideClip.FillContains(new Point(60, 60)), "Outside stroke clip excludes points near inner boundary");
+            
+            // Shape exterior MUST be included within the clip
+            Assert(outsideClip.FillContains(new Point(45, 100)), "Outside stroke clip includes 5px outside boundary");
+            Assert(outsideClip.FillContains(new Point(155, 100)), "Outside stroke clip includes 5px outside right boundary");
+
+            // 2. Stroke Trim Path
+            // Test 0..1 full path
+            var fullTrim = StrokeEffectsEngine.TrimGeometry(rectGeo, 0.0, 1.0, 0.0);
+            Assert(fullTrim != null, "TrimGeometry with 0..1 returns non-null geometry");
+
+            // Test 0.25..0.75 partial trim
+            var partialTrim = StrokeEffectsEngine.TrimGeometry(rectGeo, 0.25, 0.75, 0.0);
+            Assert(partialTrim != null, "TrimGeometry partial trim returns valid geometry");
+            var pgTrim = partialTrim as PathGeometry;
+            Assert(pgTrim != null && pgTrim.Figures.Count > 0, "Partial trim contains path figures");
+            Assert(pgTrim.Figures[0].Segments.Count > 0, "Partial trim figure has line segments");
+            var flatPartial = partialTrim.GetFlattenedPathGeometry();
+            Assert(flatPartial != null && flatPartial.Figures.Count > 0, "Flattened partial trim contains path figures");
+
+            // Test offset wrapping
+            var offsetTrim = StrokeEffectsEngine.TrimGeometry(rectGeo, 0.8, 1.2, 0.0);
+            Assert(offsetTrim != null, "TrimGeometry with wrapping offset returns valid geometry");
+
+            // Test zero length produces empty geometry
+            var zeroTrim = StrokeEffectsEngine.TrimGeometry(rectGeo, 0.5, 0.5, 0.0);
+            Assert(zeroTrim != null && zeroTrim.IsEmpty(), "TrimGeometry with zero length returns empty geometry");
+
+            // 3. Stroke Taper Mesh Generation
+            var lineGeo = new LineGeometry(new Point(0, 0), new Point(200, 0));
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                // Test inactive taper returns false
+                bool inactive = StrokeEffectsEngine.RenderTaperedStroke(dc, lineGeo, Brushes.Black, 10.0, 0.0, 0.0, 0.0, 0.0, StrokeCap.Round);
+                Assert(!inactive, "RenderTaperedStroke returns false when taper is 0");
+
+                // Test active taper returns true
+                bool active = StrokeEffectsEngine.RenderTaperedStroke(dc, lineGeo, Brushes.Black, 10.0, 0.5, 0.5, 0.0, 0.0, StrokeCap.Round);
+                Assert(active, "RenderTaperedStroke returns true when taperStart and taperEnd are active");
+            }
+
+            // 4. StrokeData Model & Cloning
+            var stroke = new StrokeData
+            {
+                Width = 4.0,
+                Alignment = StrokeAlignment.Outside,
+                Cap = StrokeCap.Round,
+                TrimStart = 0.1,
+                TrimEnd = 0.9,
+                TrimOffset = 0.2,
+                TaperStart = 0.3,
+                TaperEnd = 0.4,
+                TaperStartWidth = 0.05,
+                TaperEndWidth = 0.08
+            };
+            var clone = stroke.Clone();
+            Assert(clone != null, "StrokeData clone is non-null");
+            Assert(clone.Alignment == StrokeAlignment.Outside, "Clone preserves Outside alignment");
+            Assert(Math.Abs(clone.TrimStart - 0.1) < 0.001, "Clone preserves TrimStart");
+            Assert(Math.Abs(clone.TrimEnd - 0.9) < 0.001, "Clone preserves TrimEnd");
+            Assert(Math.Abs(clone.TrimOffset - 0.2) < 0.001, "Clone preserves TrimOffset");
+            Assert(Math.Abs(clone.TaperStart - 0.3) < 0.001, "Clone preserves TaperStart");
+            Assert(Math.Abs(clone.TaperEnd - 0.4) < 0.001, "Clone preserves TaperEnd");
+            Assert(Math.Abs(clone.TaperStartWidth - 0.05) < 0.001, "Clone preserves TaperStartWidth");
+            Assert(Math.Abs(clone.TaperEndWidth - 0.08) < 0.001, "Clone preserves TaperEndWidth");
+
+            // 5. PropertyBinder & Animation Evaluation
+            var layer = new LayerNode
+            {
+                Id = "layer-test-stroke",
+                Type = ElementType.Rectangle,
+                Strokes = new List<StrokeData> { stroke }
+            };
+
+            var pose = new Dictionary<uint, Dictionary<ushort, double>>();
+            uint numId = PropertyBinder.GetNumericNodeId(layer.Id);
+            var props = new Dictionary<ushort, double>();
+            props[(ushort)PropKey.StrokeWidth] = 8.5;
+            props[(ushort)PropKey.StrokeTrimStart] = 0.15;
+            props[(ushort)PropKey.StrokeTrimEnd] = 0.85;
+            props[(ushort)PropKey.StrokeTrimOffset] = 0.45;
+            props[(ushort)PropKey.StrokeTaperStart] = 0.6;
+            props[(ushort)PropKey.StrokeTaperEnd] = 0.7;
+            pose[numId] = props;
+
+            PropertyBinder.ApplyPoseToLayer(layer, numId, pose);
+
+            Assert(Math.Abs(layer.Strokes[0].Width - 8.5) < 0.001, "PropertyBinder binds StrokeWidth");
+            Assert(Math.Abs(layer.Strokes[0].TrimStart - 0.15) < 0.001, "PropertyBinder binds StrokeTrimStart");
+            Assert(Math.Abs(layer.Strokes[0].TrimEnd - 0.85) < 0.001, "PropertyBinder binds StrokeTrimEnd");
+            Assert(Math.Abs(layer.Strokes[0].TrimOffset - 0.45) < 0.001, "PropertyBinder binds StrokeTrimOffset");
+            Assert(Math.Abs(layer.Strokes[0].TaperStart - 0.6) < 0.001, "PropertyBinder binds StrokeTaperStart");
+            Assert(Math.Abs(layer.Strokes[0].TaperEnd - 0.7) < 0.001, "PropertyBinder binds StrokeTaperEnd");
         }
     }
 }

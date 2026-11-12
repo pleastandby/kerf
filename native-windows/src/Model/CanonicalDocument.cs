@@ -394,6 +394,17 @@ namespace Kerf.Model
         public List<double> DashPattern { get; set; }
         public bool Enabled { get; set; }
 
+        // Trim Path properties (0.0 to 1.0)
+        public double TrimStart { get; set; }
+        public double TrimEnd { get; set; }
+        public double TrimOffset { get; set; }
+
+        // Stroke Taper properties (0.0 to 1.0)
+        public double TaperStart { get; set; }
+        public double TaperEnd { get; set; }
+        public double TaperStartWidth { get; set; }
+        public double TaperEndWidth { get; set; }
+
         public StrokeData()
         {
             Paint = Paint.Solid("#000000");
@@ -403,6 +414,15 @@ namespace Kerf.Model
             Join = StrokeJoin.Miter;
             DashPattern = new List<double>();
             Enabled = true;
+
+            TrimStart = 0.0;
+            TrimEnd = 1.0;
+            TrimOffset = 0.0;
+
+            TaperStart = 0.0;
+            TaperEnd = 0.0;
+            TaperStartWidth = 0.0;
+            TaperEndWidth = 0.0;
         }
 
         public StrokeData Clone()
@@ -415,7 +435,14 @@ namespace Kerf.Model
                 Cap = this.Cap,
                 Join = this.Join,
                 Enabled = this.Enabled,
-                DashPattern = new List<double>()
+                DashPattern = new List<double>(),
+                TrimStart = this.TrimStart,
+                TrimEnd = this.TrimEnd,
+                TrimOffset = this.TrimOffset,
+                TaperStart = this.TaperStart,
+                TaperEnd = this.TaperEnd,
+                TaperStartWidth = this.TaperStartWidth,
+                TaperEndWidth = this.TaperEndWidth
             };
             if (DashPattern != null)
             {

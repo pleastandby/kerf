@@ -1424,26 +1424,7 @@ namespace Kerf.Engine
                     }
                     strokePen.Freeze();
 
-                    if (stroke.Alignment == StrokeAlignment.Inside)
-                    {
-                        dc.PushClip(geo);
-                        var insidePen = strokePen.Clone();
-                        insidePen.Thickness = stroke.Width * 2.0;
-                        insidePen.Freeze();
-                        dc.DrawGeometry(null, insidePen, geo);
-                        dc.Pop();
-                    }
-                    else if (stroke.Alignment == StrokeAlignment.Outside)
-                    {
-                        var outsidePen = strokePen.Clone();
-                        outsidePen.Thickness = stroke.Width * 2.0;
-                        outsidePen.Freeze();
-                        dc.DrawGeometry(null, outsidePen, geo);
-                    }
-                    else
-                    {
-                        dc.DrawGeometry(null, strokePen, geo);
-                    }
+                    StrokeEffectsEngine.RenderStroke(dc, geo, stroke, strokeBrush, strokePen);
                 }
             }
         }

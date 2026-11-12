@@ -139,6 +139,36 @@ namespace Kerf.Engine.Animation
                 layer.CornerRadiusBottomRight = layer.CornerRadius;
                 layer.CornerRadiusBottomLeft = layer.CornerRadius;
             }
+
+            // 7. Dynamic Stroke & Trim Path / Taper Animation
+            if (layer.Strokes != null && layer.Strokes.Count > 0)
+            {
+                var stroke = layer.Strokes[0];
+                if (props.TryGetValue((ushort)PropKey.StrokeWidth, out val))
+                {
+                    stroke.Width = Math.Max(0.0, val);
+                }
+                if (props.TryGetValue((ushort)PropKey.StrokeTrimStart, out val))
+                {
+                    stroke.TrimStart = Math.Max(0.0, Math.Min(1.0, val));
+                }
+                if (props.TryGetValue((ushort)PropKey.StrokeTrimEnd, out val))
+                {
+                    stroke.TrimEnd = Math.Max(0.0, Math.Min(1.0, val));
+                }
+                if (props.TryGetValue((ushort)PropKey.StrokeTrimOffset, out val))
+                {
+                    stroke.TrimOffset = val;
+                }
+                if (props.TryGetValue((ushort)PropKey.StrokeTaperStart, out val))
+                {
+                    stroke.TaperStart = Math.Max(0.0, Math.Min(1.0, val));
+                }
+                if (props.TryGetValue((ushort)PropKey.StrokeTaperEnd, out val))
+                {
+                    stroke.TaperEnd = Math.Max(0.0, Math.Min(1.0, val));
+                }
+            }
         }
 
         public static void ApplyPoseToLayers(

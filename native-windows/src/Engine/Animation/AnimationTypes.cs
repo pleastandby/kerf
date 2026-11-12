@@ -22,6 +22,12 @@ namespace Kerf.Engine.Animation
         AnchorY = 15,
         VisualWidth = 16,
         VisualHeight = 17,
+        StrokeWidth = 18,
+        StrokeTrimStart = 19,
+        StrokeTrimEnd = 20,
+        StrokeTrimOffset = 21,
+        StrokeTaperStart = 22,
+        StrokeTaperEnd = 23,
         Custom = 100
     }
 

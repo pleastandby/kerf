@@ -8037,13 +8037,29 @@ namespace Kerf.UI
                 DockPanel.SetDock(strokeTypeCombo, Dock.Left);
                 topRow.Children.Add(strokeTypeCombo);
 
+                double startStrokeW = stroke.Width;
                 var widthField = ScrubControls.CreateScrubField("Width", stroke.Width, val =>
                 {
                     stroke.Width = Math.Max(0, val);
                     stroke.Enabled = (stroke.Width > 0);
                     InvalidateAndRefresh(primary);
-                }, min: 0, max: 200, suffix: "px");
-                topRow.Children.Add(widthField);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeWidth, stroke.Width);
+                    }
+                }, min: 0, max: 200, suffix: "px", onDragComplete: () =>
+                {
+                    double finalW = stroke.Width;
+                    if (Math.Abs(finalW - startStrokeW) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeWidth, startStrokeW, finalW);
+                        }
+                        startStrokeW = finalW;
+                    }
+                });
+                topRow.Children.Add(CreateAnimatedPropertyField(widthField, primary, PropKey.StrokeWidth));
 
                 cardStack.Children.Add(topRow);
 
@@ -8141,6 +8157,258 @@ namespace Kerf.UI
                 alignRow.Children.Add(capCombo);
 
                 cardStack.Children.Add(alignRow);
+
+                // --- TRIM PATH CONTROLS ---
+                var trimHeader = new Grid { Margin = new Thickness(0, 8, 0, 4) };
+                trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                trimHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var trimTitle = new TextBlock
+                {
+                    Text = "TRIM PATH",
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(trimTitle, 0);
+                trimHeader.Children.Add(trimTitle);
+
+                bool isTrimmed = (stroke.TrimStart > 0.001 || stroke.TrimEnd < 0.999 || Math.Abs(stroke.TrimOffset) > 0.001);
+                if (isTrimmed)
+                {
+                    var resetTrimBtn = new Button
+                    {
+                        Template = CreateRoundedButtonTemplate(3),
+                        Content = "Reset",
+                        FontSize = 9,
+                        Height = 16,
+                        Padding = new Thickness(4, 0, 4, 0),
+                        Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                        Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                        BorderThickness = new Thickness(0),
+                        Cursor = Cursors.Hand,
+                        ToolTip = "Reset trim path to full outline (0% - 100%)"
+                    };
+                    resetTrimBtn.Click += (s, e) =>
+                    {
+                        stroke.TrimStart = 0.0;
+                        stroke.TrimEnd = 1.0;
+                        stroke.TrimOffset = 0.0;
+                        InvalidateAndRefresh(primary);
+                        RefreshPropertyInspector();
+                    };
+                    Grid.SetColumn(resetTrimBtn, 1);
+                    trimHeader.Children.Add(resetTrimBtn);
+                }
+                cardStack.Children.Add(trimHeader);
+
+                var trimStartEndGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                trimStartEndGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                double startTrimS = stroke.TrimStart;
+                var trimStartField = ScrubControls.CreateScrubField("Start", Math.Round(stroke.TrimStart * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TrimStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimStart, stroke.TrimStart);
+                    }
+                }), 0.0, 100.0, 1.0, "%", "Trim Start percentage", 1, new Action(() =>
+                {
+                    double finalTrimS = stroke.TrimStart;
+                    if (Math.Abs(finalTrimS - startTrimS) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimStart, startTrimS, finalTrimS);
+                        }
+                        startTrimS = finalTrimS;
+                    }
+                }));
+                var animTrimStart = CreateAnimatedPropertyField(trimStartField, primary, PropKey.StrokeTrimStart);
+                Grid.SetColumn(animTrimStart, 0);
+                trimStartEndGrid.Children.Add(animTrimStart);
+
+                double startTrimE = stroke.TrimEnd;
+                var trimEndField = ScrubControls.CreateScrubField("End", Math.Round(stroke.TrimEnd * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TrimEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimEnd, stroke.TrimEnd);
+                    }
+                }), 0.0, 100.0, 1.0, "%", "Trim End percentage", 1, new Action(() =>
+                {
+                    double finalTrimE = stroke.TrimEnd;
+                    if (Math.Abs(finalTrimE - startTrimE) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimEnd, startTrimE, finalTrimE);
+                        }
+                        startTrimE = finalTrimE;
+                    }
+                }));
+                var animTrimEnd = CreateAnimatedPropertyField(trimEndField, primary, PropKey.StrokeTrimEnd);
+                Grid.SetColumn(animTrimEnd, 2);
+                trimStartEndGrid.Children.Add(animTrimEnd);
+
+                cardStack.Children.Add(trimStartEndGrid);
+
+                double startTrimOff = stroke.TrimOffset;
+                var trimOffsetField = ScrubControls.CreateScrubField("Offset", Math.Round(stroke.TrimOffset * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TrimOffset = val / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTrimOffset, stroke.TrimOffset);
+                    }
+                }), -360.0, 360.0, 1.0, "%", "Trim Offset shift percentage", 1, new Action(() =>
+                {
+                    double finalTrimOff = stroke.TrimOffset;
+                    if (Math.Abs(finalTrimOff - startTrimOff) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTrimOffset, startTrimOff, finalTrimOff);
+                        }
+                        startTrimOff = finalTrimOff;
+                    }
+                }));
+                var animTrimOffset = CreateAnimatedPropertyField(trimOffsetField, primary, PropKey.StrokeTrimOffset);
+                cardStack.Children.Add(animTrimOffset);
+
+                // --- STROKE TAPER CONTROLS ---
+                var taperHeader = new Grid { Margin = new Thickness(0, 6, 0, 4) };
+                taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                taperHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var taperTitle = new TextBlock
+                {
+                    Text = "STROKE TAPER",
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(130, 145, 175)),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(taperTitle, 0);
+                taperHeader.Children.Add(taperTitle);
+
+                bool isTapered = (stroke.TaperStart > 0.001 || stroke.TaperEnd > 0.001 || stroke.TaperStartWidth > 0.001 || stroke.TaperEndWidth > 0.001);
+                if (isTapered)
+                {
+                    var resetTaperBtn = new Button
+                    {
+                        Template = CreateRoundedButtonTemplate(3),
+                        Content = "Reset",
+                        FontSize = 9,
+                        Height = 16,
+                        Padding = new Thickness(4, 0, 4, 0),
+                        Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                        Foreground = new SolidColorBrush(Color.FromRgb(140, 160, 195)),
+                        BorderThickness = new Thickness(0),
+                        Cursor = Cursors.Hand,
+                        ToolTip = "Reset taper lengths and tips to uniform stroke"
+                    };
+                    resetTaperBtn.Click += (s, e) =>
+                    {
+                        stroke.TaperStart = 0.0;
+                        stroke.TaperEnd = 0.0;
+                        stroke.TaperStartWidth = 0.0;
+                        stroke.TaperEndWidth = 0.0;
+                        InvalidateAndRefresh(primary);
+                        RefreshPropertyInspector();
+                    };
+                    Grid.SetColumn(resetTaperBtn, 1);
+                    taperHeader.Children.Add(resetTaperBtn);
+                }
+                cardStack.Children.Add(taperHeader);
+
+                var taperGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                taperGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                double startTaperS = stroke.TaperStart;
+                var taperStartField = ScrubControls.CreateScrubField("Start Length", Math.Round(stroke.TaperStart * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TaperStart = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperStart, stroke.TaperStart);
+                    }
+                }), 0.0, 100.0, 1.0, "%", "Taper Start length fraction", 1, new Action(() =>
+                {
+                    double finalTaperS = stroke.TaperStart;
+                    if (Math.Abs(finalTaperS - startTaperS) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTaperStart, startTaperS, finalTaperS);
+                        }
+                        startTaperS = finalTaperS;
+                    }
+                }));
+                var animTaperStart = CreateAnimatedPropertyField(taperStartField, primary, PropKey.StrokeTaperStart);
+                Grid.SetColumn(animTaperStart, 0);
+                taperGrid.Children.Add(animTaperStart);
+
+                double startTaperE = stroke.TaperEnd;
+                var taperEndField = ScrubControls.CreateScrubField("End Length", Math.Round(stroke.TaperEnd * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TaperEnd = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                    if (_currentStudioMode == StudioMode.Animate)
+                    {
+                        AutoKeyPropertyLivePreview(primary, PropKey.StrokeTaperEnd, stroke.TaperEnd);
+                    }
+                }), 0.0, 100.0, 1.0, "%", "Taper End length fraction", 1, new Action(() =>
+                {
+                    double finalTaperE = stroke.TaperEnd;
+                    if (Math.Abs(finalTaperE - startTaperE) > 1e-6)
+                    {
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            CommitKeyframeValueChange(primary, PropKey.StrokeTaperEnd, startTaperE, finalTaperE);
+                        }
+                        startTaperE = finalTaperE;
+                    }
+                }));
+                var animTaperEnd = CreateAnimatedPropertyField(taperEndField, primary, PropKey.StrokeTaperEnd);
+                Grid.SetColumn(animTaperEnd, 2);
+                taperGrid.Children.Add(animTaperEnd);
+
+                cardStack.Children.Add(taperGrid);
+
+                var taperTipGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                taperTipGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var startTipField = ScrubControls.CreateScrubField("Start Tip", Math.Round(stroke.TaperStartWidth * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TaperStartWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                }), 0.0, 100.0, 1.0, "%", "Start tip thickness fraction (0% = sharp point)");
+                Grid.SetColumn(startTipField, 0);
+                taperTipGrid.Children.Add(startTipField);
+
+                var endTipField = ScrubControls.CreateScrubField("End Tip", Math.Round(stroke.TaperEndWidth * 100.0, 1), new Action<double>(val =>
+                {
+                    stroke.TaperEndWidth = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    InvalidateAndRefresh(primary);
+                }), 0.0, 100.0, 1.0, "%", "End tip thickness fraction (0% = sharp point)");
+                Grid.SetColumn(endTipField, 2);
+                taperTipGrid.Children.Add(endTipField);
+
+                cardStack.Children.Add(taperTipGrid);
 
                 card.Child = cardStack;
                 _propertyInspectorStack.Children.Add(card);
@@ -22090,6 +22358,12 @@ namespace Kerf.UI
                 case PropKey.Height:
                 case PropKey.VisualHeight: return layer.RenderTransform != null && layer.RenderTransform.VisualHeight > 0 ? layer.RenderTransform.VisualHeight : layer.Height;
                 case PropKey.CornerRadius: return layer.CornerRadius;
+                case PropKey.StrokeWidth: return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].Width : 0.0;
+                case PropKey.StrokeTrimStart: return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimStart : 0.0;
+                case PropKey.StrokeTrimEnd: return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimEnd : 1.0;
+                case PropKey.StrokeTrimOffset: return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimOffset : 0.0;
+                case PropKey.StrokeTaperStart: return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TaperStart : 0.0;
+                case PropKey.StrokeTaperEnd: return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TaperEnd : 0.0;
                 default: return 0.0;
             }
         }
@@ -22434,6 +22708,18 @@ namespace Kerf.UI
                     return layer.Opacity;
                 case PropKey.CornerRadius:
                     return layer.CornerRadius;
+                case PropKey.StrokeWidth:
+                    return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].Width : 0.0;
+                case PropKey.StrokeTrimStart:
+                    return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimStart : 0.0;
+                case PropKey.StrokeTrimEnd:
+                    return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimEnd : 1.0;
+                case PropKey.StrokeTrimOffset:
+                    return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimOffset : 0.0;
+                case PropKey.StrokeTaperStart:
+                    return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TaperStart : 0.0;
+                case PropKey.StrokeTaperEnd:
+                    return (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TaperEnd : 0.0;
                 default:
                     return 0.0;
             }
@@ -22931,6 +23217,12 @@ namespace Kerf.UI
                 case PropKey.VisualWidth: return "Visual Width";
                 case PropKey.VisualHeight: return "Visual Height";
                 case PropKey.CornerRadius: return "Corner Radius";
+                case PropKey.StrokeWidth: return "Stroke Width";
+                case PropKey.StrokeTrimStart: return "Trim Start";
+                case PropKey.StrokeTrimEnd: return "Trim End";
+                case PropKey.StrokeTrimOffset: return "Trim Offset";
+                case PropKey.StrokeTaperStart: return "Taper Start";
+                case PropKey.StrokeTaperEnd: return "Taper End";
                 default: return ((PropKey)prop).ToString();
             }
         }
@@ -22968,6 +23260,12 @@ namespace Kerf.UI
                     case PropKey.Height:
                     case PropKey.VisualHeight: val = layer.RenderTransform != null && layer.RenderTransform.VisualHeight > 0 ? layer.RenderTransform.VisualHeight : layer.Height; break;
                     case PropKey.CornerRadius: val = layer.CornerRadius; break;
+                    case PropKey.StrokeWidth: val = (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].Width : 0.0; break;
+                    case PropKey.StrokeTrimStart: val = (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimStart : 0.0; break;
+                    case PropKey.StrokeTrimEnd: val = (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimEnd : 1.0; break;
+                    case PropKey.StrokeTrimOffset: val = (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TrimOffset : 0.0; break;
+                    case PropKey.StrokeTaperStart: val = (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TaperStart : 0.0; break;
+                    case PropKey.StrokeTaperEnd: val = (layer.Strokes != null && layer.Strokes.Count > 0) ? layer.Strokes[0].TaperEnd : 0.0; break;
                 }
             }
 
@@ -22980,10 +23278,16 @@ namespace Kerf.UI
                 case PropKey.VisualWidth:
                 case PropKey.VisualHeight:
                 case PropKey.CornerRadius:
+                case PropKey.StrokeWidth:
                     return string.Format("{0:F1} px", val);
                 case PropKey.Rotation:
                     return string.Format("{0:F1} °", val);
                 case PropKey.Opacity:
+                case PropKey.StrokeTrimStart:
+                case PropKey.StrokeTrimEnd:
+                case PropKey.StrokeTrimOffset:
+                case PropKey.StrokeTaperStart:
+                case PropKey.StrokeTaperEnd:
                     return string.Format("{0:F0} %", val * 100);
                 case PropKey.ScaleX:
                 case PropKey.ScaleY:
