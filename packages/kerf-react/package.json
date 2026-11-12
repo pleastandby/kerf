@@ -1,5 +1,5 @@
 {
-  "name": "@pleastandby/kerf-react",
+  "name": "kerf-react",
   "version": "1.0.0",
   "description": "Official plug-and-play React runtime for Kerf (.kfx) interactive motion graphics, vector animations, and state machines.",
   "license": "MIT",
@@ -21,6 +21,9 @@
     "interactive"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
