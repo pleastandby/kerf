@@ -796,7 +796,7 @@ namespace Kerf.UI.Dialogs
 
             stack.Children.Add(CreateSubHeading("Step 2: Place Your Exported .kfx File"));
             stack.Children.Add(CreateParagraph(
-                "Export your animation from Kerf Studio via 'Export > Kerf Animation (.kfx)' and place the generated file into your project's public folder, e.g. `public/animations/hero.kfx`. In Vite or Create React App, files in `public/` are accessible directly at the root URL `/animations/hero.kfx`."));
+                "Export your animation from Kerf via 'Export > Kerf Animation (.kfx)' and place the generated file into your project's public folder, e.g. `public/animations/hero.kfx`. In Vite or Create React App, files in `public/` are accessible directly at the root URL `/animations/hero.kfx`."));
 
             stack.Children.Add(CreateSubHeading("Step 3: Declarative Component (<KerfPlayer />)"));
             stack.Children.Add(CreateParagraph(
@@ -1056,7 +1056,7 @@ namespace Kerf.UI.Dialogs
             var stack = new StackPanel();
             stack.Children.Add(CreateSectionHeading("Interactive State Machine Runtime", "INTERACTIVITY"));
             stack.Children.Add(CreateParagraph(
-                "Kerf State Machines enable complex interactive animation logic inside a single .kfx package. Instead of stitching multiple video clips or complex CSS keyframes together, you define multi-state transitions in Kerf Studio and trigger them from code with smooth Bézier rest-pose blending."));
+                "Kerf State Machines enable complex interactive animation logic inside a single .kfx package. Instead of stitching multiple video clips or complex CSS keyframes together, you define multi-state transitions in Kerf and trigger them from code with smooth Bézier rest-pose blending."));
 
             stack.Children.Add(CreateSubHeading("Input Types Explained"));
             string[][] inputRows = new string[][]
@@ -1069,10 +1069,10 @@ namespace Kerf.UI.Dialogs
 
             stack.Children.Add(CreateSubHeading("Pointer Event Listeners on Layers"));
             stack.Children.Add(CreateParagraph(
-                "When authoring in Kerf Studio's Animate Mode, you can attach pointer listeners directly to vector layers. The web runtime automatically maps canvas mouse and touch events to the exact geometry boundaries:"));
+                "When authoring in Kerf's Animate Mode, you can attach pointer listeners directly to vector layers. The web runtime automatically maps canvas mouse and touch events to the exact geometry boundaries:"));
 
             string pointerCode =
-                "// Inside .kfx package state-machines.json (configured via Kerf Studio UI):\n" +
+                "// Inside .kfx package state-machines.json (configured via Kerf UI):\n" +
                 "// Target layer 'SubmitButton' -> Event: 'PointerDown' -> Fires Trigger 'SubmitClicked'\n" +
                 "// Target layer 'SubmitButton' -> Event: 'PointerEnter' -> Sets Bool 'isHovered' = true\n" +
                 "// Target layer 'SubmitButton' -> Event: 'PointerExit' -> Sets Bool 'isHovered' = false\n\n" +
@@ -1163,7 +1163,7 @@ namespace Kerf.UI.Dialogs
             stack.Children.Add(CreateSubHeading("Core Specifications & Security Guarantees"));
             stack.Children.Add(CreateParagraph(
                 "1. Pure Declarative JSON: No executable JavaScript or arbitrary code execution within the container.\n" +
-                "2. Dual-Payload Persistence: Fully round-trippable back into Kerf Studio while optimized for lightweight web streaming.\n" +
+                "2. Dual-Payload Persistence: Fully round-trippable back into Kerf while optimized for lightweight web streaming.\n" +
                 "3. Safe Relative Paths: Directory traversal attempts ('../') are rejected by the runtime unpacker.\n" +
                 "4. High-DPI Vector Fidelity: Infinite zoom with resolution-independent Bézier rasterization."));
 

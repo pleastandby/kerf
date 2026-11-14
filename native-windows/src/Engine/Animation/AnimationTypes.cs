@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Kerf.Model;
 
 namespace Kerf.Engine.Animation
 {
@@ -28,6 +29,8 @@ namespace Kerf.Engine.Animation
         StrokeTrimOffset = 21,
         StrokeTaperStart = 22,
         StrokeTaperEnd = 23,
+        Path = 24,
+        PathNode = 25,
         Custom = 100
     }
 
@@ -89,6 +92,8 @@ namespace Kerf.Engine.Animation
         public double InitialVelocity { get; set; }
         public bool IsTangentBroken { get; set; }
         public EasingPreset Preset { get; set; }
+        public VectorGeometry GeometryValue { get; set; }
+        public BezierNode GeometryNodeValue { get; set; }
 
         public Keyframe() : this(0.0, 0.0, InterpMode.Linear) { }
 
@@ -120,6 +125,8 @@ namespace Kerf.Engine.Animation
             kf.InitialVelocity = InitialVelocity;
             kf.IsTangentBroken = IsTangentBroken;
             kf.Preset = Preset;
+            kf.GeometryValue = GeometryValue != null ? GeometryValue.Clone() : null;
+            kf.GeometryNodeValue = GeometryNodeValue != null ? GeometryNodeValue.Clone() : null;
             return kf;
         }
 
@@ -169,11 +176,12 @@ namespace Kerf.Engine.Animation
         public string TargetNodeId { get; set; }
         public ushort Prop { get; set; }
         public string PropertyPath { get; set; }
+        public int GeometryNodeIndex { get; set; }
         public List<Keyframe> Keys { get; set; }
 
         public Track() : this(0, 0) { }
 
-        public Track(uint nodeId, ushort prop, string targetNodeId = null, string propPath = null)
+        public Track(uint nodeId, ushort prop, string targetNodeId = null, string propPath = null, int geometryNodeIndex = -1)
         {
             Id = Guid.NewGuid().ToString("N");
             IsActive = true;
@@ -181,6 +189,7 @@ namespace Kerf.Engine.Animation
             TargetNodeId = targetNodeId ?? string.Empty;
             Prop = prop;
             PropertyPath = propPath ?? ((PropKey)prop).ToString();
+            GeometryNodeIndex = geometryNodeIndex;
             Keys = new List<Keyframe>();
         }
 
@@ -205,6 +214,8 @@ namespace Kerf.Engine.Animation
                     Keys[i].InitialVelocity = kf.InitialVelocity;
                     Keys[i].IsTangentBroken = kf.IsTangentBroken;
                     Keys[i].Preset = kf.Preset;
+                    Keys[i].GeometryValue = kf.GeometryValue != null ? kf.GeometryValue.Clone() : null;
+                    Keys[i].GeometryNodeValue = kf.GeometryNodeValue != null ? kf.GeometryNodeValue.Clone() : null;
                     return;
                 }
             }
@@ -345,6 +356,16 @@ namespace Kerf.Engine.Animation
             }
         }
 
+        public VectorGeometry SampleGeometry(double t)
+        {
+            return GeometryAnimation.Sample(Keys, t);
+        }
+
+        public BezierNode SampleGeometryNode(double t)
+        {
+            return GeometryAnimation.SampleNode(Keys, t);
+        }
+
         private class KeyframeComparer : IComparer<Keyframe>
         {
             public static readonly KeyframeComparer Instance = new KeyframeComparer();
@@ -358,11 +379,147 @@ namespace Kerf.Engine.Animation
         }
     }
 
+    public static class GeometryAnimation
+    {
+        public static VectorGeometry Sample(IList<Keyframe> keys, double time)
+        {
+            if (keys == null || keys.Count == 0) return null;
+            var valid = new List<Keyframe>();
+            for (int i = 0; i < keys.Count; i++)
+                if (keys[i] != null && keys[i].GeometryValue != null) valid.Add(keys[i]);
+            if (valid.Count == 0) return null;
+            if (time <= valid[0].Time) return valid[0].GeometryValue.Clone();
+            if (time >= valid[valid.Count - 1].Time) return valid[valid.Count - 1].GeometryValue.Clone();
+
+            for (int i = 0; i < valid.Count - 1; i++)
+            {
+                Keyframe from = valid[i];
+                Keyframe to = valid[i + 1];
+                if (time < from.Time || time > to.Time) continue;
+                double span = to.Time - from.Time;
+                double progress = span <= 1e-6 ? 1.0 : Math.Max(0.0, Math.Min(1.0, (time - from.Time) / span));
+                if (from.Interp == InterpMode.Hold) return from.GeometryValue.Clone();
+                if (from.Interp == InterpMode.Cubic)
+                {
+                    progress = CubicBezierEase.Evaluate(progress, from.X1, from.Y1, from.X2, from.Y2);
+                    if (double.IsNaN(progress) || double.IsInfinity(progress)) progress = 0.0;
+                }
+                else if (from.Interp == InterpMode.Spring)
+                {
+                    progress = EasingEngine.EvaluateSpring(time - from.Time, from.Mass, from.Stiffness, from.Damping, from.InitialVelocity);
+                    if (double.IsNaN(progress) || double.IsInfinity(progress)) progress = 0.0;
+                }
+                return Interpolate(from.GeometryValue, to.GeometryValue, Math.Max(0.0, Math.Min(1.0, progress)));
+            }
+            return valid[valid.Count - 1].GeometryValue.Clone();
+        }
+
+        public static BezierNode SampleNode(IList<Keyframe> keys, double time)
+        {
+            if (keys == null || keys.Count == 0) return null;
+            var valid = new List<Keyframe>();
+            for (int i = 0; i < keys.Count; i++)
+                if (keys[i] != null && keys[i].GeometryNodeValue != null) valid.Add(keys[i]);
+            if (valid.Count == 0) return null;
+            if (time <= valid[0].Time) return valid[0].GeometryNodeValue.Clone();
+            if (time >= valid[valid.Count - 1].Time) return valid[valid.Count - 1].GeometryNodeValue.Clone();
+
+            for (int i = 0; i < valid.Count - 1; i++)
+            {
+                Keyframe from = valid[i];
+                Keyframe to = valid[i + 1];
+                if (time < from.Time || time > to.Time) continue;
+                double span = to.Time - from.Time;
+                double progress = span <= 1e-6 ? 1.0 : (time - from.Time) / span;
+                if (from.Interp == InterpMode.Hold) return from.GeometryNodeValue.Clone();
+                if (from.Interp == InterpMode.Cubic)
+                    progress = CubicBezierEase.Evaluate(progress, from.X1, from.Y1, from.X2, from.Y2);
+                else if (from.Interp == InterpMode.Spring)
+                    progress = EasingEngine.EvaluateSpring(time - from.Time, from.Mass, from.Stiffness, from.Damping, from.InitialVelocity);
+                if (double.IsNaN(progress) || double.IsInfinity(progress)) progress = 0.0;
+
+                BezierNode a = from.GeometryNodeValue;
+                BezierNode b = to.GeometryNodeValue;
+                return new BezierNode
+                {
+                    Anchor = Interpolate(a.Anchor, b.Anchor, progress),
+                    InHandle = Interpolate(a.InHandle, b.InHandle, progress),
+                    OutHandle = Interpolate(a.OutHandle, b.OutHandle, progress),
+                    Type = progress < 0.5 ? a.Type : b.Type
+                };
+            }
+            return valid[valid.Count - 1].GeometryNodeValue.Clone();
+        }
+
+        public static VectorGeometry Interpolate(VectorGeometry from, VectorGeometry to, double amount)
+        {
+            if (from == null) return to != null ? to.Clone() : null;
+            if (to == null) return from.Clone();
+            amount = Math.Max(0.0, Math.Min(1.0, amount));
+            if (amount <= 0.0) return from.Clone();
+            if (amount >= 1.0) return to.Clone();
+
+            bool canMorph = from.Nodes != null && to.Nodes != null && from.Nodes.Count == to.Nodes.Count &&
+                from.Nodes.Count > 0 && string.IsNullOrEmpty(from.SvgPathData) && string.IsNullOrEmpty(to.SvgPathData);
+            if (!canMorph) return from.Clone();
+
+            var result = new VectorGeometry
+            {
+                IsClosed = amount < 0.5 ? from.IsClosed : to.IsClosed,
+                SvgPathData = null,
+                Nodes = new List<BezierNode>(from.Nodes.Count)
+            };
+            for (int i = 0; i < from.Nodes.Count; i++)
+            {
+                BezierNode a = from.Nodes[i];
+                BezierNode b = to.Nodes[i];
+                if (a == null || b == null)
+                {
+                    result.Nodes.Add((amount < 0.5 ? a : b) != null ? (amount < 0.5 ? a : b).Clone() : new BezierNode());
+                    continue;
+                }
+                result.Nodes.Add(new BezierNode
+                {
+                    Anchor = Interpolate(a.Anchor, b.Anchor, amount),
+                    InHandle = Interpolate(a.InHandle, b.InHandle, amount),
+                    OutHandle = Interpolate(a.OutHandle, b.OutHandle, amount),
+                    Type = amount < 0.5 ? a.Type : b.Type
+                });
+            }
+            return result;
+        }
+
+        private static System.Windows.Point Interpolate(System.Windows.Point a, System.Windows.Point b, double amount)
+        {
+            return new System.Windows.Point(a.X + (b.X - a.X) * amount, a.Y + (b.Y - a.Y) * amount);
+        }
+
+        public static void BlendPoses(Dictionary<uint, VectorGeometry> from, Dictionary<uint, VectorGeometry> to, double amount, Dictionary<uint, VectorGeometry> result)
+        {
+            if (result == null) return;
+            amount = Math.Max(0.0, Math.Min(1.0, amount));
+            var nodeIds = new HashSet<uint>();
+            if (from != null) foreach (uint id in from.Keys) nodeIds.Add(id);
+            if (to != null) foreach (uint id in to.Keys) nodeIds.Add(id);
+            foreach (uint id in nodeIds)
+            {
+                VectorGeometry a = null;
+                VectorGeometry b = null;
+                if (from != null) from.TryGetValue(id, out a);
+                if (to != null) to.TryGetValue(id, out b);
+                VectorGeometry chosen = a == null ? b : b == null ? a : Interpolate(a, b, amount);
+                if (chosen != null) result[id] = chosen.Clone();
+            }
+        }
+    }
+
     public class Clip
     {
         public uint Id { get; set; }
         public string Name { get; set; }
         public double Duration { get; set; }
+        public double WorkAreaStart { get; set; }
+        public double WorkAreaEnd { get; set; }
         public double Fps { get; set; }
         public LoopMode LoopMode { get; set; }
         public List<Track> Tracks { get; set; }
@@ -374,6 +531,8 @@ namespace Kerf.Engine.Animation
             Id = id;
             Name = name ?? "Clip";
             Duration = Math.Max(0.001, duration);
+            WorkAreaStart = 0.0;
+            WorkAreaEnd = Duration;
             Fps = Math.Max(1.0, fps);
             LoopMode = loopMode;
             Tracks = new List<Track>();
@@ -393,11 +552,26 @@ namespace Kerf.Engine.Animation
 
         public void SampleToPose(double t, Dictionary<uint, Dictionary<ushort, double>> outPose)
         {
-            if (outPose == null || Tracks == null) return;
+            SampleToPose(t, outPose, null);
+        }
+
+        public void SampleToPose(double t, Dictionary<uint, Dictionary<ushort, double>> outPose, Dictionary<uint, VectorGeometry> geometryPose)
+        {
+            if (Tracks == null) return;
+            // Sample complete paths first so per-node tracks can overlay them regardless of
+            // track creation order.
             for (int i = 0; i < Tracks.Count; i++)
             {
                 Track tr = Tracks[i];
                 if (tr == null || !tr.IsActive) continue;
+                if (tr.Prop == (ushort)PropKey.Path)
+                {
+                    VectorGeometry geometry = tr.SampleGeometry(t);
+                    if (geometry != null && geometryPose != null) geometryPose[tr.NodeId] = geometry;
+                    continue;
+                }
+                if (tr.Prop == (ushort)PropKey.PathNode) continue;
+                if (outPose == null) continue;
                 double val = tr.Sample(t);
 
                 Dictionary<ushort, double> nodeProps;
@@ -408,6 +582,33 @@ namespace Kerf.Engine.Animation
                 }
                 nodeProps[tr.Prop] = val;
             }
+
+            if (geometryPose != null)
+            {
+                for (int i = 0; i < Tracks.Count; i++)
+                {
+                    Track tr = Tracks[i];
+                    if (tr == null || !tr.IsActive || tr.Prop != (ushort)PropKey.PathNode || tr.GeometryNodeIndex < 0) continue;
+                    VectorGeometry geometry;
+                    if (!geometryPose.TryGetValue(tr.NodeId, out geometry) || geometry == null || geometry.Nodes == null || tr.GeometryNodeIndex >= geometry.Nodes.Count) continue;
+                    BezierNode node = tr.SampleGeometryNode(t);
+                    if (node != null) geometry.Nodes[tr.GeometryNodeIndex] = node;
+                }
+            }
+        }
+
+        public double GetNormalizedWorkAreaStart()
+        {
+            if (double.IsNaN(WorkAreaStart) || double.IsInfinity(WorkAreaStart)) return 0.0;
+            return Math.Max(0.0, Math.Min(Math.Max(0.0, Duration - 0.001), WorkAreaStart));
+        }
+
+        public double GetNormalizedWorkAreaEnd()
+        {
+            double start = GetNormalizedWorkAreaStart();
+            if (double.IsNaN(WorkAreaEnd) || double.IsInfinity(WorkAreaEnd) || WorkAreaEnd <= start)
+                return Math.Max(start + 0.001, Duration);
+            return Math.Max(start + 0.001, Math.Min(Duration, WorkAreaEnd));
         }
 
         public Dictionary<uint, Dictionary<ushort, double>> EvaluateAt(double t)
@@ -439,6 +640,18 @@ namespace Kerf.Engine.Animation
                 AddTrack(tr);
             }
             return tr;
+        }
+
+        public Track GetGeometryNodeTrack(uint nodeId, int geometryNodeIndex)
+        {
+            if (Tracks == null) return null;
+            for (int i = 0; i < Tracks.Count; i++)
+            {
+                Track track = Tracks[i];
+                if (track != null && track.NodeId == nodeId && track.Prop == (ushort)PropKey.PathNode &&
+                    track.GeometryNodeIndex == geometryNodeIndex) return track;
+            }
+            return null;
         }
 
         public List<Track> GetTracksForNode(uint nodeId)

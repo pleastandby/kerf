@@ -19,11 +19,13 @@ namespace Kerf.Engine
     {
         public string Description { get; private set; }
         private readonly List<ICommand> commands;
+        private readonly Action _onCompleted;
 
-        public CompositeCommand(string desc, IEnumerable<ICommand> cmds)
+        public CompositeCommand(string desc, IEnumerable<ICommand> cmds, Action onCompleted = null)
         {
             Description = desc;
             commands = new List<ICommand>(cmds);
+            _onCompleted = onCompleted;
         }
 
         public void Execute()
@@ -32,6 +34,7 @@ namespace Kerf.Engine
             {
                 commands[i].Execute();
             }
+            if (_onCompleted != null) _onCompleted();
         }
 
         public void Unexecute()
@@ -40,6 +43,7 @@ namespace Kerf.Engine
             {
                 commands[i].Unexecute();
             }
+            if (_onCompleted != null) _onCompleted();
         }
     }
 
@@ -832,6 +836,60 @@ namespace Kerf.Engine
         }
     }
 
+    public class ModifyKeyframeGeometryCommand : ICommand
+    {
+        public string Description { get { return "Modify Path Keyframe"; } }
+        private readonly Keyframe _keyframe;
+        private readonly VectorGeometry _beforeGeometry;
+        private readonly VectorGeometry _afterGeometry;
+        private readonly Action _onRender;
+
+        public ModifyKeyframeGeometryCommand(Keyframe keyframe, VectorGeometry beforeGeometry, VectorGeometry afterGeometry, Action onRender = null)
+        {
+            _keyframe = keyframe;
+            _beforeGeometry = beforeGeometry != null ? beforeGeometry.Clone() : null;
+            _afterGeometry = afterGeometry != null ? afterGeometry.Clone() : null;
+            _onRender = onRender;
+        }
+
+        public void Execute()
+        {
+            if (_keyframe != null) _keyframe.GeometryValue = _afterGeometry != null ? _afterGeometry.Clone() : null;
+            if (_onRender != null) _onRender();
+        }
+
+        public void Unexecute()
+        {
+            if (_keyframe != null) _keyframe.GeometryValue = _beforeGeometry != null ? _beforeGeometry.Clone() : null;
+            if (_onRender != null) _onRender();
+        }
+    }
+
+    public class ModifyKeyframeGeometryNodeCommand : ICommand
+    {
+        public string Description { get { return "Modify Path Node Keyframe"; } }
+        private readonly Keyframe _keyframe;
+        private readonly BezierNode _beforeNode;
+        private readonly BezierNode _afterNode;
+
+        public ModifyKeyframeGeometryNodeCommand(Keyframe keyframe, BezierNode beforeNode, BezierNode afterNode)
+        {
+            _keyframe = keyframe;
+            _beforeNode = beforeNode != null ? beforeNode.Clone() : null;
+            _afterNode = afterNode != null ? afterNode.Clone() : null;
+        }
+
+        public void Execute()
+        {
+            if (_keyframe != null) _keyframe.GeometryNodeValue = _afterNode != null ? _afterNode.Clone() : null;
+        }
+
+        public void Unexecute()
+        {
+            if (_keyframe != null) _keyframe.GeometryNodeValue = _beforeNode != null ? _beforeNode.Clone() : null;
+        }
+    }
+
     public class MoveKeyframesCommand : ICommand
     {
         public string Description { get { return "Move Keyframes"; } }
@@ -1420,6 +1478,40 @@ namespace Kerf.Engine
         }
     }
 
+    public class AnimationClipWorkAreaCommand : ICommand
+    {
+        public string Description { get { return "Change Timeline Work Area"; } }
+        private readonly Clip _clip;
+        private readonly double _beforeStart;
+        private readonly double _beforeEnd;
+        private readonly double _afterStart;
+        private readonly double _afterEnd;
+        private readonly Action _onRender;
+
+        public AnimationClipWorkAreaCommand(Clip clip, double afterStart, double afterEnd, Action onRender = null)
+        {
+            _clip = clip;
+            _beforeStart = clip != null ? clip.GetNormalizedWorkAreaStart() : 0.0;
+            _beforeEnd = clip != null ? clip.GetNormalizedWorkAreaEnd() : 1.0;
+            _afterStart = afterStart;
+            _afterEnd = afterEnd;
+            _onRender = onRender;
+        }
+
+        private void Apply(double start, double end)
+        {
+            if (_clip != null)
+            {
+                _clip.WorkAreaStart = Math.Max(0.0, Math.Min(Math.Max(0.0, _clip.Duration - 0.001), start));
+                _clip.WorkAreaEnd = Math.Max(_clip.WorkAreaStart + 0.001, Math.Min(_clip.Duration, end));
+            }
+            if (_onRender != null) _onRender();
+        }
+
+        public void Execute() { Apply(_afterStart, _afterEnd); }
+        public void Unexecute() { Apply(_beforeStart, _beforeEnd); }
+    }
+
     public class ModifyCornerRadiusCommand : ICommand
     {
         public string Description { get { return "Change Corner Radius"; } }
@@ -1469,8 +1561,6 @@ namespace Kerf.Engine
         private readonly LayerNode _layer;
         private readonly VectorGeometry _beforeGeo;
         private readonly VectorGeometry _afterGeo;
-        private readonly Rect _beforeBounds;
-        private readonly Rect _afterBounds;
         private readonly Action _onRender;
 
         public ModifyVectorGeometryCommand(LayerNode layer, VectorGeometry before, VectorGeometry after, Action onRender)
@@ -1478,8 +1568,9 @@ namespace Kerf.Engine
             _layer = layer;
             _beforeGeo = (before != null) ? before.Clone() : null;
             _afterGeo = (after != null) ? after.Clone() : null;
-            _beforeBounds = (before != null) ? Kerf.Tools.BezierVectorEngine.CalculateBounds(before) : (layer != null ? layer.GetBounds() : new Rect(0, 0, 0, 0));
-            _afterBounds = (after != null) ? Kerf.Tools.BezierVectorEngine.CalculateBounds(after) : (layer != null ? layer.GetBounds() : new Rect(0, 0, 0, 0));
+            // Path geometry is stored in the layer's parent coordinate space. Recomputing
+            // X/Y from its anchors changes the transform pivot, which makes undo and grouped
+            // edits visibly jump. A node edit changes geometry only; layer bounds stay fixed.
             _onRender = onRender;
         }
 
@@ -1488,10 +1579,6 @@ namespace Kerf.Engine
             if (_layer != null && _afterGeo != null)
             {
                 _layer.Geometry = _afterGeo.Clone();
-                _layer.X = _afterBounds.X;
-                _layer.Y = _afterBounds.Y;
-                _layer.Width = Math.Max(2, _afterBounds.Width);
-                _layer.Height = Math.Max(2, _afterBounds.Height);
             }
             if (_onRender != null) _onRender();
         }
@@ -1501,10 +1588,6 @@ namespace Kerf.Engine
             if (_layer != null && _beforeGeo != null)
             {
                 _layer.Geometry = _beforeGeo.Clone();
-                _layer.X = _beforeBounds.X;
-                _layer.Y = _beforeBounds.Y;
-                _layer.Width = Math.Max(2, _beforeBounds.Width);
-                _layer.Height = Math.Max(2, _beforeBounds.Height);
             }
             if (_onRender != null) _onRender();
         }
@@ -2207,20 +2290,28 @@ namespace Kerf.Engine
         public string Name { get; set; }
         public string Caption { get; set; }
         public StateType StateType { get; set; }
+        public StateKind Kind { get; set; }
         public int ClipIndex { get; set; }
         public string ClipName { get; set; }
+        public int BlendInputIndex { get; set; }
+        public List<Blend1DItem> Blend1DItems { get; set; }
         public double Speed { get; set; }
         public bool Loop { get; set; }
+        public LoopMode LoopMode { get; set; }
 
         public StateSnapshot()
         {
             Name = "State";
             Caption = string.Empty;
             StateType = StateType.Single;
+            Kind = StateKind.Animation;
             ClipIndex = -1;
             ClipName = null;
+            BlendInputIndex = -1;
+            Blend1DItems = new List<Blend1DItem>();
             Speed = 1.0;
             Loop = true;
+            LoopMode = Kerf.Engine.Animation.LoopMode.Loop;
         }
 
         public StateSnapshot(MachineState s) : this()
@@ -2230,10 +2321,14 @@ namespace Kerf.Engine
                 Name = s.Name;
                 Caption = s.Caption ?? string.Empty;
                 StateType = s.StateType;
+                Kind = s.Kind;
                 ClipIndex = s.ClipIndex;
                 ClipName = s.ClipName;
+                BlendInputIndex = s.BlendInputIndex;
+                Blend1DItems = CloneBlendItems(s.Blend1DItems);
                 Speed = s.Speed;
-                Loop = s.Loop;
+                LoopMode = s.LoopMode;
+                Loop = LoopMode != Kerf.Engine.Animation.LoopMode.OneShot;
             }
         }
 
@@ -2243,11 +2338,24 @@ namespace Kerf.Engine
             snap.Name = Name;
             snap.Caption = Caption;
             snap.StateType = StateType;
+            snap.Kind = Kind;
             snap.ClipIndex = ClipIndex;
             snap.ClipName = ClipName;
+            snap.BlendInputIndex = BlendInputIndex;
+            snap.Blend1DItems = CloneBlendItems(Blend1DItems);
             snap.Speed = Speed;
             snap.Loop = Loop;
+            snap.LoopMode = LoopMode;
             return snap;
+        }
+
+        private static List<Blend1DItem> CloneBlendItems(IEnumerable<Blend1DItem> items)
+        {
+            var clones = new List<Blend1DItem>();
+            if (items != null)
+                foreach (var item in items)
+                    if (item != null) clones.Add(new Blend1DItem(item.Threshold, item.ClipIndex));
+            return clones;
         }
     }
 
@@ -2277,10 +2385,21 @@ namespace Kerf.Engine
             _state.Name = s.Name;
             _state.Caption = s.Caption;
             _state.StateType = s.StateType;
+            _state.Kind = s.Kind;
             _state.ClipIndex = s.ClipIndex;
             _state.ClipName = s.ClipName;
+            _state.BlendInputIndex = s.BlendInputIndex;
+            _state.Blend1DItems = s.Blend1DItems != null
+                ? s.Blend1DItems.Select(item => new Blend1DItem(item.Threshold, item.ClipIndex)).ToList()
+                : new List<Blend1DItem>();
             _state.Speed = s.Speed;
-            _state.Loop = s.Loop;
+            // Older state edit commands only captured the Loop boolean. Keep those
+            // snapshots working, while preserving PingPong from new mode-aware ones.
+            Kerf.Engine.Animation.LoopMode stateLoopMode = s.LoopMode;
+            if (!s.Loop) stateLoopMode = Kerf.Engine.Animation.LoopMode.OneShot;
+            else if (stateLoopMode == Kerf.Engine.Animation.LoopMode.OneShot)
+                stateLoopMode = Kerf.Engine.Animation.LoopMode.Loop;
+            _state.LoopMode = stateLoopMode;
         }
 
         public void Execute()
@@ -2880,6 +2999,7 @@ namespace Kerf.Engine
         private readonly MachineInput _input;
         private readonly int _inputIndex;
         private readonly List<DependentConditionSlot> _dependentConditions;
+        private readonly List<Tuple<MachineInput, string>> _folderChildren;
         private readonly Action _onChanged;
 
         public DeleteInputCommand(StateMachineDefinition def, MachineInput input, Action onChanged = null)
@@ -2888,7 +3008,18 @@ namespace Kerf.Engine
             _input = input;
             _inputIndex = (def != null && input != null) ? def.Inputs.IndexOf(input) : -1;
             _dependentConditions = new List<DependentConditionSlot>();
+            _folderChildren = new List<Tuple<MachineInput, string>>();
             _onChanged = onChanged;
+
+            if (def != null && input != null && input.Kind == InputKind.Folder && def.Inputs != null)
+            {
+                for (int i = 0; i < def.Inputs.Count; i++)
+                {
+                    var child = def.Inputs[i];
+                    if (child != null && string.Equals(child.ParentFolderId, input.InputId, StringComparison.OrdinalIgnoreCase))
+                        _folderChildren.Add(Tuple.Create(child, child.ParentFolderId));
+                }
+            }
 
             if (def != null && input != null && def.Layers != null)
             {
@@ -2956,6 +3087,11 @@ namespace Kerf.Engine
         {
             if (_def != null && _input != null)
             {
+                for (int i = 0; i < _folderChildren.Count; i++)
+                {
+                    if (_folderChildren[i] != null && _folderChildren[i].Item1 != null)
+                        _folderChildren[i].Item1.ParentFolderId = string.Empty;
+                }
                 for (int i = 0; i < _dependentConditions.Count; i++)
                 {
                     var slot = _dependentConditions[i];
@@ -2977,6 +3113,12 @@ namespace Kerf.Engine
                 {
                     int targetIdx = Math.Max(0, Math.Min(_inputIndex >= 0 ? _inputIndex : _def.Inputs.Count, _def.Inputs.Count));
                     _def.Inputs.Insert(targetIdx, _input);
+                }
+
+                for (int i = 0; i < _folderChildren.Count; i++)
+                {
+                    var child = _folderChildren[i];
+                    if (child != null && child.Item1 != null) child.Item1.ParentFolderId = child.Item2;
                 }
 
                 for (int i = 0; i < _dependentConditions.Count; i++)
@@ -3036,6 +3178,35 @@ namespace Kerf.Engine
                 _input.InitialValue = _oldInitial;
                 _input.Value = _oldInitial;
             }
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class ModifyInputFolderCommand : ICommand
+    {
+        public string Description { get { return "Move Input to Folder"; } }
+        private readonly MachineInput _input;
+        private readonly string _oldFolderId;
+        private readonly string _newFolderId;
+        private readonly Action _onChanged;
+
+        public ModifyInputFolderCommand(MachineInput input, string oldFolderId, string newFolderId, Action onChanged = null)
+        {
+            _input = input;
+            _oldFolderId = oldFolderId ?? string.Empty;
+            _newFolderId = newFolderId ?? string.Empty;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_input != null) _input.ParentFolderId = _newFolderId;
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_input != null) _input.ParentFolderId = _oldFolderId;
             if (_onChanged != null) _onChanged();
         }
     }
@@ -3101,7 +3272,10 @@ namespace Kerf.Engine
 
     public class NodeListenerSnapshot
     {
+        public string Name { get; set; }
         public uint TargetNodeId { get; set; }
+        public string TargetLayerId { get; set; }
+        public string Filter { get; set; }
         public PointerEventKind Kind { get; set; }
         public bool Enabled { get; set; }
         public List<ListenerAction> Actions { get; set; }
@@ -3115,7 +3289,10 @@ namespace Kerf.Engine
         {
             if (listener != null)
             {
+                Name = listener.Name;
                 TargetNodeId = listener.TargetNodeId;
+                TargetLayerId = listener.TargetLayerId;
+                Filter = listener.Filter;
                 Kind = listener.Kind;
                 Enabled = listener.Enabled;
                 Actions = new List<ListenerAction>();
@@ -3139,7 +3316,10 @@ namespace Kerf.Engine
         public void ApplyTo(NodeListener listener)
         {
             if (listener == null) return;
+            listener.Name = Name;
             listener.TargetNodeId = TargetNodeId;
+            listener.TargetLayerId = TargetLayerId;
+            listener.Filter = Filter;
             listener.Kind = Kind;
             listener.Enabled = Enabled;
             listener.Actions = new List<ListenerAction>();
@@ -3292,6 +3472,98 @@ namespace Kerf.Engine
             }
             if (_onChanged != null) _onChanged();
         }
+    }
+
+    public class AddClippingTargetCommand : ICommand
+    {
+        public string Description { get { return "Add Clipping Target"; } }
+        private readonly List<ClippingTargetData> _targets;
+        private readonly ClippingTargetData _target;
+        private readonly int _index;
+        private readonly Action _onChanged;
+
+        public AddClippingTargetCommand(List<ClippingTargetData> targets, ClippingTargetData target, Action onChanged = null)
+        {
+            _targets = targets;
+            _target = target;
+            _index = targets != null ? targets.Count : 0;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_targets != null && _target != null && !_targets.Contains(_target))
+                _targets.Insert(Math.Max(0, Math.Min(_index, _targets.Count)), _target);
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_targets != null && _target != null) _targets.Remove(_target);
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class RemoveClippingTargetCommand : ICommand
+    {
+        public string Description { get { return "Remove Clipping Target"; } }
+        private readonly List<ClippingTargetData> _targets;
+        private readonly ClippingTargetData _target;
+        private readonly int _index;
+        private readonly Action _onChanged;
+
+        public RemoveClippingTargetCommand(List<ClippingTargetData> targets, ClippingTargetData target, Action onChanged = null)
+        {
+            _targets = targets;
+            _target = target;
+            _index = targets != null && target != null ? targets.IndexOf(target) : -1;
+            _onChanged = onChanged;
+        }
+
+        public void Execute()
+        {
+            if (_targets != null && _target != null) _targets.Remove(_target);
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Unexecute()
+        {
+            if (_targets != null && _target != null && !_targets.Contains(_target))
+                _targets.Insert(Math.Max(0, Math.Min(_index, _targets.Count)), _target);
+            if (_onChanged != null) _onChanged();
+        }
+    }
+
+    public class ModifyClippingTargetCommand : ICommand
+    {
+        public string Description { get { return "Modify Clipping Target"; } }
+        private readonly ClippingTargetData _target;
+        private readonly ClippingTargetData _before;
+        private readonly ClippingTargetData _after;
+        private readonly Action _onChanged;
+
+        public ModifyClippingTargetCommand(ClippingTargetData target, ClippingTargetData before, ClippingTargetData after, Action onChanged = null)
+        {
+            _target = target;
+            _before = before != null ? before.Clone() : null;
+            _after = after != null ? after.Clone() : null;
+            _onChanged = onChanged;
+        }
+
+        private void Apply(ClippingTargetData snapshot)
+        {
+            if (_target != null && snapshot != null)
+            {
+                _target.TargetLayerId = snapshot.TargetLayerId;
+                _target.TargetNodeId = snapshot.TargetNodeId;
+                _target.IsInverse = snapshot.IsInverse;
+                _target.Enabled = snapshot.Enabled;
+            }
+            if (_onChanged != null) _onChanged();
+        }
+
+        public void Execute() { Apply(_after); }
+        public void Unexecute() { Apply(_before); }
     }
 
     public class ResolveOrphanedReferencesCommand : ICommand

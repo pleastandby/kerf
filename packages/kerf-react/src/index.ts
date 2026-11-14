@@ -9,7 +9,9 @@ export {
   loadKfxFromArrayBuffer,
   KerfRuntimePlayer,
   cubicBezier,
-  evaluateTrack
+  evaluateTrack,
+  evaluateGeometryTrack,
+  evaluateGeometryNodeTrack
 } from './runtime';
 
 export type {
@@ -17,8 +19,13 @@ export type {
   KfxManifest,
   KfxScene,
   KfxLayer,
+  KfxVectorGeometry,
+  KfxBezierNode,
+  KfxConstraint,
+  KfxClippingTarget,
   KfxFill,
   KfxClip,
+  KfxLoopMode,
   KfxTrack,
   KfxKeyframe,
   KfxStateMachine,

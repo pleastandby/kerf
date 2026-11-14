@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Kerf.Model;
 
 namespace Kerf.Engine.Animation
 {
@@ -7,6 +8,14 @@ namespace Kerf.Engine.Animation
     {
         public double CurrentTime { get; private set; }
         public double Duration { get; set; }
+        public double WorkAreaStart
+        {
+            get { return _activeClip != null ? _activeClip.GetNormalizedWorkAreaStart() : 0.0; }
+        }
+        public double WorkAreaEnd
+        {
+            get { return _activeClip != null ? _activeClip.GetNormalizedWorkAreaEnd() : Duration; }
+        }
         public double Fps { get; set; }
         private double _speed = 1.0;
         public double Speed
@@ -40,7 +49,7 @@ namespace Kerf.Engine.Animation
                 if (_activeClip != null)
                 {
                     Duration = Math.Max(0.001, _activeClip.Duration);
-                    CurrentTime = Math.Max(0.0, Math.Min(Duration, CurrentTime));
+                    CurrentTime = Math.Max(WorkAreaStart, Math.Min(WorkAreaEnd, CurrentTime));
                     LoopMode = _activeClip.LoopMode;
                 }
             }
@@ -48,9 +57,11 @@ namespace Kerf.Engine.Animation
         public StateMachineRuntime ActiveStateMachine { get; set; }
 
         public event EventHandler<Dictionary<uint, Dictionary<ushort, double>>> FrameUpdated;
+        public event EventHandler<Dictionary<uint, VectorGeometry>> GeometryFrameUpdated;
         public event EventHandler PlaybackStopped;
 
         private readonly Dictionary<uint, Dictionary<ushort, double>> _currentPose;
+        private readonly Dictionary<uint, VectorGeometry> _currentGeometryPose;
 
         public AnimationTimelineController(double duration = 1.0, double fps = 60.0)
         {
@@ -63,13 +74,14 @@ namespace Kerf.Engine.Animation
             UseStateMachine = false;
             SnapToFrames = true;
             _currentPose = new Dictionary<uint, Dictionary<ushort, double>>();
+            _currentGeometryPose = new Dictionary<uint, VectorGeometry>();
         }
 
         public void Play()
         {
-            if (CurrentTime >= Duration && LoopMode == LoopMode.OneShot)
+            if (CurrentTime >= WorkAreaEnd || CurrentTime < WorkAreaStart)
             {
-                CurrentTime = 0.0;
+                CurrentTime = WorkAreaStart;
             }
             IsPlaying = true;
         }
@@ -83,7 +95,7 @@ namespace Kerf.Engine.Animation
         {
             IsPlaying = false;
             if (ActiveStateMachine != null) ActiveStateMachine.Reset();
-            Seek(0.0);
+            Seek(WorkAreaStart);
             var handler = PlaybackStopped;
             if (handler != null) handler(this, EventArgs.Empty);
         }
@@ -91,7 +103,7 @@ namespace Kerf.Engine.Animation
         public void Seek(double time)
         {
             if (double.IsNaN(time) || double.IsInfinity(time)) time = 0.0;
-            CurrentTime = Math.Max(0.0, Math.Min(Duration, time));
+            CurrentTime = Math.Max(WorkAreaStart, Math.Min(WorkAreaEnd, time));
             EvaluateAndNotify(0.0);
         }
 
@@ -120,33 +132,36 @@ namespace Kerf.Engine.Animation
                 }
                 else
                 {
+                    double start = WorkAreaStart;
+                    double end = WorkAreaEnd;
+                    double rangeDuration = Math.Max(0.001, end - start);
                     double nextTime = CurrentTime + stepDt * _playDirection;
 
                     switch (LoopMode)
                     {
                         case LoopMode.OneShot:
-                            if (nextTime >= Duration)
+                            if (nextTime >= end)
                             {
-                                CurrentTime = Duration;
+                                CurrentTime = end;
                                 IsPlaying = false;
                             }
-                            else if (nextTime <= 0.0)
+                            else if (nextTime <= start)
                             {
-                                CurrentTime = 0.0;
+                                CurrentTime = start;
                                 IsPlaying = false;
                             }
                             else CurrentTime = nextTime;
                             break;
 
                         case LoopMode.Loop:
-                            CurrentTime = PositiveModulo(nextTime, Duration);
+                            CurrentTime = start + PositiveModulo(nextTime - start, rangeDuration);
                             _playDirection = 1;
                             break;
 
                         case LoopMode.PingPong:
-                            double phase = PositiveModulo(nextTime, Duration * 2.0);
-                            CurrentTime = phase <= Duration ? phase : (Duration * 2.0 - phase);
-                            _playDirection = (phase <= Duration ? 1 : -1) * _playDirection;
+                            double phase = PositiveModulo(nextTime - start, rangeDuration * 2.0);
+                            CurrentTime = start + (phase <= rangeDuration ? phase : (rangeDuration * 2.0 - phase));
+                            _playDirection = (phase <= rangeDuration ? 1 : -1) * _playDirection;
                             break;
                     }
                 }
@@ -167,15 +182,16 @@ namespace Kerf.Engine.Animation
         private void EvaluateAndNotify(double dt)
         {
             _currentPose.Clear();
+            _currentGeometryPose.Clear();
 
             if (UseStateMachine && ActiveStateMachine != null)
             {
                 double effectiveDt = IsPlaying ? Math.Abs(dt) : 0.0;
-                ActiveStateMachine.Update(effectiveDt, _currentPose);
+                ActiveStateMachine.Update(effectiveDt, _currentPose, _currentGeometryPose);
             }
             else if (ActiveClip != null)
             {
-                ActiveClip.SampleToPose(CurrentTime, _currentPose);
+                ActiveClip.SampleToPose(CurrentTime, _currentPose, _currentGeometryPose);
             }
 
             var handler = FrameUpdated;
@@ -183,6 +199,9 @@ namespace Kerf.Engine.Animation
             {
                 handler(this, _currentPose);
             }
+
+            var geometryHandler = GeometryFrameUpdated;
+            if (geometryHandler != null) geometryHandler(this, _currentGeometryPose);
         }
     }
 }

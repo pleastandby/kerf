@@ -14,7 +14,7 @@ updated: "2026-11-11T15:57:00Z"
 number: 1
 name: Project Persistence & Save/Reload (Schema 4.0.0)
 expected: |
-  Create or open an animated project in Kerf Studio with animation clips, property tracks (Position, Scale, Rotation), and a State Machine with inputs/listeners.
+  Create or open an animated project in Kerf with animation clips, property tracks (Position, Scale, Rotation), and a State Machine with inputs/listeners.
   Save the project (File > Save / Ctrl+S) and reopen it (File > Open).
   Verify that all clips, tracks, keyframe curves, state machine nodes, inputs, and listeners load back completely with zero data loss, and the document is saved with SchemaVersion "4.0.0".
 awaiting: user response
@@ -38,7 +38,7 @@ expected: Playing animations or scrubbing transforms (scale, translation, rotati
 result: pending
 
 ### 5. Dedicated Export Window (.kfx, PNG, JPEG, SVG, PDF, MP4) & Home Page
-expected: Clicking the top-right Export button (or File > Export / Ctrl+E) opens the dedicated Export modal with options for .kfx Runtime Package (with optional standalone HTML5 web player runner), PNG, JPEG, SVG, PDF (150/300 DPI vector), and MP4 video. Home Page displays v4.0.0 Motion badge and feature overview.
+expected: Clicking the top-right Export button (or File > Export / Ctrl+E) opens the dedicated Export modal with options for .kfx Runtime Package (with optional standalone HTML5 web player runner), PNG, JPEG, SVG, PDF (150/300 DPI vector), and MP4 video. Home Page displays Kerf 3.1 Beta branding and the feature overview.
 result: pending
 
 ## Summary

@@ -10,12 +10,15 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Shell;
 using Microsoft.Win32;
+using Kerf;
 using IOPath = System.IO.Path;
 
 namespace Kerf.Installer
 {
     public class SetupWindow : Window
     {
+        private const string AppExecutableResource = "KerfAppExecutable";
+        private const string NativeCoreResource = "KerfNativeCore";
         private ProgressBar progressBar;
         private TextBlock statusText;
         private Button btnInstall;
@@ -29,7 +32,7 @@ namespace Kerf.Installer
 
         public SetupWindow()
         {
-            Title = "Kerf Studio Setup — Native DirectX Vector Design";
+            Title = ProductInfo.DisplayName + " Setup";
             Width = 560;
             Height = 440;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -92,7 +95,7 @@ namespace Kerf.Installer
 
             var titleBlock = new TextBlock
             {
-                Text = "KERF STUDIO INSTALLER — v3.0 PRO",
+                Text = "KERF 3.1 BETA SETUP",
                 FontWeight = FontWeights.Bold,
                 FontSize = 11,
                 Foreground = Brushes.White,
@@ -137,7 +140,7 @@ namespace Kerf.Installer
 
             var banner = new TextBlock
             {
-                Text = "Install Kerf Vector Studio",
+                Text = "Install Kerf",
                 FontSize = 18,
                 FontWeight = FontWeights.Bold,
                 Foreground = Brushes.White,
@@ -147,7 +150,7 @@ namespace Kerf.Installer
 
             var desc = new TextBlock
             {
-                Text = "High-performance vector design suite with DirectX acceleration, Pen tool, local storage, and .kerf file association.",
+                Text = "Vector design and animation for Windows. This installer includes everything Kerf needs to install and run.",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Color.FromRgb(0x9E, 0x9E, 0xA8)),
                 TextWrapping = TextWrapping.Wrap,
@@ -179,10 +182,10 @@ namespace Kerf.Installer
             content.Children.Add(txtInstallDir);
 
             // Options
-            chkDesktop = CreateOptionCheckbox("Create Desktop Shortcut (Kerf Studio)", true);
+            chkDesktop = CreateOptionCheckbox("Create Desktop Shortcut (Kerf)", true);
             chkStartMenu = CreateOptionCheckbox("Create Start Menu entry", true);
-            chkAssociate = CreateOptionCheckbox("Register .kerf file extension (Open .kerf with Kerf Studio)", true);
-            chkLaunch = CreateOptionCheckbox("Launch Kerf Studio immediately after install", true);
+            chkAssociate = CreateOptionCheckbox("Register .kerf file extension (Open .kerf with Kerf)", true);
+            chkLaunch = CreateOptionCheckbox("Launch Kerf immediately after install", true);
 
             content.Children.Add(chkDesktop);
             content.Children.Add(chkStartMenu);
@@ -226,7 +229,7 @@ namespace Kerf.Installer
 
             var versionInfo = new TextBlock
             {
-                Text = "Kerf v2.4 (x64) • DirectX 11",
+                Text = "3.1 Beta (64-bit) • DirectX 11",
                 FontSize = 10,
                 Foreground = Brushes.Gray,
                 VerticalAlignment = VerticalAlignment.Center
@@ -236,7 +239,7 @@ namespace Kerf.Installer
 
             btnInstall = new Button
             {
-                Content = "Install Kerf Studio",
+                Content = "Install Kerf",
                 Background = new SolidColorBrush(Color.FromRgb(0x46, 0xEF, 0xB1)),
                 Foreground = new SolidColorBrush(Color.FromRgb(0x0C, 0x42, 0x47)),
                 FontWeight = FontWeights.Bold,
@@ -272,9 +275,9 @@ namespace Kerf.Installer
 
         private void OnInstallClick(object sender, RoutedEventArgs e)
         {
-            if (btnInstall.Content.ToString() == "Launch Kerf Studio")
+            if (btnInstall.Content.ToString() == "Launch Kerf")
             {
-                string targetExe = IOPath.Combine(txtInstallDir.Text, "KerfStudio.exe");
+                string targetExe = IOPath.Combine(txtInstallDir.Text, ProductInfo.ExecutableFileName);
                 if (File.Exists(targetExe))
                 {
                     Process.Start(targetExe);
@@ -299,34 +302,11 @@ namespace Kerf.Installer
                     Directory.CreateDirectory(targetDir);
                 }
 
-                // Locate source KerfStudio.exe
-                string appDir = AppDomain.CurrentDomain.BaseDirectory;
-                string srcExe = IOPath.Combine(appDir, "KerfStudio.exe");
-                if (!File.Exists(srcExe))
-                {
-                    srcExe = IOPath.Combine(appDir, "..", "KerfStudio.exe");
-                }
-                if (!File.Exists(srcExe))
-                {
-                    srcExe = IOPath.Combine(appDir, "native-windows", "..", "KerfStudio.exe");
-                }
-
-                if (!File.Exists(srcExe))
-                {
-                    MessageBox.Show("KerfStudio.exe could not be found to install from:\n" + srcExe, "Source Not Found", MessageBoxButton.OK, MessageBoxImage.Error);
-                    btnInstall.IsEnabled = true;
-                    return;
-                }
-
                 UpdateProgress(35, "Copying application binaries...");
-                string destExe = IOPath.Combine(targetDir, "KerfStudio.exe");
-                File.Copy(srcExe, destExe, true);
-
-                string srcDll = IOPath.Combine(IOPath.GetDirectoryName(srcExe), "kerf_core.dll");
-                if (File.Exists(srcDll))
-                {
-                    File.Copy(srcDll, IOPath.Combine(targetDir, "kerf_core.dll"), true);
-                }
+                string destExe = IOPath.Combine(targetDir, ProductInfo.ExecutableFileName);
+                ExtractEmbeddedResource(AppExecutableResource, destExe);
+                if (HasEmbeddedResource(NativeCoreResource))
+                    ExtractEmbeddedResource(NativeCoreResource, IOPath.Combine(targetDir, "kerf_core.dll"));
 
                 // High DPI Aware Config
                 string configContent = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <startup>\n    <supportedRuntime version=\"v4.0\" sku=\".NETFramework,Version=v4.0\"/>\n  </startup>\n</configuration>";
@@ -338,10 +318,10 @@ namespace Kerf.Installer
                 string projectsDir = IOPath.Combine(localApp, "KerfStudio", "Projects");
                 if (!Directory.Exists(projectsDir)) Directory.CreateDirectory(projectsDir);
 
-                string welcomeFile = IOPath.Combine(projectsDir, "Welcome to Kerf Studio.kerf");
+                string welcomeFile = IOPath.Combine(projectsDir, "Welcome to Kerf.kerf");
                 if (!File.Exists(welcomeFile))
                 {
-                    string sampleKerf = "{\"Format\":\"kerf-vector-design\",\"Version\":\"2.4.0\",\"Name\":\"Welcome to Kerf Studio\",\"Elements\":[{\"Id\":\"w1\",\"Name\":\"Welcome Card\",\"Type\":\"Frame\",\"X\":120,\"Y\":80,\"Width\":400,\"Height\":240,\"CornerRadius\":16,\"Fill\":\"#18181C\",\"Stroke\":\"#2A2A34\",\"StrokeWidth\":1,\"Opacity\":1.0},{\"Id\":\"w2\",\"Name\":\"Title\",\"Type\":\"Text\",\"Text\":\"Welcome to Kerf Studio!\",\"FontSize\":24,\"X\":150,\"Y\":120,\"Width\":340,\"Height\":36,\"Fill\":\"#FFFFFF\"},{\"Id\":\"w3\",\"Name\":\"Subtitle\",\"Type\":\"Text\",\"Text\":\"GPU-accelerated vector design with local storage and .kerf extension.\",\"FontSize\":13,\"X\":150,\"Y\":170,\"Width\":340,\"Height\":48,\"Fill\":\"#9E9EA8\"},{\"Id\":\"w4\",\"Name\":\"Pen Icon\",\"Type\":\"Star\",\"X\":440,\"Y\":120,\"Width\":50,\"Height\":50,\"Fill\":\"#0D99FF\"}]}";
+                    string sampleKerf = "{\"Format\":\"kerf-vector-design\",\"Version\":\"2.4.0\",\"Name\":\"Welcome to Kerf\",\"Elements\":[{\"Id\":\"w1\",\"Name\":\"Welcome Card\",\"Type\":\"Frame\",\"X\":120,\"Y\":80,\"Width\":400,\"Height\":240,\"CornerRadius\":16,\"Fill\":\"#18181C\",\"Stroke\":\"#2A2A34\",\"StrokeWidth\":1,\"Opacity\":1.0},{\"Id\":\"w2\",\"Name\":\"Title\",\"Type\":\"Text\",\"Text\":\"Welcome to Kerf!\",\"FontSize\":24,\"X\":150,\"Y\":120,\"Width\":340,\"Height\":36,\"Fill\":\"#FFFFFF\"},{\"Id\":\"w3\",\"Name\":\"Subtitle\",\"Type\":\"Text\",\"Text\":\"GPU-accelerated vector design with local storage and .kerf extension.\",\"FontSize\":13,\"X\":150,\"Y\":170,\"Width\":340,\"Height\":48,\"Fill\":\"#9E9EA8\"},{\"Id\":\"w4\",\"Name\":\"Pen Icon\",\"Type\":\"Star\",\"X\":440,\"Y\":120,\"Width\":50,\"Height\":50,\"Fill\":\"#0D99FF\"}]}";
                     File.WriteAllText(welcomeFile, sampleKerf, Encoding.UTF8);
                 }
 
@@ -350,16 +330,16 @@ namespace Kerf.Installer
                 {
                     UpdateProgress(70, "Creating Desktop shortcut...");
                     string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-                    CreateShortcut(IOPath.Combine(desktop, "Kerf Studio.lnk"), destExe, targetDir);
+                    CreateShortcut(IOPath.Combine(desktop, "Kerf.lnk"), destExe, targetDir);
                 }
 
                 if (chkStartMenu.IsChecked == true)
                 {
                     UpdateProgress(80, "Creating Start Menu program entry...");
                     string startMenu = Environment.GetFolderPath(Environment.SpecialFolder.StartMenu);
-                    string progDir = IOPath.Combine(startMenu, "Programs", "Kerf Studio");
+                    string progDir = IOPath.Combine(startMenu, "Programs", "Kerf");
                     if (!Directory.Exists(progDir)) Directory.CreateDirectory(progDir);
-                    CreateShortcut(IOPath.Combine(progDir, "Kerf Studio.lnk"), destExe, targetDir);
+                    CreateShortcut(IOPath.Combine(progDir, "Kerf.lnk"), destExe, targetDir);
                 }
 
                 // File Association
@@ -373,7 +353,7 @@ namespace Kerf.Installer
                 RegisterUninstallEntry(targetDir, destExe);
 
                 UpdateProgress(100, "Installation complete!");
-                btnInstall.Content = "Launch Kerf Studio";
+                btnInstall.Content = "Launch Kerf";
                 btnInstall.IsEnabled = true;
 
                 if (chkLaunch.IsChecked == true)
@@ -395,6 +375,28 @@ namespace Kerf.Installer
             statusText.Text = msg;
         }
 
+        private static bool HasEmbeddedResource(string resourceName)
+        {
+            using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+                return stream != null;
+        }
+
+        private static void ExtractEmbeddedResource(string resourceName, string destinationPath)
+        {
+            using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+            {
+                if (source == null)
+                    throw new InvalidDataException("The installer is missing its embedded payload: " + resourceName);
+                using (var destination = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    byte[] buffer = new byte[81920];
+                    int read;
+                    while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                        destination.Write(buffer, 0, read);
+                }
+            }
+        }
+
         private void CreateShortcut(string shortcutPath, string targetPath, string workingDir)
         {
             try
@@ -406,7 +408,7 @@ namespace Kerf.Installer
                     var shortcut = shell.CreateShortcut(shortcutPath);
                     shortcut.TargetPath = targetPath;
                     shortcut.WorkingDirectory = workingDir;
-                    shortcut.Description = "Kerf Studio — Native DirectX Vector Design";
+                    shortcut.Description = ProductInfo.DisplayName + " — vector design and animation";
                     shortcut.Save();
                 }
             }
@@ -453,16 +455,16 @@ namespace Kerf.Installer
                 string uninstBat = IOPath.Combine(targetDir, "uninstall.bat");
                 var sb = new StringBuilder();
                 sb.AppendLine("@echo off");
-                sb.AppendLine("echo Uninstalling Kerf Studio...");
-                sb.AppendLine("taskkill /f /im KerfStudio.exe >nul 2>&1");
+                sb.AppendLine("echo Uninstalling Kerf...");
+                sb.AppendLine("taskkill /f /im Kerf.exe >nul 2>&1");
                 sb.AppendLine("reg delete \"HKCU\\Software\\Classes\\.kerf\" /f >nul 2>&1");
                 sb.AppendLine("reg delete \"HKCU\\Software\\Classes\\Kerf.DesignFile\" /f >nul 2>&1");
                 sb.AppendLine("reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\KerfStudio\" /f >nul 2>&1");
-                string desktopLnk = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kerf Studio.lnk");
+                string desktopLnk = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kerf.lnk");
                 sb.AppendLine(string.Format("del \"{0}\" >nul 2>&1", desktopLnk));
-                string startMenuLnk = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Kerf Studio");
+                string startMenuLnk = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Kerf");
                 sb.AppendLine(string.Format("rmdir /s /q \"{0}\" >nul 2>&1", startMenuLnk));
-                sb.AppendLine("echo Kerf Studio uninstalled successfully.");
+                sb.AppendLine("echo Kerf uninstalled successfully.");
                 sb.AppendLine("pause");
                 File.WriteAllText(uninstBat, sb.ToString(), Encoding.UTF8);
 
@@ -470,9 +472,9 @@ namespace Kerf.Installer
                 {
                     if (key != null)
                     {
-                        key.SetValue("DisplayName", "Kerf Studio — Native DirectX Vector Design");
-                        key.SetValue("DisplayVersion", "2.4.0");
-                        key.SetValue("Publisher", "Kerf Studio");
+                        key.SetValue("DisplayName", ProductInfo.DisplayName);
+                        key.SetValue("DisplayVersion", ProductInfo.Version);
+                        key.SetValue("Publisher", "Kerf");
                         key.SetValue("DisplayIcon", exePath + ",0");
                         key.SetValue("InstallLocation", targetDir);
                         key.SetValue("UninstallString", "\"" + uninstBat + "\"");

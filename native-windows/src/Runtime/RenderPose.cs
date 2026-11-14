@@ -10,6 +10,7 @@ namespace Kerf.Runtime
         public Dictionary<string, Matrix3x2> LayerWorldMatrices { get; private set; }
         public Dictionary<string, double> LayerOpacities { get; private set; }
         public Dictionary<string, RenderTransform> LocalTransforms { get; private set; }
+        public Dictionary<string, VectorGeometry> LayerGeometries { get; private set; }
 
         public RenderPose()
         {
@@ -17,6 +18,7 @@ namespace Kerf.Runtime
             LayerWorldMatrices = new Dictionary<string, Matrix3x2>(StringComparer.Ordinal);
             LayerOpacities = new Dictionary<string, double>(StringComparer.Ordinal);
             LocalTransforms = new Dictionary<string, RenderTransform>(StringComparer.Ordinal);
+            LayerGeometries = new Dictionary<string, VectorGeometry>(StringComparer.Ordinal);
         }
 
         public void Clear()
@@ -25,6 +27,7 @@ namespace Kerf.Runtime
             LayerWorldMatrices.Clear();
             LayerOpacities.Clear();
             LocalTransforms.Clear();
+            LayerGeometries.Clear();
         }
     }
 }

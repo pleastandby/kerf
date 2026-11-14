@@ -112,6 +112,7 @@ namespace Kerf.IO
 
             // Capture initial rest poses
             var restPoses = new Dictionary<LayerNode, RenderTransform>();
+            var restGeometry = AnimationFrameSampler.CaptureRestGeometry(page);
             if (page.Layers != null)
             {
                 foreach (var l in page.Layers)
@@ -134,9 +135,7 @@ namespace Kerf.IO
                 using (var bw = new BinaryWriter(fs))
                 {
                     // Render first frame to establish GIF canvas bounds
-                    var firstPose = new Dictionary<uint, Dictionary<ushort, double>>();
-                    clip.SampleToPose(startT, firstPose);
-                    PropertyBinder.ApplyPoseToLayers(page.Layers, firstPose);
+                    AnimationFrameSampler.ApplyPose(page, clip, startT, restGeometry);
 
                     BitmapSource firstBmp = HighQualityImageRenderer.Render(page, (IEnumerable<LayerNode>)null, options.Scale, options.PreserveTransparency);
                     int width = firstBmp.PixelWidth;
@@ -168,9 +167,7 @@ namespace Kerf.IO
                         double t = startT + ((double)f / fps);
                         if (t > endT) t = endT;
 
-                        var pose = new Dictionary<uint, Dictionary<ushort, double>>();
-                        clip.SampleToPose(t, pose);
-                        PropertyBinder.ApplyPoseToLayers(page.Layers, pose);
+                        AnimationFrameSampler.ApplyPose(page, clip, t, restGeometry);
 
                         BitmapSource frameBmp = (f == 0)
                             ? firstBmp
@@ -199,6 +196,7 @@ namespace Kerf.IO
                 }
 
                 // Restore rest poses
+                AnimationFrameSampler.RestoreRestGeometry(restGeometry);
                 if (page.Layers != null)
                 {
                     foreach (var l in page.Layers)

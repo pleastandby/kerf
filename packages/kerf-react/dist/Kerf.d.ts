@@ -5,7 +5,7 @@ export interface KerfProps {
     src: string;
     /** Whether animation starts playing automatically. Defaults to true. */
     autoplay?: boolean;
-    /** Whether animation loops. Defaults to true. */
+    /** Override the package's authored loop mode. Defaults to the package setting. */
     loop?: boolean;
     /** Initial state machine inputs to bind, e.g. { isHovering: true, score: 42 } */
     inputs?: Record<string, boolean | number>;
@@ -17,6 +17,10 @@ export interface KerfProps {
     onLoad?: (pkg: KfxPackage) => void;
     /** Callback invoked when state machine transitions */
     onStateChange?: (stateName: string) => void;
+    /** Callback invoked when a listener reports a named event */
+    onEvent?: (eventName: string) => void;
+    /** Callback invoked when a listener changes a text view-model property */
+    onTextInputChange?: (name: string, value: string) => void;
 }
 export interface KerfRef {
     /** Set state machine Boolean input */

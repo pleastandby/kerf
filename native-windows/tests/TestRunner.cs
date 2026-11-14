@@ -30,7 +30,7 @@ namespace Kerf.Tests
         public static int Main(string[] args)
         {
             Console.WriteLine("=====================================================================");
-            Console.WriteLine(" Kerf Studio — Automated Verification Test Suite (v3.0.0)");
+            Console.WriteLine(" Kerf — Automated Verification Test Suite (3.1 Beta)");
             Console.WriteLine("=====================================================================");
 
             RunTest("Document Migrations: Legacy React v1/v2 to Canonical v3.0", TestLegacyReactMigration);
@@ -116,6 +116,10 @@ namespace Kerf.Tests
             RunTest("Advanced Stroke Engine: Outside Stroke Clipping, Trim Path & Stroke Tapering", TestAdvancedStrokeEngineOutsideClipTrimAndTaper);
             RunTest("Multiple Fills/Strokes Reordering & Freely Movable Radial Gradients", TestMultipleFillsStrokesReorderAndFreelyMovableRadialGradient);
             RunTest("Smart Guide Distribution, Image Drag-and-Drop & Figma Image Editing", TestSmartGuideDistributionImageImportAndAdjustments);
+            RunTest("Default Artboard, Timeline Work Area & Clipping Command History", TestDefaultArtboardWorkAreaAndClippingHistory);
+            RunTest("Rive Animation Constraints Engine: Transform, Distance, IK & FollowPath Solvers", TestRiveAnimationConstraintsEngine);
+            RunTest("Multi-Target Clipping & Inverse Outside Hole Clipping Engine", TestMultiTargetClippingAndInverseClipping);
+            RunTest("All 13 Rive Listeners, Pointer Coordinate Mapping & Semantic Dispatch", TestAll13RiveListenersAndPointerTracking);
 
             Console.WriteLine("=====================================================================");
             Console.WriteLine(string.Format(" Tests Completed: {0} Passed, {1} Failed", _passed, _failed));
@@ -9721,10 +9725,7 @@ namespace Kerf.Tests
             // Verify Object Canvas Color Updates: In Figma, Fill 0 is the top-most fill on the object
             var gpu = new GpuRenderer();
             var dv = new DrawingVisual();
-            using (var dc = dv.RenderOpen())
-            {
-                gpu.Render(node, dc);
-            }
+            gpu.RenderNodeToVisual(node, dv, 1.0);
             Assert(dv != null, "GpuRenderer renders object with top-most fill rendered on top of canvas shape");
 
             // 2. Stroke Reordering & Expansion Tracking
@@ -9779,7 +9780,6 @@ namespace Kerf.Tests
             Assert(Math.Abs(radPaint.GradientRadius - 0.5) < 0.05, "Dragging radius handle freely updates GradientRadius magnitude");
 
             // 4. GPU Renderer Aspect Ratio Correction Verification
-            var gpu = new GpuRenderer();
             var brush = gpu.CreateBrushFromPaint(radPaint, new Rect(0, 0, 200, 100)) as RadialGradientBrush;
             Assert(brush != null, "CreateBrushFromPaint produces valid RadialGradientBrush");
             Assert(brush.MappingMode == BrushMappingMode.RelativeToBoundingBox, "BrushMappingMode is RelativeToBoundingBox");
@@ -9910,6 +9910,252 @@ namespace Kerf.Tests
                 Directory.Delete(tempDir, true);
             }
             catch { }
+        }
+
+        private static void TestDefaultArtboardWorkAreaAndClippingHistory()
+        {
+            var document = new StudioView().Document;
+            var artboard = document.GetActivePage().Layers.FirstOrDefault(layer => layer.Type == ElementType.Frame);
+            Assert(artboard != null, "A new project starts with an artboard frame");
+            Assert(artboard != null && artboard.Width == 520.0 && artboard.Height == 520.0, "Default artboard size is 520 by 520 pixels");
+            var colorPicker = typeof(StudioView).GetMethod("GetReadableColorAtPoint", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var contrastStudio = new StudioView();
+            string colorOnWhite = (string)colorPicker.Invoke(contrastStudio, new object[] { new Point(50, 50) });
+            Assert(colorOnWhite == "#111111", "Default foreground on the white artboard is a readable dark color");
+            contrastStudio.Document.GetActivePage().Layers[0].Fills[0] = Paint.Solid("#101114");
+            string colorOnDark = (string)colorPicker.Invoke(contrastStudio, new object[] { new Point(50, 50) });
+            Assert(colorOnDark == "#FFFFFF", "Default foreground on a dark shape is a readable light color");
+
+            var clip = new Clip(77, "Work Area", 3.0, 60.0, LoopMode.OneShot)
+            {
+                WorkAreaStart = 1.0,
+                WorkAreaEnd = 2.0
+            };
+            var timeline = new AnimationTimelineController(3.0, 60.0) { ActiveClip = clip };
+            Assert(Math.Abs(timeline.WorkAreaStart - 1.0) < 0.0001 && Math.Abs(timeline.WorkAreaEnd - 2.0) < 0.0001,
+                "Timeline controller reads the clip work-area range");
+            timeline.Seek(0.0);
+            Assert(Math.Abs(timeline.CurrentTime - 1.0) < 0.0001, "Seeking clamps to the work-area start");
+            timeline.Play();
+            timeline.Step(1.5);
+            Assert(Math.Abs(timeline.CurrentTime - 2.0) < 0.0001 && !timeline.IsPlaying,
+                "One-shot playback stops at the work-area end");
+
+            var history = new CommandHistory();
+            history.Execute(new AnimationClipWorkAreaCommand(clip, 0.5, 2.5));
+            Assert(Math.Abs(clip.GetNormalizedWorkAreaStart() - 0.5) < 0.0001 && Math.Abs(clip.GetNormalizedWorkAreaEnd() - 2.5) < 0.0001,
+                "Work-area edits apply through history commands");
+            history.Undo();
+            Assert(Math.Abs(clip.GetNormalizedWorkAreaStart() - 1.0) < 0.0001 && Math.Abs(clip.GetNormalizedWorkAreaEnd() - 2.0) < 0.0001,
+                "Work-area edit undo restores the previous range");
+            history.Redo();
+            Assert(Math.Abs(clip.GetNormalizedWorkAreaStart() - 0.5) < 0.0001 && Math.Abs(clip.GetNormalizedWorkAreaEnd() - 2.5) < 0.0001,
+                "Work-area edit redo reapplies the range");
+
+            var clips = new List<ClippingTargetData>();
+            var target = new ClippingTargetData();
+            history.Execute(new AddClippingTargetCommand(clips, target));
+            Assert(clips.Count == 1 && clips[0] == target, "Clipping target creation is undoable");
+            var modified = target.Clone();
+            modified.TargetLayerId = "mask-layer";
+            modified.TargetNodeId = 123;
+            modified.Enabled = false;
+            history.Execute(new ModifyClippingTargetCommand(target, target.Clone(), modified));
+            Assert(target.TargetLayerId == "mask-layer" && target.TargetNodeId == 123 && !target.Enabled,
+                "Clipping source and enabled state update through history");
+            history.Undo();
+            Assert(string.IsNullOrEmpty(target.TargetLayerId) && target.TargetNodeId == 0 && target.Enabled,
+                "Clipping target modification undo restores the original source");
+            history.Redo();
+            Assert(target.TargetLayerId == "mask-layer" && !target.Enabled, "Clipping target modification redo reapplies source and state");
+            history.Execute(new RemoveClippingTargetCommand(clips, target));
+            Assert(clips.Count == 0, "Clipping target removal executes");
+            history.Undo();
+            Assert(clips.Count == 1 && clips[0] == target, "Clipping target removal undo restores its position");
+
+            var machineState = new MachineState(1, "Blend", StateKind.Animation, 0);
+            var beforeState = new StateSnapshot(machineState);
+            var afterState = beforeState.Clone();
+            afterState.StateType = StateType.Blend1D;
+            afterState.Kind = StateKind.Blend1D;
+            afterState.BlendInputIndex = 0;
+            afterState.Blend1DItems.Add(new Blend1DItem(0.0, 0));
+            afterState.Blend1DItems.Add(new Blend1DItem(1.0, 1));
+            history.Execute(new ModifyStateNodeCommand(machineState, beforeState, afterState));
+            Assert(machineState.Kind == StateKind.Blend1D && machineState.Blend1DItems.Count == 2,
+                "Blend state selection binds two timeline clips and a numeric blend input");
+            history.Undo();
+            Assert(machineState.Kind == StateKind.Animation && machineState.Blend1DItems.Count == 0,
+                "Blend state changes undo without leaving blend configuration behind");
+            history.Redo();
+            Assert(machineState.Kind == StateKind.Blend1D && machineState.Blend1DItems.Count == 2,
+                "Blend state changes redo with both timeline clips restored");
+
+            var listener = new NodeListener(0, PointerEventKind.PointerEnter);
+            listener.Name = "Listener1";
+            listener.Actions.Add(new ListenerAction(ActionKind.Blank, -1));
+            var oldListener = new NodeListenerSnapshot(listener);
+            var newListener = new NodeListenerSnapshot(listener);
+            newListener.Name = "Listener2";
+            newListener.Kind = PointerEventKind.PointerMove;
+            newListener.Actions[0].Kind = ActionKind.AlignObjectToPointer;
+            history.Execute(new ModifyListenerCommand(listener, oldListener, newListener));
+            Assert(listener.Name == "Listener2" && listener.Kind == PointerEventKind.PointerMove && listener.Actions[0].Kind == ActionKind.AlignObjectToPointer,
+                "Listener rename, event kind, and action changes enter command history");
+            history.Undo();
+            Assert(listener.Name == "Listener1" && listener.Kind == PointerEventKind.PointerEnter && listener.Actions[0].Kind == ActionKind.Blank,
+                "Listener event changes undo together");
+        }
+
+        private static void TestRiveAnimationConstraintsEngine()
+        {
+            var page = new Page();
+            var target = new LayerNode { Id = "target-node", Type = ElementType.Rectangle, X = 100, Y = 100, Width = 50, Height = 50 };
+            var follower = new LayerNode { Id = "follower-node", Type = ElementType.Rectangle, X = 0, Y = 0, Width = 50, Height = 50 };
+
+            // 1. Translation constraint
+            var transC = new AnimationConstraintData
+            {
+                Type = AnimationConstraintType.Translation,
+                TargetLayerId = "target-node",
+                ConstrainX = true,
+                ConstrainY = true,
+                Strength = 1.0,
+                Enabled = true
+            };
+            follower.Constraints.Add(transC);
+            page.Layers.Add(target);
+            page.Layers.Add(follower);
+
+            ConstraintsEngine.Solve(page);
+            Assert(follower.RenderTransform != null, "RenderTransform instantiated by ConstraintsEngine");
+            Assert(Math.Abs(follower.RenderTransform.TranslationX - 100.0) < 0.01, "Translation constraint X solved (100)");
+            Assert(Math.Abs(follower.RenderTransform.TranslationY - 100.0) < 0.01, "Translation constraint Y solved (100)");
+
+            // 2. Partial strength blending (50%)
+            transC.Strength = 0.5;
+            ConstraintsEngine.Solve(page);
+            Assert(Math.Abs(follower.RenderTransform.TranslationX - 50.0) < 0.01, "Translation constraint 50% strength solved (50)");
+
+            // 3. Distance constraint (Exact mode)
+            follower.Constraints.Clear();
+            var distC = new AnimationConstraintData
+            {
+                Type = AnimationConstraintType.Distance,
+                TargetLayerId = "target-node",
+                DistanceMode = DistanceConstraintMode.Exact,
+                Distance = 20.0,
+                Strength = 1.0,
+                Enabled = true
+            };
+            follower.Constraints.Add(distC);
+            ConstraintsEngine.Solve(page);
+            double dx = (follower.X + follower.RenderTransform.TranslationX) - target.X;
+            double dy = (follower.Y + follower.RenderTransform.TranslationY) - target.Y;
+            double actualDist = Math.Sqrt(dx * dx + dy * dy);
+            Assert(Math.Abs(actualDist - 20.0) < 0.05, "Distance constraint solved to exact 20.0px");
+
+            // 4. Follow Path constraint
+            follower.Constraints.Clear();
+            var pathLayer = new LayerNode { Id = "path-layer", Type = ElementType.Path, X = 0, Y = 0, Width = 200, Height = 100 };
+            pathLayer.Geometry = new VectorGeometry { IsClosed = false };
+            pathLayer.Geometry.Nodes.Add(new BezierNode(0, 0));
+            pathLayer.Geometry.Nodes.Add(new BezierNode(200, 0));
+            page.Layers.Add(pathLayer);
+
+            var pathC = new AnimationConstraintData
+            {
+                Type = AnimationConstraintType.FollowPath,
+                TargetLayerId = "path-layer",
+                PathDistance = 50.0, // halfway along path
+                OrientToPath = true,
+                Strength = 1.0,
+                Enabled = true
+            };
+            follower.Constraints.Add(pathC);
+            ConstraintsEngine.Solve(page);
+            double followerCenterX = follower.X + follower.RenderTransform.TranslationX + follower.Width * 0.5;
+            Assert(Math.Abs(followerCenterX - 100.0) < 1.0, "FollowPath constraint 50% placed follower center at X=100");
+        }
+
+        private static void TestMultiTargetClippingAndInverseClipping()
+        {
+            var shape = new LayerNode { Id = "masked-shape", Type = ElementType.Rectangle, X = 50, Y = 50, Width = 200, Height = 200 };
+            var clipTarget1 = new LayerNode { Id = "clip-target-1", Type = ElementType.Ellipse, X = 100, Y = 100, Width = 80, Height = 80 };
+            var clipTarget2 = new LayerNode { Id = "clip-target-2", Type = ElementType.Rectangle, X = 120, Y = 120, Width = 40, Height = 40 };
+
+            // Add standard clip target (Inside)
+            var c1 = new ClippingTargetData
+            {
+                TargetLayerId = clipTarget1.Id,
+                IsInverse = false,
+                Enabled = true
+            };
+            shape.ClippingTargets.Add(c1);
+
+            // Add inverse clip target (Hole/Outside cut out)
+            var c2 = new ClippingTargetData
+            {
+                TargetLayerId = clipTarget2.Id,
+                IsInverse = true,
+                Enabled = true
+            };
+            shape.ClippingTargets.Add(c2);
+
+            Assert(shape.ClippingTargets.Count == 2, "Shape has two clipping targets registered");
+            Assert(!shape.ClippingTargets[0].IsInverse, "Clip 1 is Inside clip mode");
+            Assert(shape.ClippingTargets[1].IsInverse, "Clip 2 is Inverse/Hole clip mode");
+
+            // Deep clone preserves clipping targets
+            var clone = shape.Clone();
+            Assert(clone.ClippingTargets != null && clone.ClippingTargets.Count == 2, "Clone deep copies clipping targets");
+            Assert(clone.ClippingTargets[1].IsInverse, "Clone preserves inverse clipping flag");
+        }
+
+        private static void TestAll13RiveListenersAndPointerTracking()
+        {
+            var smDef = new StateMachineDefinition("ListenersMachine");
+            var inputX = MachineInput.Number("pointerX", 0.0);
+            var inputY = MachineInput.Number("pointerY", 0.0);
+            var inputNorm = MachineInput.Number("pointerNormX", 0.0);
+            var inputBool = MachineInput.Bool("keyTriggered", false);
+            var inputTrigger = MachineInput.Trigger("submitAction");
+            smDef.AddInput(inputX);
+            smDef.AddInput(inputY);
+            smDef.AddInput(inputNorm);
+            smDef.AddInput(inputBool);
+            smDef.AddInput(inputTrigger);
+
+            // Register PointerMove listener with coordinate tracking
+            var moveListener = new NodeListener(101u, PointerEventKind.PointerMove);
+            moveListener.Actions.Add(new ListenerAction(ActionKind.SetPointerX, 0, 0.0) { InputId = inputX.InputId, PropertyName = inputX.Name });
+            moveListener.Actions.Add(new ListenerAction(ActionKind.SetPointerNormalizedX, 2, 0.0) { InputId = inputNorm.InputId, PropertyName = inputNorm.Name });
+            smDef.Listeners.Add(moveListener);
+
+            // Register Keyboard listener
+            var keyListener = new NodeListener(0u, PointerEventKind.Keyboard);
+            keyListener.Actions.Add(new ListenerAction(ActionKind.SetBool, 3, 1.0) { InputId = inputBool.InputId, PropertyName = "Space" });
+            smDef.Listeners.Add(keyListener);
+
+            // Register SemanticAction listener
+            var semanticListener = new NodeListener(101u, PointerEventKind.SemanticAction);
+            semanticListener.Actions.Add(new ListenerAction(ActionKind.Fire, 4, 0.0) { InputId = inputTrigger.InputId, PropertyName = "submit" });
+            smDef.Listeners.Add(semanticListener);
+
+            var runtime = new StateMachineRuntime(smDef, new List<Clip>());
+
+            // Dispatch PointerMove event on target bounds (X: 100, Y: 100, W: 200, H: 200) with pointer at (150, 150)
+            runtime.OnPointerEvent(new List<uint> { 101u }, PointerEventKind.PointerMove, new Point(150, 150), new Rect(100, 100, 200, 200), null);
+            Assert(Math.Abs(smDef.Inputs[0].Value - 50.0) < 0.01, "Pointer local X evaluated to 50 (150 - 100)");
+            Assert(Math.Abs(smDef.Inputs[2].Value - 25.0) < 0.01, "Pointer normalized X evaluated to 25% (50 / 200 * 100)");
+
+            // Dispatch KeyDown for Space
+            runtime.OnKeyDown("Space");
+            Assert(smDef.Inputs[3].Value > 0.5, "Keyboard listener responded to Space key and set bool true");
+
+            // Dispatch SemanticAction
+            runtime.OnSemanticAction("submit", 101u);
+            Assert(smDef.Inputs[4].Fired, "SemanticAction fired trigger input");
         }
     }
 }

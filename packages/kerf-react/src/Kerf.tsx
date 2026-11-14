@@ -6,7 +6,7 @@ export interface KerfProps {
   src: string;
   /** Whether animation starts playing automatically. Defaults to true. */
   autoplay?: boolean;
-  /** Whether animation loops. Defaults to true. */
+  /** Override the package's authored loop mode. Defaults to the package setting. */
   loop?: boolean;
   /** Initial state machine inputs to bind, e.g. { isHovering: true, score: 42 } */
   inputs?: Record<string, boolean | number>;
@@ -18,6 +18,10 @@ export interface KerfProps {
   onLoad?: (pkg: KfxPackage) => void;
   /** Callback invoked when state machine transitions */
   onStateChange?: (stateName: string) => void;
+  /** Callback invoked when a listener reports a named event */
+  onEvent?: (eventName: string) => void;
+  /** Callback invoked when a listener changes a text view-model property */
+  onTextInputChange?: (name: string, value: string) => void;
 }
 
 export interface KerfRef {
@@ -52,11 +56,14 @@ export interface KerfRef {
 export const Kerf = forwardRef<KerfRef, KerfProps>(({
   src,
   autoplay = true,
+  loop,
   inputs,
   style,
   className,
   onLoad,
-  onStateChange
+  onStateChange,
+  onEvent,
+  onTextInputChange
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playerRef = useRef<KerfRuntimePlayer | null>(null);
@@ -103,7 +110,10 @@ export const Kerf = forwardRef<KerfRef, KerfProps>(({
 
         const player = new KerfRuntimePlayer(pkg);
         player.isPlaying = autoplay;
+        player.loop = loop ?? null;
         if (onStateChange) player.onStateChange = onStateChange;
+        if (onEvent) player.onEvent = onEvent;
+        if (onTextInputChange) player.onTextInputChange = onTextInputChange;
 
         // Apply initial inputs if provided
         if (inputs) {
@@ -117,7 +127,7 @@ export const Kerf = forwardRef<KerfRef, KerfProps>(({
         onLoad?.(pkg);
 
         // Render loop
-        const loop = (now: number) => {
+        const frameLoop = (now: number) => {
           const dt = (now - lastTime) / 1000.0;
           lastTime = now;
 
@@ -126,10 +136,10 @@ export const Kerf = forwardRef<KerfRef, KerfProps>(({
             playerRef.current.renderToCanvas(canvasRef.current);
           }
 
-          animId = requestAnimationFrame(loop);
+          animId = requestAnimationFrame(frameLoop);
         };
 
-        animId = requestAnimationFrame(loop);
+        animId = requestAnimationFrame(frameLoop);
       } catch (err) {
         console.error(`[Kerf] Error loading "${src}":`, err);
       }
@@ -142,7 +152,7 @@ export const Kerf = forwardRef<KerfRef, KerfProps>(({
       cancelAnimationFrame(animId);
       playerRef.current = null;
     };
-  }, [src, autoplay, onStateChange, onLoad]);
+  }, [src, autoplay, loop, onStateChange, onLoad, onEvent, onTextInputChange]);
 
   // Pointer interaction
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -154,13 +164,45 @@ export const Kerf = forwardRef<KerfRef, KerfProps>(({
     }
   };
 
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const player = playerRef.current;
+    const canvas = canvasRef.current;
+    if (player && canvas) {
+      const coords = player.getArtboardCoords(canvas, e.clientX, e.clientY);
+      player.handlePointerMove(coords.x, coords.y);
+      player.handlePointerDown();
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const player = playerRef.current;
+    const canvas = canvasRef.current;
+    if (player && canvas) {
+      const coords = player.getArtboardCoords(canvas, e.clientX, e.clientY);
+      player.handlePointerMove(coords.x, coords.y);
+      player.handlePointerUp();
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    playerRef.current?.handlePointerCancel();
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
   const handlePointerLeave = () => {
     playerRef.current?.handlePointerLeave();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    playerRef.current?.handleKeyDown(e.key);
   };
 
   return (
     <canvas
       ref={canvasRef}
+      tabIndex={0}
       className={className}
       style={{
         width: '100%',
@@ -169,7 +211,12 @@ export const Kerf = forwardRef<KerfRef, KerfProps>(({
         ...style
       }}
       onPointerMove={handlePointerMove}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
+      onPointerCancel={handlePointerCancel}
+      onKeyDown={handleKeyDown}
+      onClick={() => playerRef.current?.handlePointerClick()}
     />
   );
 });

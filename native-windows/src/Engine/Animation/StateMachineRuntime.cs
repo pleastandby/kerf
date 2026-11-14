@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Windows;
+using Kerf.Model;
 
 namespace Kerf.Engine.Animation
 {
@@ -12,6 +14,7 @@ namespace Kerf.Engine.Animation
         public double Elapsed { get; set; }
         public double Duration { get; set; }
         public Dictionary<uint, Dictionary<ushort, double>> SnapshotPose { get; set; }
+        public Dictionary<uint, VectorGeometry> SnapshotGeometryPose { get; set; }
 
         public ActiveTransitionState(StateTransition def, int toState, double duration)
         {
@@ -21,6 +24,7 @@ namespace Kerf.Engine.Animation
             Elapsed = 0.0;
             Duration = Math.Max(0.0, duration);
             SnapshotPose = null;
+            SnapshotGeometryPose = null;
         }
     }
 
@@ -48,11 +52,25 @@ namespace Kerf.Engine.Animation
 
     public class StateMachineRuntime
     {
+        private sealed class ListenerActionInvocation
+        {
+            public NodeListener Listener;
+            public ListenerAction Action;
+
+            public ListenerActionInvocation(NodeListener listener, ListenerAction action)
+            {
+                Listener = listener;
+                Action = action;
+            }
+        }
+
         public StateMachineDefinition Definition { get; private set; }
         public StateMachineViewModel ViewModel { get; private set; }
         public List<Clip> Clips { get; private set; }
         public List<LayerRuntimeState> LayerRuntimes { get; private set; }
         public List<string> ReportedEvents { get; private set; }
+        public Dictionary<uint, Point> PointerAlignmentTargets { get; private set; }
+        public uint FocusedNodeId { get; private set; }
         public Dictionary<uint, Dictionary<ushort, double>> RestPose { get; set; }
 
         public bool IsFinished
@@ -91,6 +109,7 @@ namespace Kerf.Engine.Animation
             Clips = clips ?? new List<Clip>();
             LayerRuntimes = new List<LayerRuntimeState>();
             ReportedEvents = new List<string>();
+            PointerAlignmentTargets = new Dictionary<uint, Point>();
 
             for (int i = 0; i < Definition.Inputs.Count; i++)
             {
@@ -193,6 +212,8 @@ namespace Kerf.Engine.Animation
         public void Reset()
         {
             _inputVersion++;
+            if (PointerAlignmentTargets != null) PointerAlignmentTargets.Clear();
+            FocusedNodeId = 0u;
             if (ViewModel != null) ViewModel.Reset();
             for (int i = 0; i < Definition.Inputs.Count; i++)
             {
@@ -333,23 +354,54 @@ namespace Kerf.Engine.Animation
 
         public void OnPointerEvent(uint targetNodeId, PointerEventKind kind)
         {
-            OnPointerEvent(new List<uint> { targetNodeId }, kind);
+            OnPointerEvent(new List<uint> { targetNodeId }, kind, null, null, null);
         }
 
         public void OnPointerEvent(IList<uint> targetNodeIds, PointerEventKind kind)
         {
+            OnPointerEvent(targetNodeIds, kind, null, null, null);
+        }
+
+        public void OnPointerEvent(IList<uint> targetNodeIds, PointerEventKind kind, Point? canvasPt, Rect? targetBounds, string keyOrText)
+        {
             if (Definition == null || Definition.Listeners == null) return;
-            List<ListenerAction> actionsToRun = new List<ListenerAction>();
+            List<ListenerActionInvocation> actionsToRun = new List<ListenerActionInvocation>();
             for (int i = 0; i < Definition.Listeners.Count; i++)
             {
                 NodeListener listener = Definition.Listeners[i];
                 if (listener != null && listener.Enabled && listener.IsActive && listener.Kind == kind && listener.Actions != null)
                 {
-                    bool targetMatches = listener.TargetNodeId == 0u ||
-                                         (targetNodeIds != null && targetNodeIds.Contains(listener.TargetNodeId));
+                    bool targetMatches = targetNodeIds != null && targetNodeIds.Contains(listener.TargetNodeId);
                     if (targetMatches)
                     {
-                        actionsToRun.AddRange(listener.Actions);
+                        for (int a = 0; a < listener.Actions.Count; a++)
+                        {
+                            if (listener.Actions[a] != null)
+                                actionsToRun.Add(new ListenerActionInvocation(listener, listener.Actions[a]));
+                        }
+                    }
+                }
+            }
+
+            // Pointer alignment is active only while its pointer listener is receiving movement.
+            // Exiting the listener target returns the object to its authored/animated pose.
+            if (kind == PointerEventKind.Exit || kind == PointerEventKind.PointerExit)
+            {
+                for (int i = 0; i < Definition.Listeners.Count; i++)
+                {
+                    NodeListener listener = Definition.Listeners[i];
+                    if (listener == null || !listener.Enabled || !listener.IsActive ||
+                        (listener.Kind != PointerEventKind.Move && listener.Kind != PointerEventKind.PointerDrag) ||
+                        listener.Actions == null)
+                        continue;
+                    bool targetMatches = targetNodeIds != null && targetNodeIds.Contains(listener.TargetNodeId);
+                    if (!targetMatches) continue;
+                    for (int a = 0; a < listener.Actions.Count; a++)
+                    {
+                        ListenerAction moveAction = listener.Actions[a];
+                        if (moveAction == null || moveAction.Kind != ActionKind.AlignObjectToPointer) continue;
+                        uint alignedNodeId = moveAction.TargetNodeId != 0u ? moveAction.TargetNodeId : listener.TargetNodeId;
+                        if (alignedNodeId != 0u) PointerAlignmentTargets.Remove(alignedNodeId);
                     }
                 }
             }
@@ -363,7 +415,7 @@ namespace Kerf.Engine.Animation
                     NodeListener listener = Definition.Listeners[i];
                     if (listener != null && listener.Enabled && listener.IsActive && (listener.Kind == PointerEventKind.Enter || listener.Kind == PointerEventKind.PointerEnter) && listener.Actions != null)
                     {
-                        bool targetMatches = listener.TargetNodeId == 0u || targetNodeIds.Contains(listener.TargetNodeId);
+                        bool targetMatches = targetNodeIds.Contains(listener.TargetNodeId);
                         if (targetMatches)
                         {
                             for (int a = 0; a < listener.Actions.Count; a++)
@@ -374,10 +426,11 @@ namespace Kerf.Engine.Animation
                                     bool hasExplicitExit = false;
                                     for (int ex = 0; ex < actionsToRun.Count; ex++)
                                     {
-                                        if (actionsToRun[ex] != null &&
-                                            (actionsToRun[ex].InputIndex == enterAction.InputIndex ||
-                                             (!string.IsNullOrEmpty(enterAction.InputId) && actionsToRun[ex].InputId == enterAction.InputId) ||
-                                             (!string.IsNullOrEmpty(enterAction.PropertyName) && actionsToRun[ex].PropertyName == enterAction.PropertyName)))
+                                        ListenerAction exitAction = actionsToRun[ex].Action;
+                                        if (exitAction != null &&
+                                            (exitAction.InputIndex == enterAction.InputIndex ||
+                                             (!string.IsNullOrEmpty(enterAction.InputId) && exitAction.InputId == enterAction.InputId) ||
+                                             (!string.IsNullOrEmpty(enterAction.PropertyName) && exitAction.PropertyName == enterAction.PropertyName)))
                                         {
                                             hasExplicitExit = true;
                                             break;
@@ -385,11 +438,11 @@ namespace Kerf.Engine.Animation
                                     }
                                     if (!hasExplicitExit)
                                     {
-                                        actionsToRun.Add(new ListenerAction(ActionKind.SetBool, enterAction.InputIndex, 0.0)
-                                        {
-                                            InputId = enterAction.InputId,
-                                            PropertyName = enterAction.PropertyName
-                                        });
+                                        actionsToRun.Add(new ListenerActionInvocation(listener, new ListenerAction(ActionKind.SetBool, enterAction.InputIndex, 0.0)
+                                            {
+                                                InputId = enterAction.InputId,
+                                                PropertyName = enterAction.PropertyName
+                                            }));
                                     }
                                 }
                             }
@@ -400,8 +453,28 @@ namespace Kerf.Engine.Animation
 
             for (int a = 0; a < actionsToRun.Count; a++)
             {
-                ListenerAction action = actionsToRun[a];
+                ListenerActionInvocation invocation = actionsToRun[a];
+                ListenerAction action = invocation != null ? invocation.Action : null;
                 if (action == null) continue;
+
+                // If Keyboard listener with specific key filter, check match
+                if ((kind == PointerEventKind.Keyboard || kind == PointerEventKind.Gamepad ||
+                     kind == PointerEventKind.TextInput || kind == PointerEventKind.SemanticAction) && !string.IsNullOrEmpty(keyOrText))
+                {
+                    string filter = invocation.Listener != null ? invocation.Listener.Filter : null;
+                    if (string.IsNullOrWhiteSpace(filter) && invocation.Listener != null &&
+                        !string.IsNullOrEmpty(action.InputId) && !string.IsNullOrEmpty(action.PropertyName))
+                    {
+                        var boundInput = Definition != null ? Definition.FindInputById(action.InputId) : null;
+                        if (boundInput != null && !string.Equals(action.PropertyName, boundInput.Name, StringComparison.OrdinalIgnoreCase))
+                            filter = action.PropertyName; // Older files stored the key filter here.
+                    }
+                    if (!string.IsNullOrEmpty(filter) && !string.Equals(filter, keyOrText, StringComparison.OrdinalIgnoreCase) && !string.Equals(filter, "Any", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                }
+
                 int inputIdx = action.InputIndex;
                 if (inputIdx < 0 && !string.IsNullOrEmpty(action.InputId) && Definition != null)
                 {
@@ -435,6 +508,64 @@ namespace Kerf.Engine.Animation
                             SetNumber(inputIdx, action.Parameter);
                         else if (!string.IsNullOrEmpty(action.PropertyName))
                             SetNumber(action.PropertyName, action.Parameter);
+                        break;
+                    case ActionKind.SetPointerX:
+                        {
+                            double px = canvasPt.HasValue ? canvasPt.Value.X : 0.0;
+                            if (targetBounds.HasValue) px -= targetBounds.Value.X;
+                            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count) SetNumber(inputIdx, px);
+                            else if (!string.IsNullOrEmpty(action.PropertyName)) SetNumber(action.PropertyName, px);
+                        }
+                        break;
+                    case ActionKind.SetPointerY:
+                        {
+                            double py = canvasPt.HasValue ? canvasPt.Value.Y : 0.0;
+                            if (targetBounds.HasValue) py -= targetBounds.Value.Y;
+                            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count) SetNumber(inputIdx, py);
+                            else if (!string.IsNullOrEmpty(action.PropertyName)) SetNumber(action.PropertyName, py);
+                        }
+                        break;
+                    case ActionKind.SetPointerNormalizedX:
+                        {
+                            double normX = 50.0;
+                            if (canvasPt.HasValue && targetBounds.HasValue && targetBounds.Value.Width > 0.0)
+                            {
+                                normX = Math.Max(0.0, Math.Min(100.0, (canvasPt.Value.X - targetBounds.Value.X) / targetBounds.Value.Width * 100.0));
+                            }
+                            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count) SetNumber(inputIdx, normX);
+                            else if (!string.IsNullOrEmpty(action.PropertyName)) SetNumber(action.PropertyName, normX);
+                        }
+                        break;
+                    case ActionKind.SetPointerNormalizedY:
+                        {
+                            double normY = 50.0;
+                            if (canvasPt.HasValue && targetBounds.HasValue && targetBounds.Value.Height > 0.0)
+                            {
+                                normY = Math.Max(0.0, Math.Min(100.0, (canvasPt.Value.Y - targetBounds.Value.Y) / targetBounds.Value.Height * 100.0));
+                            }
+                            if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count) SetNumber(inputIdx, normY);
+                            else if (!string.IsNullOrEmpty(action.PropertyName)) SetNumber(action.PropertyName, normY);
+                        }
+                        break;
+                    case ActionKind.AlignObjectToPointer:
+                        {
+                            uint alignedNodeId = action.TargetNodeId != 0u ? action.TargetNodeId : (invocation.Listener != null ? invocation.Listener.TargetNodeId : 0u);
+                            if (alignedNodeId != 0u && canvasPt.HasValue)
+                            {
+                                PointerAlignmentTargets[alignedNodeId] = canvasPt.Value;
+                            }
+                            else if (alignedNodeId != 0u)
+                            {
+                                PointerAlignmentTargets.Remove(alignedNodeId);
+                            }
+                        }
+                        break;
+                    case ActionKind.FocusTarget:
+                        {
+                            uint focusNodeId = action.TargetNodeId != 0u ? action.TargetNodeId :
+                                (invocation.Listener != null ? invocation.Listener.TargetNodeId : 0u);
+                            if (focusNodeId != 0u) OnFocus(focusNodeId);
+                        }
                         break;
                     case ActionKind.Fire: // ActionKind.FireTrigger is an alias (= 2)
                         if (inputIdx >= 0 && inputIdx < Definition.Inputs.Count)
@@ -471,8 +602,64 @@ namespace Kerf.Engine.Animation
                     case ActionKind.SetViewModelText:
                         SetViewModelText(action.PropertyName, action.TextValue);
                         break;
+                    case ActionKind.ReportEvent:
+                        if (!string.IsNullOrWhiteSpace(action.TextValue))
+                        {
+                            ReportedEvents.Add(action.TextValue);
+                            if (ReportedEvents.Count > 512) ReportedEvents.RemoveAt(0);
+                        }
+                        break;
+                    case ActionKind.Blank:
+                        // An explicitly blank listener action is a valid no-op.
+                        break;
                 }
             }
+        }
+
+        public void OnKeyDown(string keyName)
+        {
+            var targets = new List<uint>();
+            if (FocusedNodeId != 0u) targets.Add(FocusedNodeId);
+            targets.Add(0u);
+            OnPointerEvent(targets, PointerEventKind.Keyboard, null, null, keyName);
+        }
+
+        public void OnTextInput(string text)
+        {
+            var targets = new List<uint>();
+            if (FocusedNodeId != 0u) targets.Add(FocusedNodeId);
+            targets.Add(0u);
+            OnPointerEvent(targets, PointerEventKind.TextInput, null, null, text);
+        }
+
+        public void OnFocus(uint targetId)
+        {
+            if (targetId == 0u || FocusedNodeId == targetId) return;
+            uint previousTarget = FocusedNodeId;
+            FocusedNodeId = targetId;
+            if (previousTarget != 0u) OnPointerEvent(new List<uint> { previousTarget }, PointerEventKind.Blur, null, null, null);
+            OnPointerEvent(new List<uint> { targetId }, PointerEventKind.Focus, null, null, null);
+        }
+
+        public void OnBlur(uint targetId)
+        {
+            if (FocusedNodeId == targetId) FocusedNodeId = 0u;
+            OnPointerEvent(new List<uint> { targetId }, PointerEventKind.Blur, null, null, null);
+        }
+
+        public void OnGamepad(int buttonIndex)
+        {
+            OnGamepad(buttonIndex.ToString());
+        }
+
+        public void OnGamepad(string buttonName)
+        {
+            OnPointerEvent(new List<uint> { 0u }, PointerEventKind.Gamepad, null, null, buttonName);
+        }
+
+        public void OnSemanticAction(string actionName, uint targetId = 0u)
+        {
+            OnPointerEvent(new List<uint> { targetId }, PointerEventKind.SemanticAction, null, null, actionName);
         }
 
         private double GetNormalizedProgress(MachineLayer layer, int currentStateIdx, double curTime)
@@ -501,7 +688,7 @@ namespace Kerf.Engine.Animation
             return trans.EvaluateConditions(Definition.Inputs, ViewModel, Definition);
         }
 
-        private StateTransition FindValidTransition(MachineLayer layer, int currentState, double curTime, int activeTransitionToState, LayerRuntimeState layerRt = null)
+        private StateTransition FindValidTransition(MachineLayer layer, int currentState, double curTime, int activeTransitionToState, double? progressOverride = null, LayerRuntimeState layerRt = null)
         {
             int anyStateIdx = -1;
             for (int s = 0; s < layer.States.Count; s++)
@@ -549,7 +736,9 @@ namespace Kerf.Engine.Animation
                 }
             }
 
-            double progress = GetNormalizedProgress(layer, currentState, curTime);
+            double progress = progressOverride.HasValue
+                ? progressOverride.Value
+                : GetNormalizedProgress(layer, currentState, curTime);
 
             for (int i = 0; i < candidates.Count; i++)
             {
@@ -602,9 +791,10 @@ namespace Kerf.Engine.Animation
             return null;
         }
 
-        public bool Update(double dt, Dictionary<uint, Dictionary<ushort, double>> outPose)
+        public bool Update(double dt, Dictionary<uint, Dictionary<ushort, double>> outPose, Dictionary<uint, VectorGeometry> outGeometryPose = null)
         {
             if (double.IsNaN(dt) || double.IsInfinity(dt) || dt < 0.0) dt = 0.0;
+            if (outGeometryPose != null) outGeometryPose.Clear();
             bool needsRedraw = false;
 
             for (int i = 0; i < Definition.Layers.Count; i++)
@@ -626,6 +816,7 @@ namespace Kerf.Engine.Animation
 
                 // 1. Advance current state clip
                 bool pauseSource = layerRt.ActiveTransition != null && layerRt.ActiveTransition.Definition != null && layerRt.ActiveTransition.Definition.PauseSourceWhenExiting;
+                bool currentStateCrossedPlaybackBoundary = false;
                 if (!pauseSource && layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                 {
                     MachineState curState = layerDef.States[layerRt.CurrentState];
@@ -633,16 +824,15 @@ namespace Kerf.Engine.Animation
                     {
                         Clip clip = Clips[curState.ClipIndex];
                         double stateSpeed = (Math.Abs(curState.Speed) < 0.0001) ? 1.0 : curState.Speed;
-                        LoopMode loopMode;
-                        if (!curState.Loop)
-                        {
-                            loopMode = LoopMode.OneShot;
-                        }
-                        else
-                        {
-                            loopMode = (clip.LoopMode == LoopMode.PingPong) ? LoopMode.PingPong : LoopMode.Loop;
-                        }
-                        layerRt.CurTime.Advance(dt * stateSpeed, clip.Duration, loopMode);
+                        // Playback belongs to the state. Do not let the referenced clip's
+                        // global loop mode turn a looping state into a one-shot (or vice versa).
+                        LoopMode loopMode = curState.LoopMode;
+                        double rawNextTime = layerRt.CurTime.Time + dt * stateSpeed * layerRt.CurTime.Speed * layerRt.CurTime.Direction;
+                        int rawMotionDirection = (dt * stateSpeed * layerRt.CurTime.Speed * layerRt.CurTime.Direction) < 0.0 ? -1 : 1;
+                        bool crossedBoundary = layerRt.CurTime.Advance(dt * stateSpeed, clip.Duration, loopMode);
+                        currentStateCrossedPlaybackBoundary = loopMode == LoopMode.Loop
+                            ? crossedBoundary
+                            : (loopMode == LoopMode.PingPong && rawMotionDirection > 0 && rawNextTime >= clip.Duration);
                         needsRedraw = true;
                     }
                 }
@@ -661,15 +851,7 @@ namespace Kerf.Engine.Animation
                         {
                             Clip clip = Clips[toState.ClipIndex];
                             double toStateSpeed = (Math.Abs(toState.Speed) < 0.0001) ? 1.0 : toState.Speed;
-                            LoopMode toLoopMode;
-                            if (!toState.Loop)
-                            {
-                                toLoopMode = LoopMode.OneShot;
-                            }
-                            else
-                            {
-                                toLoopMode = (clip.LoopMode == LoopMode.PingPong) ? LoopMode.PingPong : LoopMode.Loop;
-                            }
+                            LoopMode toLoopMode = toState.LoopMode;
                             layerRt.ActiveTransition.ToTime.Advance(dt * toStateSpeed, clip.Duration, toLoopMode);
                         }
                     }
@@ -686,7 +868,8 @@ namespace Kerf.Engine.Animation
                     }
 
                     int activeToState = (layerRt.ActiveTransition != null) ? layerRt.ActiveTransition.ToState : -1;
-                    StateTransition nextTrans = FindValidTransition(layerDef, layerRt.CurrentState, layerRt.CurTime.Time, activeToState, layerRt);
+                    double? progressOverride = currentStateCrossedPlaybackBoundary ? (double?)1.0 : null;
+                    StateTransition nextTrans = FindValidTransition(layerDef, layerRt.CurrentState, layerRt.CurTime.Time, activeToState, progressOverride, layerRt);
                     if (nextTrans != null)
                     {
                         // Do not interrupt if already blending to the exact same target state
@@ -697,33 +880,41 @@ namespace Kerf.Engine.Animation
 
                         // Snapshot current pose if interrupting an active transition to prevent visual pops per D-04
                         Dictionary<uint, Dictionary<ushort, double>> snapshot = null;
+                        Dictionary<uint, VectorGeometry> geometrySnapshot = null;
                         if (layerRt.ActiveTransition != null)
                         {
                             var fromPose = new Dictionary<uint, Dictionary<ushort, double>>();
                             var toPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                            var fromGeometryPose = new Dictionary<uint, VectorGeometry>();
+                            var toGeometryPose = new Dictionary<uint, VectorGeometry>();
                             if (layerRt.ActiveTransition.SnapshotPose != null)
                             {
                                 fromPose = layerRt.ActiveTransition.SnapshotPose;
+                                if (layerRt.ActiveTransition.SnapshotGeometryPose != null)
+                                    fromGeometryPose = layerRt.ActiveTransition.SnapshotGeometryPose;
                             }
                             else if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                             {
-                                SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose);
+                                SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose, fromGeometryPose);
                             }
 
                             if (layerRt.ActiveTransition.ToState >= 0 && layerRt.ActiveTransition.ToState < layerDef.States.Count)
                             {
-                                SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose);
+                                SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose, toGeometryPose);
                             }
                             double progress = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
                             double mix = layerRt.ActiveTransition.Definition != null ? layerRt.ActiveTransition.Definition.EvaluateInterpolation(progress) : progress;
                             snapshot = new Dictionary<uint, Dictionary<ushort, double>>();
+                            geometrySnapshot = new Dictionary<uint, VectorGeometry>();
                             BlendPoses(fromPose, toPose, mix, snapshot, RestPose);
+                            GeometryAnimation.BlendPoses(fromGeometryPose, toGeometryPose, mix, geometrySnapshot);
                         }
 
                         int toState = nextTrans.ToState;
                         double duration = nextTrans.Duration;
                         layerRt.ActiveTransition = new ActiveTransitionState(nextTrans, toState, duration);
                         layerRt.ActiveTransition.SnapshotPose = snapshot;
+                        layerRt.ActiveTransition.SnapshotGeometryPose = geometrySnapshot;
                         needsRedraw = true;
 
                         if (duration <= 0.0)
@@ -735,6 +926,7 @@ namespace Kerf.Engine.Animation
                             layerRt.ActiveTransition = null;
                             layerRt.TimeInCurrentState = 0.0;
                             layerRt.InputVersionAtStateEntry = _inputVersion;
+                            currentStateCrossedPlaybackBoundary = false;
 
                             if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                             {
@@ -758,27 +950,33 @@ namespace Kerf.Engine.Animation
 
                 // 4. Sample poses and blend
                 var layerPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                var layerGeometryPose = new Dictionary<uint, VectorGeometry>();
                 if (layerRt.ActiveTransition != null)
                 {
                     var fromPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                    var fromGeometryPose = new Dictionary<uint, VectorGeometry>();
                     if (layerRt.ActiveTransition.SnapshotPose != null)
                     {
                         fromPose = layerRt.ActiveTransition.SnapshotPose;
+                        if (layerRt.ActiveTransition.SnapshotGeometryPose != null)
+                            fromGeometryPose = layerRt.ActiveTransition.SnapshotGeometryPose;
                     }
                     else if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                     {
-                        SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose);
+                        SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, fromPose, fromGeometryPose);
                     }
 
                     var toPose = new Dictionary<uint, Dictionary<ushort, double>>();
+                    var toGeometryPose = new Dictionary<uint, VectorGeometry>();
                     if (layerRt.ActiveTransition.ToState >= 0 && layerRt.ActiveTransition.ToState < layerDef.States.Count)
                     {
-                        SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose);
+                        SampleState(layerDef.States[layerRt.ActiveTransition.ToState], layerRt.ActiveTransition.ToTime.Time, toPose, toGeometryPose);
                     }
 
                     double u = Math.Max(0.0, Math.Min(1.0, layerRt.ActiveTransition.Elapsed / Math.Max(0.001, layerRt.ActiveTransition.Duration)));
                     double mix = layerRt.ActiveTransition.Definition != null ? layerRt.ActiveTransition.Definition.EvaluateInterpolation(u) : u;
                     BlendPoses(fromPose, toPose, mix, layerPose, RestPose);
+                    GeometryAnimation.BlendPoses(fromGeometryPose, toGeometryPose, mix, layerGeometryPose);
 
                     // Commit to target state when transition duration has completed
                     if (layerRt.ActiveTransition.Elapsed >= layerRt.ActiveTransition.Duration)
@@ -803,7 +1001,7 @@ namespace Kerf.Engine.Animation
                 }
                 else if (layerRt.CurrentState >= 0 && layerRt.CurrentState < layerDef.States.Count)
                 {
-                    SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, layerPose);
+                    SampleState(layerDef.States[layerRt.CurrentState], layerRt.CurTime.Time, layerPose, layerGeometryPose);
                 }
 
                 // Merge into final output pose (later layers override earlier layers)
@@ -823,6 +1021,11 @@ namespace Kerf.Engine.Animation
                         }
                     }
                 }
+                if (outGeometryPose != null)
+                {
+                    foreach (var geometry in layerGeometryPose)
+                        if (geometry.Value != null) outGeometryPose[geometry.Key] = geometry.Value.Clone();
+                }
             }
 
             // 6. Clear triggers: triggers last exactly one update frame!
@@ -838,16 +1041,16 @@ namespace Kerf.Engine.Animation
             return needsRedraw;
         }
 
-        private void SampleState(MachineState state, double time, Dictionary<uint, Dictionary<ushort, double>> outPose)
+        private void SampleState(MachineState state, double time, Dictionary<uint, Dictionary<ushort, double>> outPose, Dictionary<uint, VectorGeometry> outGeometryPose = null)
         {
-            if (state == null || outPose == null) return;
+            if (state == null) return;
 
             switch (state.Kind)
             {
                 case StateKind.Animation:
                     if (state.ClipIndex >= 0 && state.ClipIndex < Clips.Count)
                     {
-                        Clips[state.ClipIndex].SampleToPose(time, outPose);
+                        Clips[state.ClipIndex].SampleToPose(time, outPose, outGeometryPose);
                     }
                     break;
 
@@ -860,13 +1063,13 @@ namespace Kerf.Engine.Animation
                     if (val <= state.Blend1DItems[0].Threshold)
                     {
                         int cIdx = state.Blend1DItems[0].ClipIndex;
-                        if (cIdx >= 0 && cIdx < Clips.Count) Clips[cIdx].SampleToPose(time, outPose);
+                        if (cIdx >= 0 && cIdx < Clips.Count) Clips[cIdx].SampleToPose(time, outPose, outGeometryPose);
                         return;
                     }
                     if (val >= state.Blend1DItems[state.Blend1DItems.Count - 1].Threshold)
                     {
                         int cIdx = state.Blend1DItems[state.Blend1DItems.Count - 1].ClipIndex;
-                        if (cIdx >= 0 && cIdx < Clips.Count) Clips[cIdx].SampleToPose(time, outPose);
+                        if (cIdx >= 0 && cIdx < Clips.Count) Clips[cIdx].SampleToPose(time, outPose, outGeometryPose);
                         return;
                     }
 
@@ -880,15 +1083,19 @@ namespace Kerf.Engine.Animation
                             double w = (span > 1e-5) ? (val - a.Threshold) / span : 0.0;
                             var poseA = new Dictionary<uint, Dictionary<ushort, double>>();
                             var poseB = new Dictionary<uint, Dictionary<ushort, double>>();
-                            if (a.ClipIndex >= 0 && a.ClipIndex < Clips.Count) Clips[a.ClipIndex].SampleToPose(time, poseA);
-                            if (b.ClipIndex >= 0 && b.ClipIndex < Clips.Count) Clips[b.ClipIndex].SampleToPose(time, poseB);
+                            var geometryA = new Dictionary<uint, VectorGeometry>();
+                            var geometryB = new Dictionary<uint, VectorGeometry>();
+                            if (a.ClipIndex >= 0 && a.ClipIndex < Clips.Count) Clips[a.ClipIndex].SampleToPose(time, poseA, geometryA);
+                            if (b.ClipIndex >= 0 && b.ClipIndex < Clips.Count) Clips[b.ClipIndex].SampleToPose(time, poseB, geometryB);
                             BlendPoses(poseA, poseB, w, outPose);
+                            if (outGeometryPose != null) GeometryAnimation.BlendPoses(geometryA, geometryB, w, outGeometryPose);
                             return;
                         }
                     }
                     break;
 
                 case StateKind.BlendDirect:
+                    var geometryWeights = new Dictionary<uint, double>();
                     for (int i = 0; i < state.BlendDirectItems.Count; i++)
                     {
                         BlendDirectItem item = state.BlendDirectItems[i];
@@ -899,7 +1106,9 @@ namespace Kerf.Engine.Animation
                         if (w > 0.001 && item.ClipIndex >= 0 && item.ClipIndex < Clips.Count)
                         {
                             var temp = new Dictionary<uint, Dictionary<ushort, double>>();
-                            Clips[item.ClipIndex].SampleToPose(time, temp);
+                            var tempGeometryPose = new Dictionary<uint, VectorGeometry>();
+                            Clips[item.ClipIndex].SampleToPose(time, temp, tempGeometryPose);
+                            MergeWeightedGeometryPoses(outGeometryPose, geometryWeights, tempGeometryPose, w);
                             foreach (var nKvp in temp)
                             {
                                 Dictionary<ushort, double> nodeProps;
@@ -917,6 +1126,31 @@ namespace Kerf.Engine.Animation
                         }
                     }
                     break;
+            }
+        }
+
+        private static void MergeWeightedGeometryPoses(
+            Dictionary<uint, VectorGeometry> target,
+            Dictionary<uint, double> accumulatedWeights,
+            Dictionary<uint, VectorGeometry> source,
+            double weight)
+        {
+            if (target == null || source == null || weight <= 0.0) return;
+            foreach (var item in source)
+            {
+                if (item.Value == null) continue;
+                VectorGeometry current;
+                double previousWeight;
+                if (!target.TryGetValue(item.Key, out current) || current == null)
+                {
+                    target[item.Key] = item.Value.Clone();
+                    accumulatedWeights[item.Key] = weight;
+                    continue;
+                }
+                accumulatedWeights.TryGetValue(item.Key, out previousWeight);
+                double mix = weight / Math.Max(0.000001, previousWeight + weight);
+                target[item.Key] = GeometryAnimation.Interpolate(current, item.Value, mix);
+                accumulatedWeights[item.Key] = previousWeight + weight;
             }
         }
 

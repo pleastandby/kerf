@@ -30,7 +30,7 @@ namespace Kerf.UI.Dialogs
     }
 
     /// <summary>
-    /// Dedicated Kerf Studio Export Window.
+    /// Dedicated Kerf Export Window.
     /// Provides a polished UI format selector for .kfx runtime packages, PNG, JPEG, SVG, PDF, MP4, and animated GIF.
     /// Strictly adheres to C# 5.0 compatibility.
     /// </summary>
@@ -110,7 +110,7 @@ namespace Kerf.UI.Dialogs
             _document = doc ?? new KerfDocument();
             _studioView = studioView;
 
-            Title = "Export Document & Animations — Kerf Studio";
+            Title = "Export Document & Animations — Kerf";
             Width = 840;
             Height = 620;
             MinWidth = 780;
@@ -483,7 +483,7 @@ namespace Kerf.UI.Dialogs
 
             _kfxIncludeMetadataCheck = new CheckBox
             {
-                Content = "Include Kerf Studio editor metadata (preserves UI guides, grids, and editor state)",
+                Content = "Include Kerf editor metadata (preserves UI guides, grids, and editor state)",
                 IsChecked = true,
                 Foreground = Brushes.White,
                 Margin = new Thickness(0, 6, 0, 10)
@@ -1035,7 +1035,7 @@ namespace Kerf.UI.Dialogs
             var page = _document.GetActivePage();
             if (page == null)
             {
-                MessageBox.Show("Active page not found in document.", "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("Active page not found in document.", "Kerf", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -1094,13 +1094,13 @@ namespace Kerf.UI.Dialogs
                     MessageBox.Show(
                         "Kerf Animation Package (.kfx) exported successfully!\n\nLocation: " + dlg.FileName +
                         (_kfxGenerateWebRunnerCheck != null && _kfxGenerateWebRunnerCheck.IsChecked == true ? "\n\nStandalone HTML Web Runner created alongside package." : ""),
-                        "Kerf Studio Export", MessageBoxButton.OK, MessageBoxImage.Information);
+                        "Kerf Export", MessageBoxButton.OK, MessageBoxImage.Information);
                     Close();
                 }
                 catch (Exception ex)
                 {
                     _statusTextBlock.Text = "Export failed.";
-                    MessageBox.Show("Export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("Export failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -1135,12 +1135,12 @@ namespace Kerf.UI.Dialogs
                     HighQualityImageRenderer.ExportToFile(page, targets, dlg.FileName, RasterFormat.Png, scale);
 
                     _statusTextBlock.Text = "PNG exported successfully.";
-                    MessageBox.Show("Exported PNG successfully: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Exported PNG successfully: " + dlg.FileName, "Kerf", MessageBoxButton.OK, MessageBoxImage.Information);
                     Close();
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("PNG export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("PNG export failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -1173,12 +1173,12 @@ namespace Kerf.UI.Dialogs
                     HighQualityImageRenderer.ExportToFile(page, targets, dlg.FileName, RasterFormat.Jpeg, scale);
 
                     _statusTextBlock.Text = "JPEG exported successfully.";
-                    MessageBox.Show("Exported JPEG successfully: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Exported JPEG successfully: " + dlg.FileName, "Kerf", MessageBoxButton.OK, MessageBoxImage.Information);
                     Close();
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("JPEG export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("JPEG export failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -1200,12 +1200,12 @@ namespace Kerf.UI.Dialogs
                     File.WriteAllText(dlg.FileName, svg, Encoding.UTF8);
 
                     _statusTextBlock.Text = "SVG exported successfully.";
-                    MessageBox.Show("Exported SVG successfully: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Exported SVG successfully: " + dlg.FileName, "Kerf", MessageBoxButton.OK, MessageBoxImage.Information);
                     Close();
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("SVG export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("SVG export failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -1228,12 +1228,12 @@ namespace Kerf.UI.Dialogs
                     PdfExporter.ExportToFile(page, targets, dlg.FileName, scale);
 
                     _statusTextBlock.Text = "PDF exported successfully.";
-                    MessageBox.Show("Exported PDF successfully: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Exported PDF successfully: " + dlg.FileName, "Kerf", MessageBoxButton.OK, MessageBoxImage.Information);
                     Close();
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("PDF export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("PDF export failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -1372,12 +1372,12 @@ namespace Kerf.UI.Dialogs
                     Mp4Exporter.ExportClipToVideo(_document, mp4Options, dlg.FileName);
 
                     _statusTextBlock.Text = "MP4 video rendered successfully.";
-                    MessageBox.Show("MP4 Video rendered successfully: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("MP4 Video rendered successfully: " + dlg.FileName, "Kerf", MessageBoxButton.OK, MessageBoxImage.Information);
                     Close();
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("MP4 render failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("MP4 render failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
@@ -1510,12 +1510,12 @@ namespace Kerf.UI.Dialogs
                     GifExporter.ExportClipToGif(_document, gifOptions, dlg.FileName);
 
                     _statusTextBlock.Text = "Animated GIF exported successfully.";
-                    MessageBox.Show("Animated GIF exported successfully: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Animated GIF exported successfully: " + dlg.FileName, "Kerf", MessageBoxButton.OK, MessageBoxImage.Information);
                     Close();
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("GIF export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("GIF export failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {

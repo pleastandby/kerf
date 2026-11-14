@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -8,7 +9,7 @@ using System.Windows.Media.Imaging;
 namespace Kerf.UI
 {
     /// <summary>
-    /// Kerf Studio official vector logo and icon visual factory.
+    /// Kerf official vector logo and icon visual factory.
     /// Implements the brand mark geometry from Kerf-Logo.svg and kerf-icon.svg:
     /// - Logo Badge: 205x205 rounded squircle (rx=43) filled with #46EFB1 (Electric Mint)
     ///   containing the stylized geometric cutouts filled with #1E082E (Obsidian Plum).
@@ -28,9 +29,10 @@ namespace Kerf.UI
         }
 
         private static DrawingGroup _cachedLogoDrawingGroup;
-        private static DrawingImage _cachedLogoImage;
+        private static ImageSource _cachedLogoImage;
         private static DrawingGroup _cachedIconDrawingGroup;
-        private static DrawingImage _cachedIconImage;
+        private static ImageSource _cachedIconImage;
+        private static ImageSource _cachedAssetIconImage;
 
         // Path geometries from official vector SVG definitions
         public const string PathCutout1 = "M54.4821 56.685C51.283 53.6375 51.1601 48.5737 54.2075 45.3746L71.2518 27.4821C74.2992 24.283 79.3631 24.1601 82.5622 27.2075L100.455 44.2518C103.654 47.2992 103.777 52.3631 100.729 55.5622L83.685 73.4546C80.6375 76.6537 75.5737 76.7767 72.3746 73.7292L54.4821 56.685Z";
@@ -80,7 +82,7 @@ namespace Kerf.UI
         public static ImageSource GetLogoImageSource()
         {
             if (_cachedLogoImage != null) return _cachedLogoImage;
-            _cachedLogoImage = new DrawingImage(GetLogoDrawingGroup());
+            _cachedLogoImage = GetAssetIconImage() ?? new DrawingImage(GetLogoDrawingGroup());
             _cachedLogoImage.Freeze();
             return _cachedLogoImage;
         }
@@ -122,6 +124,9 @@ namespace Kerf.UI
 
         public static ImageSource GetIconImageSource(Brush fillBrush = null)
         {
+            ImageSource assetIcon = GetAssetIconImage();
+            if (assetIcon != null) return assetIcon;
+
             var brush = fillBrush ?? MintBrush;
             if (brush == MintBrush && _cachedIconImage != null)
             {
@@ -136,6 +141,25 @@ namespace Kerf.UI
                 _cachedIconImage = img;
             }
             return img;
+        }
+
+        private static ImageSource GetAssetIconImage()
+        {
+            if (_cachedAssetIconImage != null) return _cachedAssetIconImage;
+            try
+            {
+                using (var stream = typeof(KerfLogo).Assembly.GetManifestResourceStream("Kerf.Icon"))
+                {
+                    if (stream == null) return null;
+                    var decoder = new IconBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+                    var frame = decoder.Frames.OrderByDescending(item => item.PixelWidth * item.PixelHeight).FirstOrDefault();
+                    if (frame == null) return null;
+                    frame.Freeze();
+                    _cachedAssetIconImage = frame;
+                    return _cachedAssetIconImage;
+                }
+            }
+            catch { return null; }
         }
 
         /// <summary>

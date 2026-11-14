@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -16,7 +17,7 @@ using IOPath = System.IO.Path;
 namespace Kerf.UI
 {
     /// <summary>
-    /// Kerf Studio official Home / Project Hub View.
+    /// Kerf official Home / Project Hub View.
     /// Strictly adheres to the Kerf brand palette:
     /// - Primary: #46EFB1 (Electric Mint), #0A717B (Deep Cyan), #0C4247 (Dark Slate), #1E082E (Obsidian Plum)
     /// - Secondary: #F6B322 (Warm Amber Gold)
@@ -58,27 +59,31 @@ namespace Kerf.UI
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Padding = new Thickness(48, 24, 48, 48)
+                Padding = new Thickness(30)
             };
 
-            var bodyStack = new StackPanel { MaxWidth = 1200, HorizontalAlignment = HorizontalAlignment.Left };
+            var bodyStack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
 
-            // Welcome Hero Card
-            bodyStack.Children.Add(CreateHeroBanner());
-
-            // Motion Runtime Feature Banner
-            bodyStack.Children.Add(CreateMotionFeatureBanner());
-
-            // Templates Section
-            bodyStack.Children.Add(CreateSectionTitle("Starter Templates"));
-            bodyStack.Children.Add(CreateTemplatesRow());
+            FrameworkElement welcomeBanner;
+            try
+            {
+                welcomeBanner = new KerfRuntimeBannerView();
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceError("Kerf home banner failed to initialize: " + ex);
+                welcomeBanner = CreateHeroBanner();
+            }
+            welcomeBanner.HorizontalAlignment = HorizontalAlignment.Stretch;
+            welcomeBanner.Margin = new Thickness(0, 0, 0, 24);
+            bodyStack.Children.Add(welcomeBanner);
 
             // Recent Projects Section
             bodyStack.Children.Add(CreateRecentProjectsHeader());
             _recentProjectsPanel = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
             _emptyStateText = new TextBlock
             {
-                Text = "No local projects found. Click '+ New Design' or open a template above to get started.",
+                Text = "No recent projects yet. Create a new design or open an existing file to get started.",
                 Foreground = KerfBrand.TextMutedBrush,
                 FontSize = 14,
                 Margin = new Thickness(0, 24, 0, 24),
@@ -101,7 +106,7 @@ namespace Kerf.UI
                 Background = KerfBrand.DarkSlateBrush, // #0C4247
                 BorderBrush = KerfBrand.TealBrush,     // #0A717B
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(32, 0, 32, 0)
+                Padding = new Thickness(24, 0, 24, 0)
             };
 
             var dock = new DockPanel { LastChildFill = false };
@@ -109,12 +114,12 @@ namespace Kerf.UI
             // Left: Official Logo & Title
             var logoStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             var logo = KerfLogo.CreateIconElement(26, 32, fillBrush: KerfBrand.MintBrush, withGlow: true);
-            logo.Margin = new Thickness(0, 0, 12, 0);
+            logo.Margin = new Thickness(0, 0, 10, 0);
             logoStack.Children.Add(logo);
 
             var titleText = new TextBlock
             {
-                Text = "Kerf Studio",
+                Text = ProductInfo.Name,
                 FontSize = 18,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = KerfBrand.TextWhiteBrush,
@@ -130,7 +135,7 @@ namespace Kerf.UI
             };
             versionTag.Child = new TextBlock
             {
-                Text = "v4.0.0 Motion",
+                Text = ProductInfo.Version,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
                 Foreground = KerfBrand.MintBrush
@@ -151,13 +156,14 @@ namespace Kerf.UI
                 BorderBrush = isHw ? KerfBrand.MintBrush : KerfBrand.AmberBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(14),
-                Padding = new Thickness(12, 4, 12, 4),
-                Margin = new Thickness(0, 0, 16, 0)
+                Padding = new Thickness(9, 3, 9, 3),
+                Margin = new Thickness(0, 0, 10, 0),
+                ToolTip = isHw ? "Direct3D 11 hardware acceleration is active" : "Software rendering is active (tier " + tier + ")"
             };
             gpuBadge.Child = new TextBlock
             {
-                Text = isHw ? "Direct3D 11 GPU Active" : "Software Rasterizer (Tier " + tier + ")",
-                FontSize = 12,
+                Text = isHw ? "GPU ready" : "Software mode",
+                FontSize = 10,
                 Foreground = isHw ? KerfBrand.MintBrush : KerfBrand.AmberBrush,
                 FontWeight = FontWeights.Medium
             };
@@ -558,7 +564,6 @@ namespace Kerf.UI
 
         public void RefreshProjects()
         {
-            StorageManager.EnsureDefaultTemplates();
             _allProjects = StorageManager.GetRecentProjects();
             FilterProjects();
         }
@@ -695,7 +700,7 @@ namespace Kerf.UI
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Failed to open project: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("Failed to open project: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -703,8 +708,8 @@ namespace Kerf.UI
         {
             var dlg = new OpenFileDialog
             {
-                Filter = "Kerf Design Files (*.kerf)|*.kerf|All Files (*.*)|*.*",
-                Title = "Open Kerf Design File",
+                Filter = "Kerf Projects and Packages (*.kerf;*.kfx;*.json)|*.kerf;*.kfx;*.json|Kerf Design Files (*.kerf)|*.kerf|Kerf Animation Packages (*.kfx)|*.kfx|JSON Projects (*.json)|*.json|All Files (*.*)|*.*",
+                Title = "Open Kerf Project or Animation Package",
                 InitialDirectory = StorageManager.ProjectsFolder
             };
 

@@ -49,6 +49,8 @@ namespace Kerf.UI
         private Border _designTabButton;
         private Border _animateTabButton;
         private FrameworkElement _timelinePanel;
+        private FrameworkElement _timelineWorkAreaBar;
+        private RowDefinition _timelineTransportRow;
         private AnimationTimelineController _timelineController;
         private DispatcherTimer _animationTimer;
 
@@ -59,9 +61,13 @@ namespace Kerf.UI
         private TextBlock _timelineClipText;
         private TextBlock _timelineLoopText;
         private TextBlock _timelineSpeedText;
+        private TextBox _timelineWorkAreaStartBox;
+        private TextBox _timelineWorkAreaEndBox;
         private StackPanel _timelineTracksStack;
         private StackPanel _timelineStateTabsStack;
         private Canvas _timelineCanvasHost;
+        private Canvas _timelineWorkAreaCanvas;
+        private ScrollViewer _timelineWorkAreaScroll;
         private FrameworkElement _timelineTracksContainer;
         private FrameworkElement _stateMachineContainer;
         private FrameworkElement _stateMachineScrollContainer;
@@ -69,6 +75,12 @@ namespace Kerf.UI
         private Border _tabStateMachineBtn;
         private Border _tabTimelineClipsBtn;
         private double _timelinePixelsPerSecond = 260.0;
+        private enum TimelineWorkAreaDragMode { None, Start, End, Range }
+        private TimelineWorkAreaDragMode _timelineWorkAreaDragMode = TimelineWorkAreaDragMode.None;
+        private Point _timelineWorkAreaDragOrigin;
+        private double _timelineWorkAreaDragStart;
+        private double _timelineWorkAreaDragEnd;
+        private bool _timelineWorkAreaDragMoved;
         private bool _isScrubbingTimeline = false;
         private bool _timelinePointerDown;
         private bool _timelineCandidateMarquee;
@@ -272,6 +284,7 @@ namespace Kerf.UI
         private Rect _transformStartBounds;
         private double _transformStartRot;
         private Point _transformStartMouse;
+        private Point _anchorDragStartPoint;
         private double _startScaleX = 1.0;
         private double _startScaleY = 1.0;
         private Point _dragStartPoint;
@@ -308,6 +321,7 @@ namespace Kerf.UI
         private bool _isVectorEditing = false;
         private LayerNode _editingVectorNode = null;
         private int _selectedNodeIndex = -1;
+        private readonly HashSet<int> _selectedNodeIndices = new HashSet<int>();
         private bool _isDraggingNodeAnchor = false;
         private bool _isDraggingNodeHandle = false;
         private bool _draggingOutHandle = false;
@@ -346,12 +360,13 @@ namespace Kerf.UI
 
         // UI Controls
         private TextBlock _titleBlock;
-        private TextBox _titleTextBox;
         private TextBlock _telemetryBlock;
         private TextBlock _saveStatusBlock;
         private DispatcherTimer _saveStatusTimer;
         private TextBlock _zoomPercentBlock;
         private StackPanel _layerListStack;
+        private ScrollViewer _layerListScrollViewer;
+        private DispatcherTimer _layerDragAutoScrollTimer;
         private StackPanel _propertyInspectorStack;
         public StackPanel PropertyInspectorStack
         {
@@ -384,6 +399,7 @@ namespace Kerf.UI
         private bool _renameFocusReady;
         private bool _isFinishingRename;
         private Point _dragCardStartPoint;
+        private int _layerDragAutoScrollDirection;
         private int _layerGroupCounter = 1;
 
         // Adobe Illustrator Duplicate & Transform Engine State
@@ -452,10 +468,13 @@ namespace Kerf.UI
         private bool _isDraggingCropHandle = false;
         private Point _cropDragStartMouse;
         private Rect _cropDragStartUV;
+        private LayerNode _clipTargetOwner;
+        private ClippingTargetData _pendingClipTarget;
 
         public StudioView()
         {
             Document = new KerfDocument();
+            EnsureDefaultArtboard(Document);
             History = new CommandHistory();
             History.HistoryChanged += (s, e) => UpdateSaveStatus();
             _toolButtons = new Dictionary<ToolType, Button>();
@@ -477,13 +496,13 @@ namespace Kerf.UI
             if (_timelineTracksContainer != null) _timelineTracksContainer.Visibility = Visibility.Collapsed;
             if (_stateMachineScrollContainer != null) _stateMachineScrollContainer.Visibility = Visibility.Visible;
             Document = doc ?? new KerfDocument();
+            if (string.IsNullOrEmpty(filePath)) EnsureDefaultArtboard(Document);
             CurrentFilePath = filePath;
             SanitizeAnimationClips(Document);
             History.Clear();
             _selectedLayers.Clear();
 
             _titleBlock.Text = Document.Name;
-            _titleTextBox.Text = Document.Name;
             UpdateSaveStatus();
 
             var page = Document.GetActivePage();
@@ -499,6 +518,25 @@ namespace Kerf.UI
                 BuildStateMachineStatesGraph();
                 RefreshTimelineUI();
             }
+        }
+
+        private static void EnsureDefaultArtboard(KerfDocument document)
+        {
+            if (document == null) return;
+            var page = document.GetActivePage();
+            if (page.Layers == null) page.Layers = new List<LayerNode>();
+            if (page.Layers.Count > 0) return;
+            page.Layers.Add(new LayerNode
+            {
+                Name = "Frame 1",
+                Type = ElementType.Frame,
+                X = 0.0,
+                Y = 0.0,
+                Width = 520.0,
+                Height = 520.0,
+                ClipContent = true,
+                Fills = new List<Paint> { Paint.Solid("#FFFFFF") }
+            });
         }
 
         private void InitializeAutosave()
@@ -584,8 +622,8 @@ namespace Kerf.UI
             Content = rootGrid;
 
             // Keyboard Shortcuts
-            KeyDown += OnStudioKeyDown;
             PreviewKeyDown += OnStudioKeyDown;
+            TextInput += OnStudioTextInput;
             Focusable = true;
             Loaded += (s, e) =>
             {
@@ -727,7 +765,7 @@ namespace Kerf.UI
             helpMenu.Items.Add(CreateSubMenuItem("_Runtime Integration Guide (React & Web)...", null, () => ShowRuntimeGuideDialog()));
             helpMenu.Items.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(226, 232, 240)), Margin = new Thickness(4, 2, 4, 2) });
             helpMenu.Items.Add(CreateSubMenuItem("_Keyboard Shortcuts", "F1", () => ShowShortcutsDialog()));
-            helpMenu.Items.Add(CreateSubMenuItem("_About Kerf Studio...", null, () => ShowAboutDialog()));
+            helpMenu.Items.Add(CreateSubMenuItem("_About Kerf...", null, () => ShowAboutDialog()));
             menu.Items.Add(helpMenu);
 
             return menu;
@@ -825,7 +863,7 @@ namespace Kerf.UI
             {
                 var res = MessageBox.Show(
                     string.Format("Do you want to save changes to \"{0}\" before opening another project?", Document.Name),
-                    "Kerf Studio",
+                    "Kerf",
                     MessageBoxButton.YesNoCancel,
                     MessageBoxImage.Question);
                 if (res == MessageBoxResult.Yes)
@@ -856,7 +894,7 @@ namespace Kerf.UI
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Failed to open project: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("Failed to open project: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -866,7 +904,7 @@ namespace Kerf.UI
             {
                 var res = MessageBox.Show(
                     string.Format("Do you want to save changes to \"{0}\" before creating a new project?", Document.Name),
-                    "Kerf Studio",
+                    "Kerf",
                     MessageBoxButton.YesNoCancel,
                     MessageBoxImage.Question);
 
@@ -900,8 +938,8 @@ namespace Kerf.UI
         private void ShowAboutDialog()
         {
             MessageBox.Show(
-                "Kerf Studio v3.0.0\nOfficial Brand Edition\n\nHigh-Performance Windows Desktop Vector & Animation Studio.\n\n• Direct3D 11 Retained Scene Graph\n• SIMD Rust Native Acceleration\n• Real-Time Vector State Machine Engine\n• Figma Auto Layout Flexbox Engine\n\n© Kerf Studio. All rights reserved.",
-                "About Kerf Studio",
+                ProductInfo.DisplayName + "\nVector design and animation for Windows.\n\n• Direct3D 11 rendering\n• Native Rust geometry engine\n• Interactive animation and state machines\n• Auto Layout and component systems\n\n© Kerf. All rights reserved.",
+                "About Kerf",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -909,7 +947,7 @@ namespace Kerf.UI
         private void ShowShortcutsDialog()
         {
             MessageBox.Show(
-                "Kerf Studio Keyboard Shortcuts:\n\n" +
+                "Kerf Keyboard Shortcuts:\n\n" +
                 "• V: Select Tool\n" +
                 "• H: Hand Pan Tool\n" +
                 "• F: Frame Tool\n" +
@@ -932,7 +970,7 @@ namespace Kerf.UI
                 "• Ctrl + D: Duplicate Selected\n" +
                 "• Space + Drag / Middle Mouse: Pan Canvas\n" +
                 "• Ctrl + MouseWheel: Centered Zoom",
-                "Kerf Studio Shortcuts",
+                "Kerf Shortcuts",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -985,30 +1023,9 @@ namespace Kerf.UI
                 FontWeight = FontWeights.SemiBold,
                 Foreground = KerfBrand.TextWhiteBrush,
                 VerticalAlignment = VerticalAlignment.Center,
-                Cursor = Cursors.Hand,
                 Margin = new Thickness(4, 0, 4, 0)
             };
-            _titleTextBox = new TextBox
-            {
-                Text = "Untitled Project",
-                Width = 150,
-                Height = 26,
-                Visibility = Visibility.Collapsed,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            KerfBrand.ApplyDarkRoundedTextBoxStyle(_titleTextBox, 6, 13);
-            _titleBlock.MouseLeftButtonUp += (s, e) =>
-            {
-                _titleBlock.Visibility = Visibility.Collapsed;
-                _titleTextBox.Visibility = Visibility.Visible;
-                _titleTextBox.Focus();
-                _titleTextBox.SelectAll();
-            };
-            _titleTextBox.LostFocus += (s, e) => CommitTitleEdit();
-            _titleTextBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) CommitTitleEdit(); };
-
             leftStack.Children.Add(_titleBlock);
-            leftStack.Children.Add(_titleTextBox);
 
             var sepMode = CreateSeparator();
             sepMode.Margin = new Thickness(6, 0, 6, 0);
@@ -1027,9 +1044,6 @@ namespace Kerf.UI
             var placeImgBtn = CreatePlaceImageTopButton();
             leftStack.Children.Add(placeImgBtn);
 
-            DockPanel.SetDock(leftStack, Dock.Left);
-            dock.Children.Add(leftStack);
-
             // Center: Boolean operations bar (visible when >= 2 elements selected)
             _booleanToolbar = new StackPanel
             {
@@ -1042,10 +1056,14 @@ namespace Kerf.UI
             _booleanToolbar.Children.Add(CreateIconButton(VectorIcons.SubtractGeometry, "Boolean Subtract", () => ApplyBoolean(BooleanOp.Subtract)));
             _booleanToolbar.Children.Add(CreateIconButton(VectorIcons.IntersectGeometry, "Boolean Intersect", () => ApplyBoolean(BooleanOp.Intersect)));
             _booleanToolbar.Children.Add(CreateIconButton(VectorIcons.ExcludeGeometry, "Boolean Exclude", () => ApplyBoolean(BooleanOp.Exclude)));
-            dock.Children.Add(_booleanToolbar);
 
             // Right: Zoom controls, Save status, Telemetry badge, Export button
-            var rightStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var rightStack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                ClipToBounds = true
+            };
 
             // Zoom percent & reset
             var zoomMinus = CreateTextButton("-", () => SetZoom(_zoomScale * 0.8));
@@ -1082,38 +1100,38 @@ namespace Kerf.UI
             // Real-time truthful telemetry
             _telemetryBlock = new TextBlock
             {
-                Text = "GPU Tier 2 (Direct3D 11) | 0 µs",
-                FontSize = 11,
+                Text = "GPU 2 · 0 µs · 0/0",
+                FontSize = 10,
                 Foreground = KerfBrand.MintBrush,
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(8, 0, 12, 0)
+                Margin = new Thickness(6, 0, 8, 0),
+                MaxWidth = 180,
+                TextTrimming = TextTrimming.CharacterEllipsis
             };
+            _telemetryBlock.ToolTip = "Rendering diagnostics";
             rightStack.Children.Add(_telemetryBlock);
 
             var exportBtn = KerfBrand.CreatePrimaryButton("Export", () => ShowExportDialog(), 6);
             exportBtn.Height = 28;
             exportBtn.Padding = new Thickness(14, 0, 14, 0);
+            exportBtn.Margin = new Thickness(8, 0, 0, 0);
             exportBtn.FontSize = 12;
             exportBtn.ToolTip = "Export Document (PNG/SVG) [Ctrl+E]";
-            rightStack.Children.Add(exportBtn);
 
+            // Reserve the right edge for Export first, then let diagnostic and project
+            // controls use the space left of it. The left tool strip is laid out last so
+            // it cannot push Export outside the visible toolbar.
+            DockPanel.SetDock(exportBtn, Dock.Right);
+            dock.Children.Add(exportBtn);
             DockPanel.SetDock(rightStack, Dock.Right);
             dock.Children.Add(rightStack);
+            DockPanel.SetDock(leftStack, Dock.Left);
+            leftStack.ClipToBounds = true;
+            dock.Children.Add(leftStack);
+            dock.Children.Add(_booleanToolbar);
 
             border.Child = dock;
             return border;
-        }
-
-        private void CommitTitleEdit()
-        {
-            _titleTextBox.Visibility = Visibility.Collapsed;
-            _titleBlock.Visibility = Visibility.Visible;
-            if (!string.IsNullOrEmpty(_titleTextBox.Text))
-            {
-                Document.Name = _titleTextBox.Text.Trim();
-                _titleBlock.Text = Document.Name;
-                History.MarkDirty();
-            }
         }
 
         private void UpdateSaveStatus()
@@ -1810,6 +1828,9 @@ namespace Kerf.UI
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             };
+            _layerListScrollViewer = scrollLayers;
+            scrollLayers.PreviewDragOver += HandleLayerListPreviewDragOver;
+            scrollLayers.PreviewDrop += (s, e) => StopLayerDragAutoScroll();
             _layerListStack = new StackPanel { Margin = new Thickness(8, 0, 8, 12) };
             scrollLayers.Content = _layerListStack;
             Grid.SetRow(scrollLayers, 1);
@@ -2460,7 +2481,9 @@ namespace Kerf.UI
 
                     if (_defaultInterpolationSubtitle != null)
                     {
-                        string propName = _editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Property";
+                        string propName = _editingInterpolationTrack != null && !string.IsNullOrEmpty(_editingInterpolationTrack.PropertyPath)
+                            ? _editingInterpolationTrack.PropertyPath
+                            : (_editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Property");
                         _defaultInterpolationSubtitle.Text = string.Format(CultureInfo.InvariantCulture, "{0} · {1:0.00}s", propName, kf.Time);
                     }
 
@@ -3261,6 +3284,80 @@ namespace Kerf.UI
             }
         }
 
+        private void HandleLayerListPreviewDragOver(object sender, DragEventArgs e)
+        {
+            if (_layerListScrollViewer == null || !e.Data.GetDataPresent(typeof(LayerNode)))
+            {
+                StopLayerDragAutoScroll();
+                return;
+            }
+
+            Point position = e.GetPosition(_layerListScrollViewer);
+            double height = _layerListScrollViewer.ActualHeight;
+            double edge = Math.Min(48.0, Math.Max(24.0, height * 0.18));
+            int direction = position.Y < edge ? -1 : position.Y > height - edge ? 1 : 0;
+            SetLayerDragAutoScrollDirection(direction);
+        }
+
+        private void SetLayerDragAutoScrollDirection(int direction)
+        {
+            _layerDragAutoScrollDirection = direction;
+            if (direction == 0 || _layerListScrollViewer == null || _layerListScrollViewer.ScrollableHeight <= 0.0)
+            {
+                StopLayerDragAutoScroll();
+                return;
+            }
+
+            if (_layerDragAutoScrollTimer == null)
+            {
+                _layerDragAutoScrollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+                _layerDragAutoScrollTimer.Tick += (s, e) =>
+                {
+                    var viewer = _layerListScrollViewer;
+                    if (viewer == null || _layerDragAutoScrollDirection == 0)
+                    {
+                        StopLayerDragAutoScroll();
+                        return;
+                    }
+
+                    Point position = Mouse.GetPosition(viewer);
+                    if (position.Y < 0.0 || position.Y > viewer.ActualHeight)
+                    {
+                        StopLayerDragAutoScroll();
+                        return;
+                    }
+                    double edge = Math.Min(48.0, Math.Max(24.0, viewer.ActualHeight * 0.18));
+                    if (position.Y < edge) _layerDragAutoScrollDirection = -1;
+                    else if (position.Y > viewer.ActualHeight - edge) _layerDragAutoScrollDirection = 1;
+                    else
+                    {
+                        StopLayerDragAutoScroll();
+                        return;
+                    }
+
+                    double distance = _layerDragAutoScrollDirection < 0
+                        ? edge - position.Y
+                        : position.Y - (viewer.ActualHeight - edge);
+                    double speed = 6.0 + 22.0 * Math.Max(0.0, Math.Min(1.0, distance / edge));
+                    double next = Math.Max(0.0, Math.Min(viewer.ScrollableHeight,
+                        viewer.VerticalOffset + _layerDragAutoScrollDirection * speed));
+                    viewer.ScrollToVerticalOffset(next);
+                    if ((_layerDragAutoScrollDirection < 0 && next <= 0.0) ||
+                        (_layerDragAutoScrollDirection > 0 && next >= viewer.ScrollableHeight))
+                        StopLayerDragAutoScroll();
+                };
+            }
+
+            if (!_layerDragAutoScrollTimer.IsEnabled) _layerDragAutoScrollTimer.Start();
+        }
+
+        private void StopLayerDragAutoScroll()
+        {
+            _layerDragAutoScrollDirection = 0;
+            if (_layerDragAutoScrollTimer != null && _layerDragAutoScrollTimer.IsEnabled)
+                _layerDragAutoScrollTimer.Stop();
+        }
+
         private FrameworkElement CreateLayerCard(LayerNode layer, int depth)
         {
             if (!MatchesFilter(layer)) return null;
@@ -3550,6 +3647,7 @@ namespace Kerf.UI
                     if (Math.Abs(cur.X - _dragCardStartPoint.X) > 4 || Math.Abs(cur.Y - _dragCardStartPoint.Y) > 4)
                     {
                         DragDrop.DoDragDrop(card, layer, DragDropEffects.Move);
+                        StopLayerDragAutoScroll();
                     }
                 }
             };
@@ -4141,6 +4239,10 @@ namespace Kerf.UI
         public void RefreshPropertyInspector()
         {
             if (_propertyInspectorStack == null) return;
+            if (_currentStudioMode == StudioMode.Animate && _isStateMachineMode)
+            {
+                BuildStateMachineListeners();
+            }
             _propertyInspectorStack.Children.Clear();
 
             // When in Animate mode and State Machine is active with NO layer selected, show dedicated State Machine Inspector (D-09)
@@ -4331,6 +4433,9 @@ namespace Kerf.UI
                 };
                 editVectorBtn.Click += (s, e) => EnterVectorEditMode(primary);
                 _propertyInspectorStack.Children.Add(editVectorBtn);
+
+                if (_currentStudioMode == StudioMode.Animate && primary.Geometry != null)
+                    _propertyInspectorStack.Children.Add(CreatePathKeyframeControl(primary));
 
                 if (primary.Geometry != null)
                 {
@@ -5042,6 +5147,12 @@ namespace Kerf.UI
                 BuildTypographySection(primary);
             }
 
+            // 7. Rive-style Clipping Section
+            BuildClippingSection(primary);
+
+            // 8. Rive-style Constraints Section
+            BuildConstraintsSection(primary);
+
             // Keep selection-level styles at the end of the inspector, after object properties.
             if (_selectedLayers.Count > 1 || primary.Type == ElementType.Frame || primary.Type == ElementType.Group)
                 BuildSelectionColorsSection(_selectedLayers);
@@ -5187,18 +5298,148 @@ namespace Kerf.UI
                         var oldSnap = new StateSnapshot(state);
                         var newSnap = oldSnap.Clone();
                         newSnap.StateType = stType;
+                        StateMachineDefinition stateMachine = Document != null && Document.Animation != null ? Document.Animation.StateMachine : null;
+                        MachineInput createdBlendInput = null;
+                        if (stType == StateType.Blend1D)
+                        {
+                            newSnap.Kind = StateKind.Blend1D;
+                            if (newSnap.Blend1DItems == null) newSnap.Blend1DItems = new List<Blend1DItem>();
+                            if (newSnap.Blend1DItems.Count < 2)
+                            {
+                                int firstClip = Math.Max(0, newSnap.ClipIndex);
+                                int secondClip = 0;
+                                if (Document != null && Document.Animation != null && Document.Animation.Clips != null)
+                                {
+                                    if (firstClip >= Document.Animation.Clips.Count) firstClip = 0;
+                                    secondClip = Document.Animation.Clips.Count > 1 ? (firstClip == 0 ? 1 : 0) : firstClip;
+                                }
+                                newSnap.Blend1DItems = new List<Blend1DItem>
+                                {
+                                    new Blend1DItem(0.0, firstClip),
+                                    new Blend1DItem(1.0, secondClip)
+                                };
+                            }
+                            int numericInput = stateMachine != null && stateMachine.Inputs != null
+                                ? stateMachine.Inputs.FindIndex(input => input != null && input.Kind == InputKind.Number)
+                                : -1;
+                            if (numericInput < 0 && stateMachine != null)
+                            {
+                                string inputName = "Blend";
+                                int suffix = 2;
+                                while (stateMachine.Inputs.Any(input => input != null && string.Equals(input.Name, inputName, StringComparison.OrdinalIgnoreCase)))
+                                    inputName = "Blend " + suffix++;
+                                createdBlendInput = MachineInput.Number(inputName, 0.0);
+                                numericInput = stateMachine.Inputs.Count;
+                            }
+                            newSnap.BlendInputIndex = numericInput;
+                        }
+                        else if (stType == StateType.Single)
+                        {
+                            newSnap.Kind = StateKind.Animation;
+                        }
+
+                        bool openedBatch = History != null && !History.IsBatching;
+                        if (openedBatch) History.BeginBatch(stType == StateType.Blend1D ? "Create Blend State" : "Change State Type");
+                        if (createdBlendInput != null && stateMachine != null)
+                        {
+                            var addInput = new CreateInputCommand(stateMachine, createdBlendInput, () =>
+                            {
+                                BuildStateMachineInputsControls();
+                                RefreshPropertyInspector();
+                            });
+                            if (History != null) History.Execute(addInput);
+                            else addInput.Execute();
+                        }
                         var cmd = new ModifyStateNodeCommand(state, oldSnap, newSnap, () =>
                         {
                             BuildStateMachineStatesGraph();
+                            BuildStateMachineInputsControls();
                             RefreshPropertyInspector();
                         });
                         if (History != null) History.Execute(cmd);
                         else cmd.Execute();
+                        if (openedBatch) History.EndBatch();
                     }
                 };
                 typeGrid.Children.Add(btn);
             }
             stack.Children.Add(CreateTransitionFormRow("Type", typeGrid));
+
+            if (state.Kind == StateKind.Blend1D)
+            {
+                var stateMachine = Document != null && Document.Animation != null ? Document.Animation.StateMachine : null;
+                var blendInputCombo = CreateModernComboBox(24);
+                if (stateMachine != null && stateMachine.Inputs != null)
+                {
+                    for (int inputIndex = 0; inputIndex < stateMachine.Inputs.Count; inputIndex++)
+                    {
+                        var input = stateMachine.Inputs[inputIndex];
+                        if (input == null || input.Kind != InputKind.Number) continue;
+                        blendInputCombo.Items.Add(CreateModernComboBoxItem(input.Name, inputIndex));
+                    }
+                }
+                for (int option = 0; option < blendInputCombo.Items.Count; option++)
+                {
+                    var item = blendInputCombo.Items[option] as ComboBoxItem;
+                    if (item != null && item.Tag is int && (int)item.Tag == state.BlendInputIndex)
+                    {
+                        blendInputCombo.SelectedIndex = option;
+                        break;
+                    }
+                }
+                blendInputCombo.SelectionChanged += (s, e) =>
+                {
+                    var item = blendInputCombo.SelectedItem as ComboBoxItem;
+                    if (item == null || !(item.Tag is int)) return;
+                    int inputIndex = (int)item.Tag;
+                    if (inputIndex == state.BlendInputIndex) return;
+                    var before = new StateSnapshot(state);
+                    var after = before.Clone();
+                    after.BlendInputIndex = inputIndex;
+                    var cmd = new ModifyStateNodeCommand(state, before, after, () => { RefreshPropertyInspector(); BuildStateMachineStatesGraph(); });
+                    if (History != null) History.Execute(cmd); else cmd.Execute();
+                };
+                stack.Children.Add(CreateTransitionFormRow("Blend input", blendInputCombo));
+
+                if (state.Blend1DItems == null) state.Blend1DItems = new List<Blend1DItem>();
+                while (state.Blend1DItems.Count < 2) state.Blend1DItems.Add(new Blend1DItem(state.Blend1DItems.Count, Math.Max(0, state.ClipIndex)));
+                for (int blendItemIndex = 0; blendItemIndex < 2; blendItemIndex++)
+                {
+                    int capturedIndex = blendItemIndex;
+                    var clipComboForBlend = CreateModernComboBox(24);
+                    if (Document != null && Document.Animation != null && Document.Animation.Clips != null)
+                    {
+                        for (int clipIndex = 0; clipIndex < Document.Animation.Clips.Count; clipIndex++)
+                        {
+                            var clip = Document.Animation.Clips[clipIndex];
+                            clipComboForBlend.Items.Add(CreateModernComboBoxItem(clip != null ? clip.Name : "Clip " + clipIndex, clipIndex));
+                        }
+                    }
+                    int selectedClipIndex = state.Blend1DItems[capturedIndex].ClipIndex;
+                    for (int option = 0; option < clipComboForBlend.Items.Count; option++)
+                    {
+                        var item = clipComboForBlend.Items[option] as ComboBoxItem;
+                        if (item != null && item.Tag is int && (int)item.Tag == selectedClipIndex)
+                        {
+                            clipComboForBlend.SelectedIndex = option;
+                            break;
+                        }
+                    }
+                    clipComboForBlend.SelectionChanged += (s, e) =>
+                    {
+                        var item = clipComboForBlend.SelectedItem as ComboBoxItem;
+                        if (item == null || !(item.Tag is int)) return;
+                        int clipIndex = (int)item.Tag;
+                        if (clipIndex == state.Blend1DItems[capturedIndex].ClipIndex) return;
+                        var before = new StateSnapshot(state);
+                        var after = before.Clone();
+                        after.Blend1DItems[capturedIndex].ClipIndex = clipIndex;
+                        var cmd = new ModifyStateNodeCommand(state, before, after, () => { RefreshPropertyInspector(); BuildStateMachineStatesGraph(); });
+                        if (History != null) History.Execute(cmd); else cmd.Execute();
+                    };
+                    stack.Children.Add(CreateTransitionFormRow(capturedIndex == 0 ? "At 0" : "At 1", clipComboForBlend));
+                }
+            }
 
             // 5. Timeline selector (ComboBox)
             var clipCombo = CreateModernComboBox(26);
@@ -5805,6 +6046,7 @@ namespace Kerf.UI
                             activeInput = sm.Definition.Inputs.FirstOrDefault(inp => inp.InputId == cond.InputId);
                         if (activeInput == null && cond.InputIndex >= 0 && cond.InputIndex < sm.Definition.Inputs.Count)
                             activeInput = sm.Definition.Inputs[cond.InputIndex];
+                        if (activeInput != null && activeInput.Kind == InputKind.Folder) activeInput = null;
                     }
 
                     var inBox = CreateModernComboBox(22);
@@ -5817,6 +6059,7 @@ namespace Kerf.UI
                         for (int inpI = 0; inpI < sm.Definition.Inputs.Count; inpI++)
                         {
                             var inputDef = sm.Definition.Inputs[inpI];
+                            if (inputDef == null || inputDef.Kind == InputKind.Folder) continue;
                             var item = new ComboBoxItem { Content = inputDef.Name, Tag = inputDef };
                             inBox.Items.Add(item);
                             if (activeInput != null && activeInput.InputId == inputDef.InputId)
@@ -6029,7 +6272,9 @@ namespace Kerf.UI
                     var newGroups = CloneConditionGroups(trans.ConditionGroups);
                     if (groupIndex < newGroups.Count)
                     {
-                        var firstInput = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0] : null;
+                        var firstInput = sm != null && sm.Definition != null && sm.Definition.Inputs != null
+                            ? sm.Definition.Inputs.FirstOrDefault(input => input != null && input.Kind != InputKind.Folder) : null;
+                        if (firstInput == null) return;
                         string firstId = firstInput != null ? firstInput.InputId : null;
                         string firstName = firstInput != null ? firstInput.Name : null;
                         double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
@@ -6100,7 +6345,9 @@ namespace Kerf.UI
                 var oldGroups = CloneConditionGroups(trans.ConditionGroups);
                 var newGroups = CloneConditionGroups(trans.ConditionGroups);
                 var newGroup = new ConditionGroup();
-                var firstInput = (sm != null && sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0] : null;
+                var firstInput = sm != null && sm.Definition != null && sm.Definition.Inputs != null
+                    ? sm.Definition.Inputs.FirstOrDefault(input => input != null && input.Kind != InputKind.Folder) : null;
+                if (firstInput == null) return;
                 string firstId = firstInput != null ? firstInput.InputId : null;
                 string firstName = firstInput != null ? firstInput.Name : null;
                 double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
@@ -6245,7 +6492,7 @@ namespace Kerf.UI
                 for (int i = 0; i < smDef.Listeners.Count; i++)
                 {
                     var l = smDef.Listeners[i];
-                    if (l != null && l.TargetNodeId == targetId)
+                    if (l != null && (l.TargetNodeId == targetId || l.TargetNodeId == 0u))
                     {
                         matchingListeners.Add(l);
                     }
@@ -6283,30 +6530,9 @@ namespace Kerf.UI
             addBtn.Click += (s, e) =>
             {
                 if (smDef == null) return;
-                var firstInp = (smDef.Inputs != null && smDef.Inputs.Count > 0) ? smDef.Inputs[0] : null;
-                string firstInpId = firstInp != null ? firstInp.InputId : null;
-                string firstInpName = firstInp != null ? firstInp.Name : null;
-                ActionKind defaultAction = (firstInp != null && firstInp.Kind == InputKind.Bool) ? ActionKind.SetBool : (firstInp != null && firstInp.Kind == InputKind.Number ? ActionKind.SetNumber : ActionKind.Fire);
-
-                // If Bool input, check if PointerEnter already exists on this target to create the complementary PointerExit
-                bool hasEnter = false;
-                if (smDef.Listeners != null)
-                {
-                    for (int li = 0; li < smDef.Listeners.Count; li++)
-                    {
-                        var l = smDef.Listeners[li];
-                        if (l != null && l.TargetNodeId == targetId && (l.Kind == PointerEventKind.Enter || l.Kind == PointerEventKind.PointerEnter))
-                        {
-                            hasEnter = true;
-                            break;
-                        }
-                    }
-                }
-
-                PointerEventKind defaultEvent = (firstInp != null && firstInp.Kind == InputKind.Bool) ? (hasEnter ? PointerEventKind.Exit : PointerEventKind.Enter) : PointerEventKind.Click;
-                double defaultParam = (firstInp != null && firstInp.Kind == InputKind.Bool && defaultEvent == PointerEventKind.Exit) ? 0.0 : ((firstInp != null && firstInp.Kind == InputKind.Bool) ? 1.0 : 0.0);
-                var newListener = new NodeListener(targetId, defaultEvent);
-                newListener.Actions.Add(new ListenerAction(defaultAction, 0, defaultParam) { InputId = firstInpId, PropertyName = firstInpName });
+                var newListener = new NodeListener(targetId, PointerEventKind.None);
+                newListener.Name = GetNextListenerName(smDef);
+                newListener.TargetLayerId = selectedLayer != null ? selectedLayer.Id : string.Empty;
                 var addCmd = new AddListenerCommand(smDef, newListener, () =>
                 {
                     RefreshPropertyInspector();
@@ -6369,8 +6595,65 @@ namespace Kerf.UI
             };
             var cardStack = new StackPanel();
 
+            // Give listeners stable, editable names such as Listener1 and Listener2.
+            var nameRow = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+            nameRow.Children.Add(new TextBlock
+            {
+                Text = "Listener",
+                Width = 46,
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            var nameBox = new TextBox
+            {
+                Text = string.IsNullOrWhiteSpace(listener.Name) ? "Listener" : listener.Name,
+                Height = 22,
+                FontSize = 11,
+                Background = new SolidColorBrush(Color.FromRgb(33, 38, 52)),
+                Foreground = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(56, 66, 92)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(4, 2, 4, 2)
+            };
+            Action commitListenerName = () =>
+            {
+                string newName = (nameBox.Text ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(newName) || string.Equals(newName, listener.Name, StringComparison.Ordinal)) return;
+                var oldSnap = new NodeListenerSnapshot(listener);
+                var newSnap = new NodeListenerSnapshot(listener) { Name = newName };
+                var renameCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                {
+                    RefreshPropertyInspector();
+                    RefreshCanvas();
+                });
+                if (History != null) History.Execute(renameCmd);
+                else renameCmd.Execute();
+            };
+            nameBox.LostKeyboardFocus += (s, e) => commitListenerName();
+            nameBox.KeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    commitListenerName();
+                    Keyboard.ClearFocus();
+                }
+            };
+            nameRow.Children.Add(nameBox);
+            cardStack.Children.Add(nameRow);
+
             // Row 1: Header (Event Kind dropdown, Enabled Checkbox, Delete button)
             var row1 = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+            var eventLabel = new TextBlock
+            {
+                Text = "Listen to",
+                Width = 46,
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(eventLabel, Dock.Left);
+            row1.Children.Add(eventLabel);
 
             var delBtn = new Button
             {
@@ -6430,15 +6713,20 @@ namespace Kerf.UI
 
             var eventCombo = CreateModernComboBox(22, double.NaN);
             eventCombo.Margin = new Thickness(0, 0, 8, 0);
-            eventCombo.Items.Add(CreateModernComboBoxItem("PointerEnter", PointerEventKind.PointerEnter));
-            eventCombo.Items.Add(CreateModernComboBoxItem("PointerExit", PointerEventKind.PointerExit));
-            eventCombo.Items.Add(CreateModernComboBoxItem("PointerDown", PointerEventKind.PointerDown));
-            eventCombo.Items.Add(CreateModernComboBoxItem("PointerUp", PointerEventKind.PointerUp));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Not set", PointerEventKind.None));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Pointer Enter", PointerEventKind.PointerEnter));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Pointer Exit", PointerEventKind.PointerExit));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Pointer Down", PointerEventKind.PointerDown));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Pointer Up", PointerEventKind.PointerUp));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Pointer Move", PointerEventKind.PointerMove));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Pointer Drag", PointerEventKind.PointerDrag));
             eventCombo.Items.Add(CreateModernComboBoxItem("Click", PointerEventKind.Click));
-            eventCombo.Items.Add(CreateModernComboBoxItem("Tap", PointerEventKind.Tap));
-            eventCombo.Items.Add(CreateModernComboBoxItem("DragStart", PointerEventKind.DragStart));
-            eventCombo.Items.Add(CreateModernComboBoxItem("Drag", PointerEventKind.Drag));
-            eventCombo.Items.Add(CreateModernComboBoxItem("DragEnd", PointerEventKind.DragEnd));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Focus", PointerEventKind.Focus));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Blur", PointerEventKind.Blur));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Keyboard", PointerEventKind.Keyboard));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Gamepad", PointerEventKind.Gamepad));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Text Input", PointerEventKind.TextInput));
+            eventCombo.Items.Add(CreateModernComboBoxItem("Semantic Action", PointerEventKind.SemanticAction));
 
             for (int k = 0; k < eventCombo.Items.Count; k++)
             {
@@ -6461,6 +6749,12 @@ namespace Kerf.UI
                         var oldSnap = new NodeListenerSnapshot(listener);
                         var newSnap = new NodeListenerSnapshot(listener);
                         newSnap.Kind = newKind;
+                        if (newKind == PointerEventKind.PointerMove && newSnap.Actions != null && newSnap.Actions.Count > 0 && newSnap.Actions[0].Kind == ActionKind.Fire)
+                        {
+                            newSnap.Actions[0].Kind = ActionKind.AlignObjectToPointer;
+                            newSnap.Actions[0].TargetLayerId = listener.TargetLayerId;
+                            newSnap.Actions[0].TargetNodeId = listener.TargetNodeId;
+                        }
                         if (newKind == PointerEventKind.Exit || newKind == PointerEventKind.PointerExit)
                         {
                             if (newSnap.Actions != null && newSnap.Actions.Count > 0 && newSnap.Actions[0].Kind == ActionKind.SetBool)
@@ -6488,14 +6782,117 @@ namespace Kerf.UI
             row1.Children.Add(eventCombo);
             cardStack.Children.Add(row1);
 
-            // Listener Actions
-            if (listener.Actions == null) listener.Actions = new List<ListenerAction>();
-            if (listener.Actions.Count == 0)
+            var filterRow = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
+            var filterLabel = new TextBlock
             {
-                listener.Actions.Add(new ListenerAction(ActionKind.Fire, 0));
-            }
+                Text = "Filter",
+                Width = 46,
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(filterLabel, Dock.Left);
+            filterRow.Children.Add(filterLabel);
+            var filterBox = new TextBox
+            {
+                Text = string.IsNullOrWhiteSpace(listener.Filter) ? "Any" : listener.Filter,
+                Height = 22,
+                FontSize = 11,
+                Background = new SolidColorBrush(Color.FromRgb(33, 38, 52)),
+                Foreground = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(56, 66, 92)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(4, 2, 4, 2),
+                ToolTip = "Optional key, gamepad, text, or semantic-action filter"
+            };
+            Action commitListenerFilter = () =>
+            {
+                string filter = (filterBox.Text ?? string.Empty).Trim();
+                if (string.Equals(filter, "Any", StringComparison.OrdinalIgnoreCase)) filter = string.Empty;
+                if (string.Equals(filter, listener.Filter ?? string.Empty, StringComparison.Ordinal)) return;
+                var oldSnap = new NodeListenerSnapshot(listener);
+                var newSnap = new NodeListenerSnapshot(listener) { Filter = filter };
+                var filterCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                {
+                    RefreshPropertyInspector();
+                    RefreshCanvas();
+                });
+                if (History != null) History.Execute(filterCmd);
+                else filterCmd.Execute();
+            };
+            filterBox.LostKeyboardFocus += (s, e) => commitListenerFilter();
+            filterBox.KeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    commitListenerFilter();
+                    Keyboard.ClearFocus();
+                }
+            };
+            filterRow.Children.Add(filterBox);
+            filterRow.Visibility = listener.Kind == PointerEventKind.Keyboard || listener.Kind == PointerEventKind.Gamepad ||
+                listener.Kind == PointerEventKind.TextInput || listener.Kind == PointerEventKind.SemanticAction
+                ? Visibility.Visible : Visibility.Collapsed;
+            cardStack.Children.Add(filterRow);
 
-            var action = listener.Actions[0];
+            // Listener target: a layer listens only when its hit region is under the pointer;
+            // Artboard listens globally, which is useful for cursor-follow rigs.
+            var listenerTargetRow = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
+            var listenerTargetLabel = new TextBlock
+            {
+                Text = "Target",
+                Width = 46,
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(listenerTargetLabel, Dock.Left);
+            listenerTargetRow.Children.Add(listenerTargetLabel);
+
+            var listenerTargetCombo = CreateModernComboBox(22, double.NaN);
+            listenerTargetCombo.Items.Add(CreateModernComboBoxItem("Artboard (global)", string.Empty));
+            var activePage = Document != null ? Document.GetActivePage() : null;
+            var listenerTargetLayers = activePage != null ? activePage.GetAllLayersFlat().ToList() : new List<LayerNode>();
+            int listenerTargetIndex = string.IsNullOrEmpty(listener.TargetLayerId) ? (listener.TargetNodeId == 0u ? 0 : -1) : -1;
+            for (int li = 0; li < listenerTargetLayers.Count; li++)
+            {
+                var targetLayer = listenerTargetLayers[li];
+                if (targetLayer == null || string.IsNullOrEmpty(targetLayer.Id)) continue;
+                listenerTargetCombo.Items.Add(CreateModernComboBoxItem(targetLayer.Name, targetLayer.Id));
+                if (string.Equals(targetLayer.Id, listener.TargetLayerId, StringComparison.OrdinalIgnoreCase) ||
+                    (string.IsNullOrEmpty(listener.TargetLayerId) && PropertyBinder.GetNumericNodeId(targetLayer.Id) == listener.TargetNodeId))
+                {
+                    listenerTargetIndex = listenerTargetCombo.Items.Count - 1;
+                }
+            }
+            if (listenerTargetIndex >= 0 && listenerTargetIndex < listenerTargetCombo.Items.Count) listenerTargetCombo.SelectedIndex = listenerTargetIndex;
+            listenerTargetCombo.SelectionChanged += (s, e) =>
+            {
+                var item = listenerTargetCombo.SelectedItem as ComboBoxItem;
+                if (item != null)
+                {
+                    string layerId = item.Tag as string;
+                    uint nodeId = string.IsNullOrEmpty(layerId) ? 0u : PropertyBinder.GetNumericNodeId(layerId);
+                    if (nodeId != listener.TargetNodeId || !string.Equals(layerId ?? string.Empty, listener.TargetLayerId ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var oldSnap = new NodeListenerSnapshot(listener);
+                        var newSnap = new NodeListenerSnapshot(listener);
+                        newSnap.TargetLayerId = layerId ?? string.Empty;
+                        newSnap.TargetNodeId = nodeId;
+                        var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () => { RefreshPropertyInspector(); RefreshCanvas(); });
+                        if (History != null) History.Execute(modCmd);
+                        else modCmd.Execute();
+                    }
+                }
+            };
+            listenerTargetRow.Children.Add(listenerTargetCombo);
+            cardStack.Children.Add(listenerTargetRow);
+
+            // An empty action list is a blank, non-mutating action until the user chooses one.
+            if (listener.Actions == null) listener.Actions = new List<ListenerAction>();
+            var action = listener.Actions.Count > 0 && listener.Actions[0] != null
+                ? listener.Actions[0]
+                : new ListenerAction(ActionKind.Blank, -1);
 
             // Row 2: Action dropdown
             var row2 = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
@@ -6511,11 +6908,23 @@ namespace Kerf.UI
             row2.Children.Add(actLabel);
 
             var actCombo = CreateModernComboBox(22, double.NaN);
-            actCombo.Items.Add(CreateModernComboBoxItem("SetBool", ActionKind.SetBool));
-            actCombo.Items.Add(CreateModernComboBoxItem("SetNumber", ActionKind.SetNumber));
-            actCombo.Items.Add(CreateModernComboBoxItem("ToggleBool", ActionKind.ToggleBool));
-            actCombo.Items.Add(CreateModernComboBoxItem("FireTrigger", ActionKind.FireTrigger));
-            actCombo.Items.Add(CreateModernComboBoxItem("Reset", ActionKind.Reset));
+            actCombo.Items.Add(CreateModernComboBoxItem("Blank", ActionKind.Blank));
+            actCombo.Items.Add(CreateModernComboBoxItem("Input Change (legacy) · Boolean", ActionKind.SetBool));
+            actCombo.Items.Add(CreateModernComboBoxItem("Input Change (legacy) · Number", ActionKind.SetNumber));
+            actCombo.Items.Add(CreateModernComboBoxItem("Input Change (legacy) · Toggle Boolean", ActionKind.ToggleBool));
+            actCombo.Items.Add(CreateModernComboBoxItem("Input Change (legacy) · Fire Trigger", ActionKind.FireTrigger));
+            actCombo.Items.Add(CreateModernComboBoxItem("Input Change (legacy) · Reset", ActionKind.Reset));
+            actCombo.Items.Add(CreateModernComboBoxItem("View Model Change · Boolean", ActionKind.SetViewModelBool));
+            actCombo.Items.Add(CreateModernComboBoxItem("View Model Change · Number", ActionKind.SetViewModelNumber));
+            actCombo.Items.Add(CreateModernComboBoxItem("View Model Change · Trigger", ActionKind.FireViewModelTrigger));
+            actCombo.Items.Add(CreateModernComboBoxItem("View Model Change · Text", ActionKind.SetViewModelText));
+            actCombo.Items.Add(CreateModernComboBoxItem("Align Target", ActionKind.AlignObjectToPointer));
+            actCombo.Items.Add(CreateModernComboBoxItem("Focus", ActionKind.FocusTarget));
+            actCombo.Items.Add(CreateModernComboBoxItem("Report Event", ActionKind.ReportEvent));
+            actCombo.Items.Add(CreateModernComboBoxItem("Pointer X → Number Input", ActionKind.SetPointerX));
+            actCombo.Items.Add(CreateModernComboBoxItem("Pointer Y → Number Input", ActionKind.SetPointerY));
+            actCombo.Items.Add(CreateModernComboBoxItem("Pointer X % → Number Input", ActionKind.SetPointerNormalizedX));
+            actCombo.Items.Add(CreateModernComboBoxItem("Pointer Y % → Number Input", ActionKind.SetPointerNormalizedY));
 
             for (int k = 0; k < actCombo.Items.Count; k++)
             {
@@ -6537,9 +6946,42 @@ namespace Kerf.UI
                     {
                         var oldSnap = new NodeListenerSnapshot(listener);
                         var newSnap = new NodeListenerSnapshot(listener);
+                        if (newSnap.Actions.Count == 0)
+                        {
+                            newSnap.Actions.Add(new ListenerAction(newKind, -1));
+                        }
                         if (newSnap.Actions.Count > 0)
                         {
                             newSnap.Actions[0].Kind = newKind;
+                            if ((newKind == ActionKind.AlignObjectToPointer || newKind == ActionKind.FocusTarget) && newSnap.Actions[0].TargetNodeId == 0u)
+                            {
+                                newSnap.Actions[0].TargetLayerId = listener.TargetLayerId;
+                                newSnap.Actions[0].TargetNodeId = listener.TargetNodeId;
+                            }
+
+                            InputKind? requiredInputKind = null;
+                            if (newKind == ActionKind.SetBool || newKind == ActionKind.ToggleBool) requiredInputKind = InputKind.Bool;
+                            else if (newKind == ActionKind.SetNumber || newKind == ActionKind.SetPointerX || newKind == ActionKind.SetPointerY || newKind == ActionKind.SetPointerNormalizedX || newKind == ActionKind.SetPointerNormalizedY) requiredInputKind = InputKind.Number;
+                            else if (newKind == ActionKind.Fire) requiredInputKind = InputKind.Trigger;
+                            if (requiredInputKind.HasValue && smDef != null && smDef.Inputs != null)
+                            {
+                                bool currentIsCompatible = newSnap.Actions[0].InputIndex >= 0 && newSnap.Actions[0].InputIndex < smDef.Inputs.Count &&
+                                    smDef.Inputs[newSnap.Actions[0].InputIndex] != null && smDef.Inputs[newSnap.Actions[0].InputIndex].Kind != InputKind.Folder &&
+                                    smDef.Inputs[newSnap.Actions[0].InputIndex].Kind == requiredInputKind.Value;
+                                if (!currentIsCompatible)
+                                {
+                                    for (int ii = 0; ii < smDef.Inputs.Count; ii++)
+                                    {
+                                        if (smDef.Inputs[ii] != null && smDef.Inputs[ii].Kind != InputKind.Folder && smDef.Inputs[ii].Kind == requiredInputKind.Value)
+                                        {
+                                            newSnap.Actions[0].InputIndex = ii;
+                                            newSnap.Actions[0].InputId = smDef.Inputs[ii].InputId;
+                                            newSnap.Actions[0].PropertyName = smDef.Inputs[ii].Name;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
                         }
                         var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
                         {
@@ -6553,6 +6995,136 @@ namespace Kerf.UI
             };
             row2.Children.Add(actCombo);
             cardStack.Children.Add(row2);
+
+            if (action.Kind == ActionKind.AlignObjectToPointer || action.Kind == ActionKind.FocusTarget)
+            {
+                var alignTargetRow = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
+                var alignTargetLabel = new TextBlock
+                {
+                    Text = action.Kind == ActionKind.FocusTarget ? "Target" : "Object",
+                    Width = 46,
+                    FontSize = 10,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(alignTargetLabel, Dock.Left);
+                alignTargetRow.Children.Add(alignTargetLabel);
+
+                var alignTargetCombo = CreateModernComboBox(22, double.NaN);
+                var alignPage = Document != null ? Document.GetActivePage() : null;
+                var alignTargetLayers = alignPage != null ? alignPage.GetAllLayersFlat().ToList() : new List<LayerNode>();
+                int alignTargetIndex = -1;
+                for (int li = 0; li < alignTargetLayers.Count; li++)
+                {
+                    var targetLayer = alignTargetLayers[li];
+                    if (targetLayer == null || string.IsNullOrEmpty(targetLayer.Id)) continue;
+                    alignTargetCombo.Items.Add(CreateModernComboBoxItem(targetLayer.Name, targetLayer.Id));
+                    if (string.Equals(targetLayer.Id, action.TargetLayerId, StringComparison.OrdinalIgnoreCase) ||
+                        (string.IsNullOrEmpty(action.TargetLayerId) && PropertyBinder.GetNumericNodeId(targetLayer.Id) == action.TargetNodeId))
+                    {
+                        alignTargetIndex = alignTargetCombo.Items.Count - 1;
+                    }
+                }
+                if (alignTargetIndex < 0 && !string.IsNullOrEmpty(listener.TargetLayerId))
+                {
+                    for (int li = 0; li < alignTargetLayers.Count; li++)
+                    {
+                        if (alignTargetLayers[li] != null && string.Equals(alignTargetLayers[li].Id, listener.TargetLayerId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            alignTargetIndex = li;
+                            break;
+                        }
+                    }
+                }
+                if (alignTargetIndex >= 0 && alignTargetIndex < alignTargetCombo.Items.Count) alignTargetCombo.SelectedIndex = alignTargetIndex;
+                alignTargetCombo.SelectionChanged += (s, e) =>
+                {
+                    var item = alignTargetCombo.SelectedItem as ComboBoxItem;
+                    if (item != null && item.Tag is string)
+                    {
+                        string layerId = (string)item.Tag;
+                        uint nodeId = PropertyBinder.GetNumericNodeId(layerId);
+                        if (nodeId != action.TargetNodeId || !string.Equals(layerId, action.TargetLayerId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var oldSnap = new NodeListenerSnapshot(listener);
+                            var newSnap = new NodeListenerSnapshot(listener);
+                            if (newSnap.Actions.Count > 0)
+                            {
+                                newSnap.Actions[0].TargetLayerId = layerId;
+                                newSnap.Actions[0].TargetNodeId = nodeId;
+                            }
+                            var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () => { RefreshPropertyInspector(); RefreshCanvas(); });
+                            if (History != null) History.Execute(modCmd);
+                            else modCmd.Execute();
+                        }
+                    }
+                };
+                alignTargetRow.Children.Add(alignTargetCombo);
+                cardStack.Children.Add(alignTargetRow);
+            }
+
+            bool actionUsesViewModel = action.Kind == ActionKind.SetViewModelBool || action.Kind == ActionKind.SetViewModelNumber ||
+                action.Kind == ActionKind.FireViewModelTrigger || action.Kind == ActionKind.SetViewModelText;
+            var viewModelPropertyRow = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
+            var viewModelPropertyLabel = new TextBlock
+            {
+                Text = "Property",
+                Width = 46,
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(viewModelPropertyLabel, Dock.Left);
+            viewModelPropertyRow.Children.Add(viewModelPropertyLabel);
+            var viewModelPropertyCombo = CreateModernComboBox(22, double.NaN);
+            ViewModelPropertyKind? requiredPropertyKind = null;
+            if (action.Kind == ActionKind.SetViewModelBool) requiredPropertyKind = ViewModelPropertyKind.Boolean;
+            else if (action.Kind == ActionKind.SetViewModelNumber) requiredPropertyKind = ViewModelPropertyKind.Number;
+            else if (action.Kind == ActionKind.FireViewModelTrigger) requiredPropertyKind = ViewModelPropertyKind.Trigger;
+            else if (action.Kind == ActionKind.SetViewModelText) requiredPropertyKind = ViewModelPropertyKind.Text;
+            if (smDef != null && smDef.ViewModelProperties != null)
+            {
+                for (int pi = 0; pi < smDef.ViewModelProperties.Count; pi++)
+                {
+                    var property = smDef.ViewModelProperties[pi];
+                    if (property == null || (requiredPropertyKind.HasValue && property.Kind != requiredPropertyKind.Value)) continue;
+                    viewModelPropertyCombo.Items.Add(CreateModernComboBoxItem(property.Name, property.Name));
+                }
+            }
+            int selectedPropertyIndex = -1;
+            for (int pi = 0; pi < viewModelPropertyCombo.Items.Count; pi++)
+            {
+                var item = viewModelPropertyCombo.Items[pi] as ComboBoxItem;
+                if (item != null && string.Equals(item.Tag as string, action.PropertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedPropertyIndex = pi;
+                    break;
+                }
+            }
+            if (selectedPropertyIndex >= 0) viewModelPropertyCombo.SelectedIndex = selectedPropertyIndex;
+            else if (viewModelPropertyCombo.Items.Count > 0) viewModelPropertyCombo.SelectedIndex = 0;
+            viewModelPropertyCombo.SelectionChanged += (s, e) =>
+            {
+                var item = viewModelPropertyCombo.SelectedItem as ComboBoxItem;
+                string propertyName = item != null ? item.Tag as string : null;
+                if (!string.Equals(propertyName ?? string.Empty, action.PropertyName ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                {
+                    var oldSnap = new NodeListenerSnapshot(listener);
+                    var newSnap = new NodeListenerSnapshot(listener);
+                    if (newSnap.Actions.Count == 0) newSnap.Actions.Add(new ListenerAction(action.Kind, -1));
+                    newSnap.Actions[0].PropertyName = propertyName;
+                    var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                    {
+                        RefreshPropertyInspector();
+                        RefreshCanvas();
+                    });
+                    if (History != null) History.Execute(modCmd);
+                    else modCmd.Execute();
+                }
+            };
+            viewModelPropertyRow.Children.Add(viewModelPropertyCombo);
+            viewModelPropertyRow.Visibility = actionUsesViewModel ? Visibility.Visible : Visibility.Collapsed;
+            cardStack.Children.Add(viewModelPropertyRow);
 
             // Row 3: Bound Input dropdown
             var row3 = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
@@ -6568,14 +7140,32 @@ namespace Kerf.UI
             row3.Children.Add(inLabel);
 
             var inCombo = CreateModernComboBox(22, double.NaN);
-            if (smDef != null && smDef.Inputs != null && smDef.Inputs.Count > 0)
+            bool actionRequiresInput = action.Kind == ActionKind.SetBool || action.Kind == ActionKind.ToggleBool ||
+                action.Kind == ActionKind.SetNumber || action.Kind == ActionKind.Fire || action.Kind == ActionKind.Reset ||
+                action.Kind == ActionKind.SetPointerX || action.Kind == ActionKind.SetPointerY ||
+                action.Kind == ActionKind.SetPointerNormalizedX || action.Kind == ActionKind.SetPointerNormalizedY;
+            if (!actionRequiresInput)
             {
+                inCombo.Items.Add(CreateModernComboBoxItem("Not required", null));
+                inCombo.SelectedIndex = 0;
+            }
+            else if (smDef != null && smDef.Inputs != null && smDef.Inputs.Count > 0)
+            {
+                InputKind? requiredInputKind = null;
+                if (action.Kind == ActionKind.SetBool || action.Kind == ActionKind.ToggleBool) requiredInputKind = InputKind.Bool;
+                else if (action.Kind == ActionKind.SetNumber || action.Kind == ActionKind.SetPointerX || action.Kind == ActionKind.SetPointerY || action.Kind == ActionKind.SetPointerNormalizedX || action.Kind == ActionKind.SetPointerNormalizedY) requiredInputKind = InputKind.Number;
+                else if (action.Kind == ActionKind.Fire) requiredInputKind = InputKind.Trigger;
                 for (int p = 0; p < smDef.Inputs.Count; p++)
                 {
                     var inp = smDef.Inputs[p];
-                    if (inp == null) continue;
+                    if (inp == null || inp.Kind == InputKind.Folder || (requiredInputKind.HasValue && inp.Kind != requiredInputKind.Value)) continue;
                     string label = string.Format("{0} ({1})", inp.Name, inp.Kind);
                     inCombo.Items.Add(CreateModernComboBoxItem(label, inp.InputId));
+                }
+                if (inCombo.Items.Count == 0)
+                {
+                    inCombo.Items.Add(CreateModernComboBoxItem("No compatible inputs", null));
+                    inCombo.SelectedIndex = 0;
                 }
 
                 // Resolve selected index
@@ -6592,15 +7182,24 @@ namespace Kerf.UI
                         }
                     }
                 }
-                if (selectedIdx < 0 && action.InputIndex >= 0 && action.InputIndex < inCombo.Items.Count)
+                if (selectedIdx < 0 && action.InputIndex >= 0)
                 {
-                    selectedIdx = action.InputIndex;
+                    for (int p = 0; p < inCombo.Items.Count; p++)
+                    {
+                        var cbi = inCombo.Items[p] as ComboBoxItem;
+                        if (cbi != null && cbi.Tag is string && smDef.GetInputIndex((string)cbi.Tag) == action.InputIndex)
+                        {
+                            selectedIdx = p;
+                            break;
+                        }
+                    }
                 }
                 if (selectedIdx >= 0) inCombo.SelectedIndex = selectedIdx;
+                else if (inCombo.Items.Count > 0) inCombo.SelectedIndex = 0;
             }
             else
             {
-                inCombo.Items.Add(CreateModernComboBoxItem("No inputs defined", null));
+                inCombo.Items.Add(CreateModernComboBoxItem("No compatible inputs", null));
                 inCombo.SelectedIndex = 0;
             }
 
@@ -6632,10 +7231,11 @@ namespace Kerf.UI
                 }
             };
             row3.Children.Add(inCombo);
+            row3.Visibility = actionRequiresInput ? Visibility.Visible : Visibility.Collapsed;
             cardStack.Children.Add(row3);
 
             // Row 4: Parameter row (if SetBool or SetNumber)
-            if (action.Kind == ActionKind.SetBool)
+            if (action.Kind == ActionKind.SetBool || action.Kind == ActionKind.SetViewModelBool)
             {
                 var row4 = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
                 var valLabel = new TextBlock
@@ -6681,7 +7281,7 @@ namespace Kerf.UI
                 row4.Children.Add(boolCheck);
                 cardStack.Children.Add(row4);
             }
-            else if (action.Kind == ActionKind.SetNumber)
+            else if (action.Kind == ActionKind.SetNumber || action.Kind == ActionKind.SetViewModelNumber)
             {
                 var row4 = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
                 var valLabel = new TextBlock
@@ -6757,6 +7357,58 @@ namespace Kerf.UI
                 };
                 row4.Children.Add(numBox);
                 cardStack.Children.Add(row4);
+            }
+            else if (action.Kind == ActionKind.ReportEvent || action.Kind == ActionKind.SetViewModelText)
+            {
+                var eventNameRow = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
+                var eventNameLabel = new TextBlock
+                {
+                    Text = action.Kind == ActionKind.ReportEvent ? "Event" : "Text",
+                    Width = 46,
+                    FontSize = 10,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(eventNameLabel, Dock.Left);
+                eventNameRow.Children.Add(eventNameLabel);
+                var eventNameBox = new TextBox
+                {
+                    Text = action.TextValue ?? string.Empty,
+                    Height = 22,
+                    FontSize = 11,
+                    Background = new SolidColorBrush(Color.FromRgb(33, 38, 52)),
+                    Foreground = Brushes.White,
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(56, 66, 92)),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(4, 2, 4, 2)
+                };
+                Action commitEventName = () =>
+                {
+                    string eventName = (eventNameBox.Text ?? string.Empty);
+                    if (action.Kind == ActionKind.ReportEvent) eventName = eventName.Trim();
+                    if (string.Equals(eventName, action.TextValue ?? string.Empty, StringComparison.Ordinal)) return;
+                    var oldSnap = new NodeListenerSnapshot(listener);
+                    var newSnap = new NodeListenerSnapshot(listener);
+                    if (newSnap.Actions.Count > 0) newSnap.Actions[0].TextValue = eventName;
+                    var modCmd = new ModifyListenerCommand(listener, oldSnap, newSnap, () =>
+                    {
+                        RefreshPropertyInspector();
+                        RefreshCanvas();
+                    });
+                    if (History != null) History.Execute(modCmd);
+                    else modCmd.Execute();
+                };
+                eventNameBox.LostKeyboardFocus += (s, e) => commitEventName();
+                eventNameBox.KeyDown += (s, e) =>
+                {
+                    if (e.Key == Key.Enter)
+                    {
+                        commitEventName();
+                        Keyboard.ClearFocus();
+                    }
+                };
+                eventNameRow.Children.Add(eventNameBox);
+                cardStack.Children.Add(eventNameRow);
             }
 
             cardBorder.Child = cardStack;
@@ -6893,12 +7545,34 @@ namespace Kerf.UI
             doneBtn.Click += (s, e) => ExitVectorEditMode();
             _propertyInspectorStack.Children.Add(doneBtn);
 
+            if (_currentStudioMode == StudioMode.Animate)
+            {
+                var nodeKeyActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+                var selectedKeyButton = CreateSmallButton("◇ Keyframe Node", "Keyframe the selected node(s) at the playhead", () =>
+                {
+                    RecordGeometryNodeKeyframes(_editingVectorNode, GetSelectedVectorNodeIndices(geo), geo.Clone());
+                });
+                selectedKeyButton.Width = 110;
+                selectedKeyButton.IsEnabled = GetSelectedVectorNodeIndices(geo).Count > 0;
+                var allKeysButton = CreateSmallButton("◆ Keyframe All Nodes", "Keyframe every Bézier node independently at the playhead", () =>
+                {
+                    RecordGeometryNodeKeyframes(_editingVectorNode, Enumerable.Range(0, geo.Nodes.Count), geo.Clone());
+                });
+                allKeysButton.Width = 140;
+                nodeKeyActions.Children.Add(selectedKeyButton);
+                nodeKeyActions.Children.Add(allKeysButton);
+                _propertyInspectorStack.Children.Add(nodeKeyActions);
+            }
+
             if (_selectedNodeIndex >= 0 && _selectedNodeIndex < geo.Nodes.Count)
             {
                 var cur = geo.Nodes[_selectedNodeIndex];
+                var selectedIndices = GetSelectedVectorNodeIndices(geo);
                 var subHeader = new TextBlock
                 {
-                    Text = string.Format(CultureInfo.InvariantCulture, "Node {0} of {1}", _selectedNodeIndex + 1, geo.Nodes.Count),
+                    Text = selectedIndices.Count > 1
+                        ? string.Format(CultureInfo.InvariantCulture, "Node {0} of {1} ({2} selected)", _selectedNodeIndex + 1, geo.Nodes.Count, selectedIndices.Count)
+                        : string.Format(CultureInfo.InvariantCulture, "Node {0} of {1}", _selectedNodeIndex + 1, geo.Nodes.Count),
                     FontSize = 11,
                     Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)),
                     Margin = new Thickness(0, 0, 0, 6)
@@ -6912,12 +7586,16 @@ namespace Kerf.UI
 
                 var xField = CreateNumberField("Anchor X", cur.Anchor.X, val =>
                 {
-                    BezierVectorEngine.MoveAnchor(geo, _selectedNodeIndex, new Point(val, cur.Anchor.Y));
+                    int index = _selectedNodeIndex;
+                    ApplyVectorGeometryEdit("Move Path Node", () =>
+                        BezierVectorEngine.MoveAnchor(geo, index, new Point(val, cur.Anchor.Y)));
                     InvalidateAndRefresh(_editingVectorNode);
                 });
                 var yField = CreateNumberField("Anchor Y", cur.Anchor.Y, val =>
                 {
-                    BezierVectorEngine.MoveAnchor(geo, _selectedNodeIndex, new Point(cur.Anchor.X, val));
+                    int index = _selectedNodeIndex;
+                    ApplyVectorGeometryEdit("Move Path Node", () =>
+                        BezierVectorEngine.MoveAnchor(geo, index, new Point(cur.Anchor.X, val)));
                     InvalidateAndRefresh(_editingVectorNode);
                 });
                 Grid.SetColumn(xField, 0); Grid.SetColumn(yField, 1);
@@ -6935,27 +7613,27 @@ namespace Kerf.UI
                 _propertyInspectorStack.Children.Add(typeLabel);
 
                 var typeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-                typeRow.Children.Add(CreateTypeButton("Corner", cur.Type == BezierNodeType.Corner, () =>
+                typeRow.Children.Add(CreateTypeButton("Corner", selectedIndices.All(i => geo.Nodes[i].Type == BezierNodeType.Corner), () =>
                 {
-                    BezierVectorEngine.SetNodeType(geo, _selectedNodeIndex, BezierNodeType.Corner);
+                    ApplySelectedVectorNodeType(geo, BezierNodeType.Corner);
                     InvalidateAndRefresh(_editingVectorNode);
                     RefreshPropertyInspector();
                 }));
-                typeRow.Children.Add(CreateTypeButton("Smooth", cur.Type == BezierNodeType.Smooth, () =>
+                typeRow.Children.Add(CreateTypeButton("Smooth", selectedIndices.All(i => geo.Nodes[i].Type == BezierNodeType.Smooth), () =>
                 {
-                    BezierVectorEngine.SetNodeType(geo, _selectedNodeIndex, BezierNodeType.Smooth);
+                    ApplySelectedVectorNodeType(geo, BezierNodeType.Smooth);
                     InvalidateAndRefresh(_editingVectorNode);
                     RefreshPropertyInspector();
                 }));
-                typeRow.Children.Add(CreateTypeButton("Symmetric", cur.Type == BezierNodeType.Symmetric, () =>
+                typeRow.Children.Add(CreateTypeButton("Symmetric", selectedIndices.All(i => geo.Nodes[i].Type == BezierNodeType.Symmetric), () =>
                 {
-                    BezierVectorEngine.SetNodeType(geo, _selectedNodeIndex, BezierNodeType.Symmetric);
+                    ApplySelectedVectorNodeType(geo, BezierNodeType.Symmetric);
                     InvalidateAndRefresh(_editingVectorNode);
                     RefreshPropertyInspector();
                 }));
-                typeRow.Children.Add(CreateTypeButton("Split", cur.Type == BezierNodeType.Split, () =>
+                typeRow.Children.Add(CreateTypeButton("Split", selectedIndices.All(i => geo.Nodes[i].Type == BezierNodeType.Split), () =>
                 {
-                    BezierVectorEngine.SetNodeType(geo, _selectedNodeIndex, BezierNodeType.Split);
+                    ApplySelectedVectorNodeType(geo, BezierNodeType.Split);
                     InvalidateAndRefresh(_editingVectorNode);
                     RefreshPropertyInspector();
                 }));
@@ -6964,18 +7642,21 @@ namespace Kerf.UI
                 var splitActionsRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
                 var splitHandlesBtn = CreateSmallButton("⤹ Split Handles", "Decouple In and Out handles (hold Alt while dragging)", () =>
                 {
-                    BezierVectorEngine.SetNodeType(geo, _selectedNodeIndex, BezierNodeType.Split);
+                    ApplySelectedVectorNodeType(geo, BezierNodeType.Split);
                     InvalidateAndRefresh(_editingVectorNode);
                     RefreshPropertyInspector();
                 });
                 splitHandlesBtn.Width = 100;
                 var splitPathBtn = CreateSmallButton("✂ Split Path", "Cut open path at this anchor point", () =>
                 {
-                    BezierVectorEngine.SplitPathAtNode(geo, _selectedNodeIndex);
+                    int index = _selectedNodeIndex;
+                    ApplyVectorGeometryEdit("Split Path", () => BezierVectorEngine.SplitPathAtNode(geo, index));
+                    SelectSingleVectorNode(_selectedNodeIndex, geo);
                     InvalidateAndRefresh(_editingVectorNode);
                     RefreshPropertyInspector();
                 });
                 splitPathBtn.Width = 85;
+                splitPathBtn.IsEnabled = selectedIndices.Count == 1;
                 splitActionsRow.Children.Add(splitHandlesBtn);
                 splitActionsRow.Children.Add(splitPathBtn);
                 _propertyInspectorStack.Children.Add(splitActionsRow);
@@ -6995,7 +7676,8 @@ namespace Kerf.UI
                 };
                 delNodeBtn.Click += (s, e) =>
                 {
-                    BezierVectorEngine.RemoveNode(geo, _selectedNodeIndex);
+                    int index = _selectedNodeIndex;
+                    ApplyVectorGeometryEdit("Delete Path Node", () => BezierVectorEngine.RemoveNode(geo, index));
                     if (geo.Nodes.Count == 0)
                     {
                         DeleteSelectedLayers();
@@ -7004,6 +7686,7 @@ namespace Kerf.UI
                     else
                     {
                         _selectedNodeIndex = Math.Min(_selectedNodeIndex, geo.Nodes.Count - 1);
+                        SelectSingleVectorNode(_selectedNodeIndex, geo);
                         InvalidateAndRefresh(_editingVectorNode);
                         RefreshPropertyInspector();
                     }
@@ -7014,17 +7697,56 @@ namespace Kerf.UI
             // Global Vector Actions
             _propertyInspectorStack.Children.Add(CreateInspectorSection("Curve & Path Options"));
 
+            // This layer-level radius rounds all sharp joins in the rendered path.
+            // Keep it available while editing nodes so users can round every corner together.
+            var radiusNode = _editingVectorNode;
+            double startRadius = radiusNode.CornerRadius;
+            var allCornersRadius = ScrubControls.CreateScrubField("All corners", startRadius, val =>
+            {
+                double radius = Math.Max(0, Math.Round(val, 1));
+                radiusNode.CornerRadius = radius;
+                radiusNode.CornerRadiusTopLeft = radius;
+                radiusNode.CornerRadiusTopRight = radius;
+                radiusNode.CornerRadiusBottomRight = radius;
+                radiusNode.CornerRadiusBottomLeft = radius;
+                InvalidateAndRefresh(radiusNode);
+            }, min: 0, suffix: "px", tooltip: "Round every sharp corner in this path", onDragComplete: () =>
+            {
+                double finalRadius = radiusNode.CornerRadius;
+                if (Math.Abs(finalRadius - startRadius) > 1e-6)
+                {
+                    var editedNode = radiusNode;
+                    History.Execute(new ModifyCornerRadiusCommand(editedNode, startRadius, finalRadius, () =>
+                    {
+                        InvalidateAndRefresh(editedNode);
+                        RefreshPropertyInspector();
+                    }));
+                    startRadius = finalRadius;
+                }
+            });
+            _propertyInspectorStack.Children.Add(allCornersRadius);
+
+            var selectionHint = new TextBlock
+            {
+                Text = "Shift-click anchors to select multiple points. Point Type applies to all selected points.",
+                FontSize = 10,
+                Foreground = KerfBrand.TextMutedBrush,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            _propertyInspectorStack.Children.Add(selectionHint);
+
             var curveActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
             var smoothAllBtn = CreateSmallButton("〰 Smooth All", "Convert all corners to smooth curves", () =>
             {
-                BezierVectorEngine.SmoothAllNodes(geo);
+                ApplyVectorGeometryEdit("Smooth Path Nodes", () => BezierVectorEngine.SmoothAllNodes(geo));
                 InvalidateAndRefresh(_editingVectorNode);
                 RefreshPropertyInspector();
             });
             smoothAllBtn.Width = 90;
             var sharpenAllBtn = CreateSmallButton("⌢ Sharpen All", "Convert all nodes to sharp corners", () =>
             {
-                BezierVectorEngine.SharpenAllNodes(geo);
+                ApplyVectorGeometryEdit("Sharpen Path Nodes", () => BezierVectorEngine.SharpenAllNodes(geo));
                 InvalidateAndRefresh(_editingVectorNode);
                 RefreshPropertyInspector();
             });
@@ -7044,11 +7766,62 @@ namespace Kerf.UI
             };
             closeBtn.Click += (s, e) =>
             {
-                BezierVectorEngine.ToggleClosed(geo);
+                ApplyVectorGeometryEdit("Toggle Closed Path", () => BezierVectorEngine.ToggleClosed(geo));
                 InvalidateAndRefresh(_editingVectorNode);
                 RefreshPropertyInspector();
             };
             _propertyInspectorStack.Children.Add(closeBtn);
+        }
+
+        private List<int> GetSelectedVectorNodeIndices(VectorGeometry geometry)
+        {
+            var selected = _selectedNodeIndices
+                .Where(i => geometry != null && i >= 0 && i < geometry.Nodes.Count)
+                .OrderBy(i => i)
+                .ToList();
+            if (selected.Count == 0 && geometry != null && _selectedNodeIndex >= 0 && _selectedNodeIndex < geometry.Nodes.Count)
+                selected.Add(_selectedNodeIndex);
+            return selected;
+        }
+
+        private void SelectSingleVectorNode(int index, VectorGeometry geometry)
+        {
+            _selectedNodeIndices.Clear();
+            if (geometry != null && index >= 0 && index < geometry.Nodes.Count)
+            {
+                _selectedNodeIndex = index;
+                _selectedNodeIndices.Add(index);
+            }
+            else
+            {
+                _selectedNodeIndex = -1;
+            }
+        }
+
+        private void ToggleVectorNodeSelection(int index, VectorGeometry geometry)
+        {
+            if (geometry == null || index < 0 || index >= geometry.Nodes.Count) return;
+            if (_selectedNodeIndices.Count == 0 && _selectedNodeIndex >= 0 && _selectedNodeIndex < geometry.Nodes.Count)
+                _selectedNodeIndices.Add(_selectedNodeIndex);
+
+            if (!_selectedNodeIndices.Add(index))
+                _selectedNodeIndices.Remove(index);
+
+            if (_selectedNodeIndices.Contains(index))
+                _selectedNodeIndex = index;
+            else if (_selectedNodeIndices.Count > 0)
+                _selectedNodeIndex = _selectedNodeIndices.OrderBy(i => i).Last();
+            else
+                _selectedNodeIndex = -1;
+        }
+
+        private void ApplySelectedVectorNodeType(VectorGeometry geometry, BezierNodeType type)
+        {
+            var selected = GetSelectedVectorNodeIndices(geometry);
+            if (selected.Count == 0 || _editingVectorNode == null) return;
+            VectorGeometry before = geometry.Clone();
+            foreach (int index in selected) BezierVectorEngine.SetNodeType(geometry, index, type);
+            CommitVectorGeometryEdit(before, geometry.Clone(), "Change Path Node Type");
         }
 
         private Button CreateTypeButton(string label, bool isActive, Action onClick)
@@ -7913,6 +8686,729 @@ namespace Kerf.UI
                 dock.Children.Add(addBtn);
             }
             return dock;
+        }
+
+        private FrameworkElement CreateInspectorSectionWithMenu(string title, Action<FrameworkElement> onShowMenu)
+        {
+            var dock = new DockPanel { Margin = new Thickness(0, 12, 0, 8) };
+            var tb = new TextBlock
+            {
+                Text = title,
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(140, 150, 175)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(tb, Dock.Left);
+            dock.Children.Add(tb);
+
+            if (onShowMenu != null)
+            {
+                var addBtn = new Button
+                {
+                    Template = CreateRoundedButtonTemplate(4),
+                    Content = "+",
+                    FontSize = 14,
+                    FontWeight = FontWeights.Bold,
+                    Width = 22,
+                    Height = 22,
+                    Background = new SolidColorBrush(Color.FromRgb(35, 42, 60)),
+                    Foreground = Brushes.White,
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(55, 65, 90)),
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    ToolTip = "Add " + title
+                };
+                addBtn.Click += (s, e) => onShowMenu(addBtn);
+                DockPanel.SetDock(addBtn, Dock.Right);
+                dock.Children.Add(addBtn);
+            }
+            return dock;
+        }
+
+        private void BuildClippingSection(LayerNode primary)
+        {
+            if (primary == null) return;
+            if (primary.ClippingTargets == null) primary.ClippingTargets = new List<ClippingTargetData>();
+
+            Action refreshClipping = () =>
+            {
+                if (primary != null) _sceneGraph.InvalidateNode(primary.Id);
+                RefreshCanvas();
+                RefreshPropertyInspector();
+            };
+
+            var page = Document != null ? Document.GetActivePage() : null;
+            var otherLayers = new List<LayerNode>();
+            if (page != null)
+            {
+                var flat = page.GetAllLayersFlat().ToList();
+                for (int i = 0; i < flat.Count; i++)
+                {
+                    var l = flat[i];
+                    if (l != null && l != primary && !string.IsNullOrEmpty(l.Id))
+                    {
+                        otherLayers.Add(l);
+                    }
+                }
+            }
+
+            var clipSourceLayers = otherLayers.Where(l => l.Type != ElementType.Frame &&
+                l.Type != ElementType.ComponentInstance && l.Type != ElementType.Slice).ToList();
+
+            Action onAdd = () =>
+            {
+                var clip = new ClippingTargetData
+                {
+                    TargetLayerId = string.Empty,
+                    TargetNodeId = 0u,
+                    IsInverse = false,
+                    Enabled = true
+                };
+                var addCommand = new AddClippingTargetCommand(primary.ClippingTargets, clip, refreshClipping);
+                if (History != null) History.Execute(addCommand);
+                else addCommand.Execute();
+                BeginClipTargetPick(primary, clip);
+                RefreshPropertyInspector();
+            };
+
+            _propertyInspectorStack.Children.Add(CreateInspectorSectionWithAdd("Clipping", onAdd));
+
+            if (primary.ClippingTargets.Count == 0)
+            {
+                var emptyBtn = CreateSmallButton("+ Add Clip Target", "Clip to another shape, path, or group", onAdd);
+                _propertyInspectorStack.Children.Add(emptyBtn);
+                return;
+            }
+
+            var clipsContainer = new StackPanel();
+            for (int i = 0; i < primary.ClippingTargets.Count; i++)
+            {
+                int clipIdx = i;
+                var clip = primary.ClippingTargets[i];
+                if (clip == null) continue;
+
+                var card = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6, 6, 6, 6),
+                    Margin = new Thickness(0, 0, 0, 6)
+                };
+
+                var cardStack = new StackPanel();
+
+                // Row 1: Target dropdown + Enabled toggle + Delete
+                var topRow = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+
+                var delBtn = new Button
+                {
+                    Content = "✕",
+                    Width = 18,
+                    Height = 18,
+                    Background = Brushes.Transparent,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Remove clipping target",
+                    Padding = new Thickness(0)
+                };
+                delBtn.Click += (s, e) =>
+                {
+                    if (clipIdx >= 0 && clipIdx < primary.ClippingTargets.Count)
+                    {
+                        if (ReferenceEquals(_pendingClipTarget, clip))
+                        {
+                            _pendingClipTarget = null;
+                            _clipTargetOwner = null;
+                            if (_canvasHost != null) _canvasHost.Cursor = Cursors.Arrow;
+                        }
+                        var removeCommand = new RemoveClippingTargetCommand(primary.ClippingTargets, clip, refreshClipping);
+                        if (History != null) History.Execute(removeCommand);
+                        else removeCommand.Execute();
+                    }
+                };
+                DockPanel.SetDock(delBtn, Dock.Right);
+                topRow.Children.Add(delBtn);
+
+                var enCheck = new CheckBox
+                {
+                    IsChecked = clip.Enabled,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 6, 0),
+                    ToolTip = "Toggle clipping target"
+                };
+                Action<bool> setClipEnabled = enabled =>
+                {
+                    if (clip.Enabled == enabled) return;
+                    var before = clip.Clone();
+                    var after = clip.Clone();
+                    after.Enabled = enabled;
+                    var command = new ModifyClippingTargetCommand(clip, before, after, refreshClipping);
+                    if (History != null) History.Execute(command);
+                    else command.Execute();
+                };
+                enCheck.Checked += (s, e) => setClipEnabled(true);
+                enCheck.Unchecked += (s, e) => setClipEnabled(false);
+                DockPanel.SetDock(enCheck, Dock.Left);
+                topRow.Children.Add(enCheck);
+
+                var targetCombo = CreateModernComboBox(24);
+                targetCombo.Items.Add(new ComboBoxItem { Content = "Pick a clip source…", Tag = string.Empty });
+                int selIdx = -1;
+                for (int l = 0; l < clipSourceLayers.Count; l++)
+                {
+                    var ol = clipSourceLayers[l];
+                    string typeIcon = ol.Type == ElementType.Group ? "▧ " : (ol.Type == ElementType.Path ? "⤹ " : "◻ ");
+                    targetCombo.Items.Add(new ComboBoxItem
+                    {
+                        Content = typeIcon + ol.Name,
+                        Tag = ol.Id
+                    });
+                    if (string.Equals(ol.Id, clip.TargetLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selIdx = l + 1;
+                    }
+                }
+                targetCombo.SelectedIndex = selIdx >= 0 ? selIdx : 0;
+
+                targetCombo.SelectionChanged += (s, e) =>
+                {
+                    var item = targetCombo.SelectedItem as ComboBoxItem;
+                    if (item != null && item.Tag is string)
+                    {
+                        string selectedTargetId = (string)item.Tag;
+                        if (string.IsNullOrEmpty(selectedTargetId)) return;
+                        if (string.Equals(clip.TargetLayerId, selectedTargetId, StringComparison.OrdinalIgnoreCase)) return;
+                        var before = clip.Clone();
+                        var after = clip.Clone();
+                        after.TargetLayerId = selectedTargetId;
+                        after.TargetNodeId = PropertyBinder.GetNumericNodeId(selectedTargetId);
+                        var command = new ModifyClippingTargetCommand(clip, before, after, refreshClipping);
+                        if (History != null) History.Execute(command);
+                        else command.Execute();
+                    }
+                };
+                topRow.Children.Add(targetCombo);
+                var pickBtn = new Button
+                {
+                    Content = ReferenceEquals(_pendingClipTarget, clip) ? "Picking…" : "Pick",
+                    Height = 22,
+                    MinWidth = 40,
+                    Margin = new Thickness(4, 0, 0, 0),
+                    Padding = new Thickness(5, 0, 5, 0),
+                    Background = ReferenceEquals(_pendingClipTarget, clip) ? KerfBrand.MintBrush : KerfBrand.DarkSlateBrush,
+                    Foreground = ReferenceEquals(_pendingClipTarget, clip) ? KerfBrand.TextBlackBrush : Brushes.White,
+                    BorderBrush = KerfBrand.FigmaBorderBrush,
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Pick a shape or group from the canvas"
+                };
+                pickBtn.Click += (s, e) =>
+                {
+                    if (ReferenceEquals(_pendingClipTarget, clip))
+                    {
+                        _pendingClipTarget = null;
+                        _clipTargetOwner = null;
+                        if (_canvasHost != null) _canvasHost.Cursor = Cursors.Arrow;
+                    }
+                    else BeginClipTargetPick(primary, clip);
+                    RefreshPropertyInspector();
+                };
+                topRow.Children.Add(pickBtn);
+                cardStack.Children.Add(topRow);
+
+                // Row 2: Mode toggle (Inside vs Outside/Hole)
+                var modeRow = new Grid { Margin = new Thickness(0, 2, 0, 0) };
+                modeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                modeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                modeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var insideBtn = new Button
+                {
+                    Content = "Clip Inside",
+                    Height = 22,
+                    FontSize = 10.5,
+                    Background = !clip.IsInverse ? new SolidColorBrush(Color.FromRgb(45, 55, 78)) : KerfBrand.FigmaCanvasBrush,
+                    Foreground = !clip.IsInverse ? KerfBrand.MintBrush : Brushes.White,
+                    BorderBrush = !clip.IsInverse ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand
+                };
+                insideBtn.Click += (s, e) =>
+                {
+                    if (!clip.IsInverse) return;
+                    var before = clip.Clone();
+                    var after = clip.Clone();
+                    after.IsInverse = false;
+                    var command = new ModifyClippingTargetCommand(clip, before, after, refreshClipping);
+                    if (History != null) History.Execute(command);
+                    else command.Execute();
+                };
+                Grid.SetColumn(insideBtn, 0);
+                modeRow.Children.Add(insideBtn);
+
+                var outsideBtn = new Button
+                {
+                    Content = "Clip Outside (Hole)",
+                    Height = 22,
+                    FontSize = 10.5,
+                    Background = clip.IsInverse ? new SolidColorBrush(Color.FromRgb(45, 55, 78)) : KerfBrand.FigmaCanvasBrush,
+                    Foreground = clip.IsInverse ? KerfBrand.MintBrush : Brushes.White,
+                    BorderBrush = clip.IsInverse ? KerfBrand.MintBrush : KerfBrand.FigmaBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand
+                };
+                outsideBtn.Click += (s, e) =>
+                {
+                    if (clip.IsInverse) return;
+                    var before = clip.Clone();
+                    var after = clip.Clone();
+                    after.IsInverse = true;
+                    var command = new ModifyClippingTargetCommand(clip, before, after, refreshClipping);
+                    if (History != null) History.Execute(command);
+                    else command.Execute();
+                };
+                Grid.SetColumn(outsideBtn, 2);
+                modeRow.Children.Add(outsideBtn);
+
+                cardStack.Children.Add(modeRow);
+                card.Child = cardStack;
+                clipsContainer.Children.Add(card);
+            }
+
+            _propertyInspectorStack.Children.Add(clipsContainer);
+        }
+
+        private void BeginClipTargetPick(LayerNode owner, ClippingTargetData clip)
+        {
+            _clipTargetOwner = owner;
+            _pendingClipTarget = clip;
+            if (_canvasHost != null) _canvasHost.Cursor = Cursors.Cross;
+        }
+
+        private void ShowAddConstraintMenu(FrameworkElement anchor, LayerNode primary)
+        {
+            if (anchor == null || primary == null) return;
+            var menu = new ContextMenu();
+            menu.Background = KerfBrand.FigmaPanelBrush;
+            menu.BorderBrush = KerfBrand.FigmaBorderBrush;
+            menu.Foreground = Brushes.White;
+
+            var types = new[]
+            {
+                new { Type = AnimationConstraintType.Transform, Label = "Transform" },
+                new { Type = AnimationConstraintType.Distance, Label = "Distance" },
+                new { Type = AnimationConstraintType.Translation, Label = "Translation" },
+                new { Type = AnimationConstraintType.Scale, Label = "Scale" },
+                new { Type = AnimationConstraintType.Rotation, Label = "Rotation" },
+                new { Type = AnimationConstraintType.IK, Label = "IK" },
+                new { Type = AnimationConstraintType.FollowPath, Label = "Follow Path" },
+                new { Type = AnimationConstraintType.Scroll, Label = "Scroll" }
+            };
+
+            var page = Document != null ? Document.GetActivePage() : null;
+            var otherLayers = new List<LayerNode>();
+            if (page != null)
+            {
+                var flat = page.GetAllLayersFlat().ToList();
+                for (int i = 0; i < flat.Count; i++)
+                {
+                    var l = flat[i];
+                    if (l != null && l != primary && !string.IsNullOrEmpty(l.Id))
+                    {
+                        otherLayers.Add(l);
+                    }
+                }
+            }
+
+            for (int i = 0; i < types.Length; i++)
+            {
+                var entry = types[i];
+                var mi = new MenuItem
+                {
+                    Header = entry.Label,
+                    Foreground = Brushes.White,
+                    FontSize = 11.5,
+                    Padding = new Thickness(10, 5, 10, 5)
+                };
+                AnimationConstraintType cType = entry.Type;
+                mi.Click += (s, e) =>
+                {
+                    if (primary.Constraints == null) primary.Constraints = new List<AnimationConstraintData>();
+                    string defaultTarget = otherLayers.Count > 0 ? otherLayers[0].Id : string.Empty;
+                    if (cType == AnimationConstraintType.FollowPath)
+                    {
+                        for (int pl = 0; pl < otherLayers.Count; pl++)
+                        {
+                            if (otherLayers[pl].Type == ElementType.Path)
+                            {
+                                defaultTarget = otherLayers[pl].Id;
+                                break;
+                            }
+                        }
+                    }
+                    var constraint = new AnimationConstraintData
+                    {
+                        Type = cType,
+                        TargetLayerId = defaultTarget,
+                        TargetNodeId = PropertyBinder.GetNumericNodeId(defaultTarget),
+                        Enabled = true,
+                        Strength = 1.0,
+                        ConstrainX = true,
+                        ConstrainY = true,
+                        OrientToPath = true,
+                        DistanceMode = cType == AnimationConstraintType.Distance ? DistanceConstraintMode.Closer : DistanceConstraintMode.Exact
+                    };
+                    primary.Constraints.Add(constraint);
+                    if (page != null) ConstraintsEngine.Solve(page);
+                    InvalidateAndRefresh(primary);
+                    RefreshPropertyInspector();
+                };
+                menu.Items.Add(mi);
+            }
+
+            menu.PlacementTarget = anchor;
+            menu.Placement = PlacementMode.Bottom;
+            menu.IsOpen = true;
+        }
+
+        private void BuildConstraintsSection(LayerNode primary)
+        {
+            if (primary == null) return;
+            if (primary.Constraints == null) primary.Constraints = new List<AnimationConstraintData>();
+
+            var page = Document != null ? Document.GetActivePage() : null;
+            var otherLayers = new List<LayerNode>();
+            if (page != null)
+            {
+                var flat = page.GetAllLayersFlat().ToList();
+                for (int i = 0; i < flat.Count; i++)
+                {
+                    var l = flat[i];
+                    if (l != null && l != primary && !string.IsNullOrEmpty(l.Id))
+                    {
+                        otherLayers.Add(l);
+                    }
+                }
+            }
+
+            _propertyInspectorStack.Children.Add(CreateInspectorSectionWithMenu("Constraints", btn => ShowAddConstraintMenu(btn, primary)));
+
+            if (primary.Constraints.Count == 0)
+            {
+                Button emptyBtn = null;
+                emptyBtn = CreateSmallButton("+ Add Constraint", "Add Transform, Distance, IK, Follow Path, or Scroll constraint", () => ShowAddConstraintMenu(emptyBtn, primary));
+                _propertyInspectorStack.Children.Add(emptyBtn);
+                return;
+            }
+
+            var constraintsContainer = new StackPanel();
+            for (int i = 0; i < primary.Constraints.Count; i++)
+            {
+                int cIdx = i;
+                var c = primary.Constraints[i];
+                if (c == null) continue;
+
+                var card = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(24, 28, 40)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(38, 46, 66)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(7, 6, 7, 6),
+                    Margin = new Thickness(0, 0, 0, 8)
+                };
+
+                var cardStack = new StackPanel();
+
+                // Row 1: Type Title + Enabled Checkbox + Delete
+                var topRow = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+
+                var delBtn = new Button
+                {
+                    Content = "✕",
+                    Width = 18,
+                    Height = 18,
+                    Background = Brushes.Transparent,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Remove constraint",
+                    Padding = new Thickness(0)
+                };
+                delBtn.Click += (s, e) =>
+                {
+                    if (cIdx >= 0 && cIdx < primary.Constraints.Count)
+                    {
+                        primary.Constraints.RemoveAt(cIdx);
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                        RefreshPropertyInspector();
+                    }
+                };
+                DockPanel.SetDock(delBtn, Dock.Right);
+                topRow.Children.Add(delBtn);
+
+                var enCheck = new CheckBox
+                {
+                    IsChecked = c.Enabled,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 6, 0),
+                    ToolTip = "Enable or disable constraint"
+                };
+                enCheck.Checked += (s, e) =>
+                {
+                    c.Enabled = true;
+                    if (page != null) ConstraintsEngine.Solve(page);
+                    InvalidateAndRefresh(primary);
+                };
+                enCheck.Unchecked += (s, e) =>
+                {
+                    c.Enabled = false;
+                    if (page != null) ConstraintsEngine.Solve(page);
+                    InvalidateAndRefresh(primary);
+                };
+                DockPanel.SetDock(enCheck, Dock.Left);
+                topRow.Children.Add(enCheck);
+
+                string typeTitle = c.Type.ToString();
+                if (c.Type == AnimationConstraintType.FollowPath) typeTitle = "Follow Path";
+                var titleBlock = new TextBlock
+                {
+                    Text = "✦ " + typeTitle,
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 11.5,
+                    Foreground = KerfBrand.MintBrush,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                topRow.Children.Add(titleBlock);
+                cardStack.Children.Add(topRow);
+
+                // Row 2: Target Selector
+                var targetRow = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+                var targetLbl = new TextBlock
+                {
+                    Text = "Target",
+                    FontSize = 10.5,
+                    Foreground = KerfBrand.TextMutedBrush,
+                    Width = 50,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(targetLbl, Dock.Left);
+                targetRow.Children.Add(targetLbl);
+
+                var targetCombo = CreateModernComboBox(24);
+                int selIdx = -1;
+                for (int l = 0; l < otherLayers.Count; l++)
+                {
+                    var ol = otherLayers[l];
+                    string typeIcon = ol.Type == ElementType.Frame ? "▣ " : (ol.Type == ElementType.Path ? "⤹ " : "◻ ");
+                    targetCombo.Items.Add(new ComboBoxItem
+                    {
+                        Content = typeIcon + ol.Name,
+                        Tag = ol.Id
+                    });
+                    if (string.Equals(ol.Id, c.TargetLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selIdx = l;
+                    }
+                }
+                if (selIdx >= 0) targetCombo.SelectedIndex = selIdx;
+                else if (targetCombo.Items.Count > 0) targetCombo.SelectedIndex = 0;
+
+                targetCombo.SelectionChanged += (s, e) =>
+                {
+                    var item = targetCombo.SelectedItem as ComboBoxItem;
+                    if (item != null && item.Tag is string)
+                    {
+                        c.TargetLayerId = (string)item.Tag;
+                        c.TargetNodeId = PropertyBinder.GetNumericNodeId(c.TargetLayerId);
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                    }
+                };
+                targetRow.Children.Add(targetCombo);
+                cardStack.Children.Add(targetRow);
+
+                // Row 3: Strength Slider / Field (0% - 100%)
+                var strengthField = ScrubControls.CreateScrubField("Strength", c.Strength * 100.0, val =>
+                {
+                    c.Strength = Math.Max(0.0, Math.Min(100.0, val)) / 100.0;
+                    if (page != null) ConstraintsEngine.Solve(page);
+                    InvalidateAndRefresh(primary);
+                });
+                cardStack.Children.Add(strengthField);
+
+                // Specific Options per Constraint Type
+                if (c.Type == AnimationConstraintType.Transform)
+                {
+                    var optRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+                    var chkX = new CheckBox { Content = "X", IsChecked = c.ConstrainX, Foreground = Brushes.White, FontSize = 10, Margin = new Thickness(0, 0, 10, 0) };
+                    chkX.Checked += (s, e) => { c.ConstrainX = true; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    chkX.Unchecked += (s, e) => { c.ConstrainX = false; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    var chkY = new CheckBox { Content = "Y", IsChecked = c.ConstrainY, Foreground = Brushes.White, FontSize = 10 };
+                    chkY.Checked += (s, e) => { c.ConstrainY = true; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    chkY.Unchecked += (s, e) => { c.ConstrainY = false; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    optRow.Children.Add(chkX);
+                    optRow.Children.Add(chkY);
+                    cardStack.Children.Add(optRow);
+                }
+                else if (c.Type == AnimationConstraintType.Distance)
+                {
+                    var distRow = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
+                    var modeCombo = CreateModernComboBox(22, 70);
+                    modeCombo.Items.Add(new ComboBoxItem { Content = "Exact", Tag = DistanceConstraintMode.Exact });
+                    modeCombo.Items.Add(new ComboBoxItem { Content = "Maximum", Tag = DistanceConstraintMode.Closer, ToolTip = "Keep the object within this distance of its target" });
+                    modeCombo.Items.Add(new ComboBoxItem { Content = "Minimum", Tag = DistanceConstraintMode.Further, ToolTip = "Keep the object at least this far from its target" });
+                    modeCombo.SelectedIndex = (int)c.DistanceMode;
+                    modeCombo.SelectionChanged += (s, e) =>
+                    {
+                        var mi = modeCombo.SelectedItem as ComboBoxItem;
+                        if (mi != null && mi.Tag is DistanceConstraintMode)
+                        {
+                            c.DistanceMode = (DistanceConstraintMode)mi.Tag;
+                            if (page != null) ConstraintsEngine.Solve(page);
+                            InvalidateAndRefresh(primary);
+                        }
+                    };
+                    DockPanel.SetDock(modeCombo, Dock.Left);
+                    distRow.Children.Add(modeCombo);
+
+                    var distField = ScrubControls.CreateScrubField("Dist", c.Distance, val =>
+                    {
+                        c.Distance = Math.Max(0.0, val);
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                    });
+                    distRow.Children.Add(distField);
+                    cardStack.Children.Add(distRow);
+                }
+                else if (c.Type == AnimationConstraintType.Translation)
+                {
+                    var optRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+                    var chkX = new CheckBox { Content = "X", IsChecked = c.ConstrainX, Foreground = Brushes.White, FontSize = 10, Margin = new Thickness(0, 0, 10, 0) };
+                    chkX.Checked += (s, e) => { c.ConstrainX = true; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    chkX.Unchecked += (s, e) => { c.ConstrainX = false; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    var chkY = new CheckBox { Content = "Y", IsChecked = c.ConstrainY, Foreground = Brushes.White, FontSize = 10 };
+                    chkY.Checked += (s, e) => { c.ConstrainY = true; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    chkY.Unchecked += (s, e) => { c.ConstrainY = false; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    optRow.Children.Add(chkX);
+                    optRow.Children.Add(chkY);
+                    cardStack.Children.Add(optRow);
+                }
+                else if (c.Type == AnimationConstraintType.Scale)
+                {
+                    var optRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+                    var chkX = new CheckBox { Content = "Scale X", IsChecked = c.ConstrainX, Foreground = Brushes.White, FontSize = 10, Margin = new Thickness(0, 0, 10, 0) };
+                    chkX.Checked += (s, e) => { c.ConstrainX = true; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    chkX.Unchecked += (s, e) => { c.ConstrainX = false; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    var chkY = new CheckBox { Content = "Scale Y", IsChecked = c.ConstrainY, Foreground = Brushes.White, FontSize = 10 };
+                    chkY.Checked += (s, e) => { c.ConstrainY = true; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    chkY.Unchecked += (s, e) => { c.ConstrainY = false; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    optRow.Children.Add(chkX);
+                    optRow.Children.Add(chkY);
+                    cardStack.Children.Add(optRow);
+                }
+                else if (c.Type == AnimationConstraintType.Rotation)
+                {
+                    var rotField = ScrubControls.CreateScrubField("Offset ∠", c.OffsetRotation, val =>
+                    {
+                        c.OffsetRotation = val;
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                    });
+                    cardStack.Children.Add(rotField);
+                }
+                else if (c.Type == AnimationConstraintType.IK)
+                {
+                    var bRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+                    bRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    bRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                    bRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                    var b1Field = ScrubControls.CreateScrubField("Bone 1", c.BoneLength1, val =>
+                    {
+                        c.BoneLength1 = Math.Max(0.0, val);
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                    });
+                    Grid.SetColumn(b1Field, 0);
+                    bRow.Children.Add(b1Field);
+
+                    var b2Field = ScrubControls.CreateScrubField("Bone 2", c.BoneLength2, val =>
+                    {
+                        c.BoneLength2 = Math.Max(0.0, val);
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                    });
+                    Grid.SetColumn(b2Field, 2);
+                    bRow.Children.Add(b2Field);
+                    cardStack.Children.Add(bRow);
+
+                    var chkBend = new CheckBox { Content = "Invert Bend Direction", IsChecked = c.InvertBend, Foreground = Brushes.White, FontSize = 10, Margin = new Thickness(0, 4, 0, 0) };
+                    chkBend.Checked += (s, e) => { c.InvertBend = true; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    chkBend.Unchecked += (s, e) => { c.InvertBend = false; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    cardStack.Children.Add(chkBend);
+                }
+                else if (c.Type == AnimationConstraintType.FollowPath)
+                {
+                    var pathDistField = ScrubControls.CreateScrubField("Distance %", c.PathDistance, val =>
+                    {
+                        c.PathDistance = Math.Max(0.0, val);
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                    });
+                    cardStack.Children.Add(pathDistField);
+
+                    var chkOrient = new CheckBox { Content = "Orient / Align to Path", IsChecked = c.OrientToPath, Foreground = Brushes.White, FontSize = 10, Margin = new Thickness(0, 4, 0, 0) };
+                    chkOrient.Checked += (s, e) => { c.OrientToPath = true; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    chkOrient.Unchecked += (s, e) => { c.OrientToPath = false; if (page != null) ConstraintsEngine.Solve(page); InvalidateAndRefresh(primary); };
+                    cardStack.Children.Add(chkOrient);
+
+                    var pathOffField = ScrubControls.CreateScrubField("Path Offset", c.PathOffset, val =>
+                    {
+                        c.PathOffset = val;
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                    });
+                    cardStack.Children.Add(pathOffField);
+                }
+                else if (c.Type == AnimationConstraintType.Scroll)
+                {
+                    var dirCombo = CreateModernComboBox(22);
+                    dirCombo.Items.Add(new ComboBoxItem { Content = "Vertical", Tag = ScrollConstraintDirection.Vertical });
+                    dirCombo.Items.Add(new ComboBoxItem { Content = "Horizontal", Tag = ScrollConstraintDirection.Horizontal });
+                    dirCombo.Items.Add(new ComboBoxItem { Content = "Both", Tag = ScrollConstraintDirection.Both });
+                    dirCombo.SelectedIndex = (int)c.ScrollDirection;
+                    dirCombo.SelectionChanged += (s, e) =>
+                    {
+                        var mi = dirCombo.SelectedItem as ComboBoxItem;
+                        if (mi != null && mi.Tag is ScrollConstraintDirection)
+                        {
+                            c.ScrollDirection = (ScrollConstraintDirection)mi.Tag;
+                            if (page != null) ConstraintsEngine.Solve(page);
+                            InvalidateAndRefresh(primary);
+                        }
+                    };
+                    cardStack.Children.Add(dirCombo);
+
+                    var scrollOffField = ScrubControls.CreateScrubField("Offset", c.ScrollOffset, val =>
+                    {
+                        c.ScrollOffset = val;
+                        if (page != null) ConstraintsEngine.Solve(page);
+                        InvalidateAndRefresh(primary);
+                    });
+                    cardStack.Children.Add(scrollOffField);
+                }
+
+                card.Child = cardStack;
+                constraintsContainer.Children.Add(card);
+            }
+
+            _propertyInspectorStack.Children.Add(constraintsContainer);
         }
 
         private void BuildSelectionColorsSection(IEnumerable<LayerNode> roots)
@@ -11659,6 +13155,41 @@ namespace Kerf.UI
             _lastMousePos = screenPt;
             Point canvasPt = ScreenToCanvas(screenPt);
 
+            if (button == MouseButton.Left && _pendingClipTarget != null && _clipTargetOwner != null)
+            {
+                var pickPage = Document != null ? Document.GetActivePage() : null;
+                var hit = pickPage != null ? CanvasInteractionController.HitTest(pickPage, canvasPt) : null;
+                var pickedLayer = hit != null ? (hit.DeepestNode ?? hit.OutermostNode) : null;
+                bool validSource = pickedLayer != null && pickedLayer != _clipTargetOwner && pickedLayer.Type != ElementType.Frame &&
+                    pickedLayer.Type != ElementType.ComponentInstance && pickedLayer.Type != ElementType.Slice;
+                if (validSource)
+                {
+                    var clipOwner = _clipTargetOwner;
+                    var clipTarget = _pendingClipTarget;
+                    _pendingClipTarget = null;
+                    _clipTargetOwner = null;
+                    if (_canvasHost != null) _canvasHost.Cursor = Cursors.Arrow;
+                    var before = clipTarget.Clone();
+                    var after = clipTarget.Clone();
+                    after.TargetLayerId = pickedLayer.Id;
+                    after.TargetNodeId = PropertyBinder.GetNumericNodeId(pickedLayer.Id);
+                    Action changed = () =>
+                    {
+                        if (_sceneGraph != null)
+                        {
+                            if (clipOwner != null) _sceneGraph.InvalidateNode(clipOwner.Id);
+                            _sceneGraph.InvalidateNode(pickedLayer.Id);
+                        }
+                        RefreshCanvas();
+                        RefreshPropertyInspector();
+                    };
+                    var command = new ModifyClippingTargetCommand(clipTarget, before, after, changed);
+                    if (History != null) History.Execute(command);
+                    else command.Execute();
+                }
+                return;
+            }
+
             if (_isEditingText)
             {
                 EndInPlaceTextEditing(commit: true);
@@ -11748,38 +13279,62 @@ namespace Kerf.UI
                 if (_isVectorEditing && _editingVectorNode != null && _editingVectorNode.Geometry != null)
                 {
                     double tolerance = 10.0 / _zoomScale;
-                    var hit = BezierVectorEngine.HitTest(_editingVectorNode.Geometry, canvasPt, tolerance);
+                    Point editPoint = RetainedSceneGraph.CanvasToLocalPoint(_editingVectorNode, canvasPt, Document != null ? Document.GetActivePage() : null);
+                    var hit = BezierVectorEngine.HitTest(_editingVectorNode.Geometry, editPoint, tolerance);
                     if (hit.NodeIndex >= 0)
                     {
-                        _selectedNodeIndex = hit.NodeIndex;
                         if (hit.IsAnchor)
                         {
+                            bool isShiftSelection = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+                            if (isShiftSelection)
+                            {
+                                ToggleVectorNodeSelection(hit.NodeIndex, _editingVectorNode.Geometry);
+                                RefreshCanvas();
+                                RefreshPropertyInspector();
+                                return;
+                            }
+
+                            // Keep a multi-selection when dragging one of its selected anchors.
+                            // Clicking an unselected anchor starts a new single-point selection.
+                            if (!_selectedNodeIndices.Contains(hit.NodeIndex))
+                                SelectSingleVectorNode(hit.NodeIndex, _editingVectorNode.Geometry);
+                            else
+                                _selectedNodeIndex = hit.NodeIndex;
+
                             if (clickCount >= 2)
                             {
                                 // Double-click anchor toggles Corner <-> Smooth
                                 var node = _editingVectorNode.Geometry.Nodes[_selectedNodeIndex];
                                 var newType = (node.Type == BezierNodeType.Corner) ? BezierNodeType.Smooth : BezierNodeType.Corner;
+                                VectorGeometry before = _editingVectorNode.Geometry.Clone();
                                 BezierVectorEngine.SetNodeType(_editingVectorNode.Geometry, _selectedNodeIndex, newType);
+                                CommitVectorGeometryEdit(before, _editingVectorNode.Geometry.Clone(), "Change Path Node Type");
                                 _sceneGraph.InvalidateNode(_editingVectorNode.Id);
-                                History.MarkDirty();
+                                RefreshCanvas();
+                                RefreshPropertyInspector();
                             }
                             else
                             {
                                 _isDraggingNodeAnchor = true;
                                 _startVectorGeometry = _editingVectorNode.Geometry.Clone();
+                                if (_canvasHost != null) _canvasHost.CaptureMouse();
                             }
                         }
                         else if (hit.IsInHandle)
                         {
+                            SelectSingleVectorNode(hit.NodeIndex, _editingVectorNode.Geometry);
                             _isDraggingNodeHandle = true;
                             _draggingOutHandle = false;
                             _startVectorGeometry = _editingVectorNode.Geometry.Clone();
+                            if (_canvasHost != null) _canvasHost.CaptureMouse();
                         }
                         else if (hit.IsOutHandle)
                         {
+                            SelectSingleVectorNode(hit.NodeIndex, _editingVectorNode.Geometry);
                             _isDraggingNodeHandle = true;
                             _draggingOutHandle = true;
                             _startVectorGeometry = _editingVectorNode.Geometry.Clone();
+                            if (_canvasHost != null) _canvasHost.CaptureMouse();
                         }
                     }
                     else
@@ -11787,17 +13342,17 @@ namespace Kerf.UI
                         // Figma-style Segment Hit Test & Add Point / Bend
                         int hitSeg;
                         Point splitPt;
-                        if (BezierVectorEngine.HitTestSegment(_editingVectorNode.Geometry, canvasPt, tolerance, out hitSeg, out splitPt))
+                        if (BezierVectorEngine.HitTestSegment(_editingVectorNode.Geometry, editPoint, tolerance, out hitSeg, out splitPt))
                         {
                             if (_activeTool == ToolType.Pen)
                             {
                                 // Pen tool clicking on segment inserts a new vertex on the segment
-                                BezierVectorEngine.InsertNode(_editingVectorNode.Geometry, hitSeg + 1, splitPt);
-                                _selectedNodeIndex = hitSeg + 1;
-                                _isDraggingNodeAnchor = true;
                                 _startVectorGeometry = _editingVectorNode.Geometry.Clone();
+                                BezierVectorEngine.InsertNode(_editingVectorNode.Geometry, hitSeg + 1, splitPt);
+                                SelectSingleVectorNode(hitSeg + 1, _editingVectorNode.Geometry);
+                                _isDraggingNodeAnchor = true;
+                                if (_canvasHost != null) _canvasHost.CaptureMouse();
                                 InvalidateAndRefresh(_editingVectorNode);
-                                History.MarkDirty();
                                 RefreshPropertyInspector();
                                 return;
                             }
@@ -11808,24 +13363,27 @@ namespace Kerf.UI
                                 _draggingSegmentIndex = hitSeg;
                                 _startVectorGeometry = _editingVectorNode.Geometry.Clone();
                                 _selectedNodeIndex = -1;
+                                _selectedNodeIndices.Clear();
+                                if (_canvasHost != null) _canvasHost.CaptureMouse();
                                 return;
                             }
                         }
                         else if (_activeTool == ToolType.Pen && !_editingVectorNode.Geometry.IsClosed)
                         {
+                            _startVectorGeometry = _editingVectorNode.Geometry.Clone();
                             // Pen tool clicking on empty canvas extends open geometry
                             if (_selectedNodeIndex == 0)
                             {
-                                BezierVectorEngine.InsertNode(_editingVectorNode.Geometry, 0, canvasPt);
-                                _selectedNodeIndex = 0;
+                                BezierVectorEngine.InsertNode(_editingVectorNode.Geometry, 0, editPoint);
+                                SelectSingleVectorNode(0, _editingVectorNode.Geometry);
                             }
                             else
                             {
-                                BezierVectorEngine.AddNode(_editingVectorNode.Geometry, canvasPt);
-                                _selectedNodeIndex = _editingVectorNode.Geometry.Nodes.Count - 1;
+                                BezierVectorEngine.AddNode(_editingVectorNode.Geometry, editPoint);
+                                SelectSingleVectorNode(_editingVectorNode.Geometry.Nodes.Count - 1, _editingVectorNode.Geometry);
                             }
                             _isDraggingNodeAnchor = true;
-                            _startVectorGeometry = _editingVectorNode.Geometry.Clone();
+                            if (_canvasHost != null) _canvasHost.CaptureMouse();
                             InvalidateAndRefresh(_editingVectorNode);
                             History.MarkDirty();
                             RefreshPropertyInspector();
@@ -11834,6 +13392,7 @@ namespace Kerf.UI
                         else
                         {
                             _selectedNodeIndex = -1;
+                            _selectedNodeIndices.Clear();
                         }
                     }
                     RefreshCanvas();
@@ -11845,7 +13404,7 @@ namespace Kerf.UI
                 if (_selectedLayers.Count == 1 && _activeTool == ToolType.Select)
                 {
                     var primary = _selectedLayers[0];
-                    if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
+                    if (CanRoundCorners(primary) && primary.Width >= 20 && primary.Height >= 20)
                     {
                         if (TransformEngine.HitTestCornerRadiusHandle(canvasPt, primary.GetBounds(), primary.Rotation, primary.CornerRadius, _zoomScale))
                         {
@@ -11908,7 +13467,8 @@ namespace Kerf.UI
                 // 3. Anchor point & Transform handles
                 if (_selectedLayers.Count > 0 && (_activeTool == ToolType.Select || _activeTool == ToolType.Anchor))
                 {
-                    if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1 && _activeTool == ToolType.Anchor)
+                    if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1 &&
+                        _selectedLayers[0].Type != ElementType.Frame && _activeTool == ToolType.Anchor)
                     {
                         var primary = _selectedLayers[0];
                         double ancX = primary.RenderTransform != null ? primary.RenderTransform.AnchorX : 0.5;
@@ -11972,6 +13532,7 @@ namespace Kerf.UI
                             _transformStartBounds = primary.GetBounds();
                             _transformStartRot = totalRot;
                             _transformStartMouse = canvasPt;
+                            _anchorDragStartPoint = anchorWorld;
                             _anchorDragStartRot = primary.RenderTransform != null ? primary.RenderTransform.Rotation : 0.0;
                             _anchorDragStartAngle = Math.Atan2(canvasPt.Y - anchorWorld.Y, canvasPt.X - anchorWorld.X);
                             if (_canvasHost != null) _canvasHost.CaptureMouse();
@@ -11982,30 +13543,33 @@ namespace Kerf.UI
                     if (_currentStudioMode == StudioMode.Animate && _selectedLayers.Count == 1)
                     {
                         var primary = _selectedLayers[0];
-                        Point localPt = RetainedSceneGraph.CanvasToLocalPoint(primary, canvasPt);
-                        double curSx = primary.RenderTransform != null ? primary.RenderTransform.ScaleX : 1.0;
-                        double curSy = primary.RenderTransform != null ? primary.RenderTransform.ScaleY : 1.0;
-                        double scaleMag = Math.Max(0.001, Math.Max(curSx, curSy));
-                        var handle = TransformEngine.HitTestHandle(localPt, primary.GetBounds(), 0, _zoomScale * scaleMag);
-                        if (handle != HandleType.None)
+                        if (primary.Type != ElementType.Frame)
                         {
-                            _activeHandle = handle;
-                            _isTransforming = true;
-                            _transformStartBounds = primary.GetBounds();
-                            _transformStartRot = primary.Rotation + (primary.RenderTransform != null ? primary.RenderTransform.Rotation : 0.0);
-                            _transformStartMouse = canvasPt;
-                            _startScaleX = curSx;
-                            _startScaleY = curSy;
-                            _dragInitialPositions.Clear();
-                            _dragInitialBounds.Clear();
-                            _dragInitialRotations.Clear();
-                            _dragInitialGeometries.Clear();
-                            foreach (var l in _selectedLayers) CollectDragInitialPositions(l, _dragInitialPositions);
-                            if (_canvasHost != null) _canvasHost.CaptureMouse();
-                            return;
+                            Point localPt = RetainedSceneGraph.CanvasToLocalPoint(primary, canvasPt);
+                            double curSx = primary.RenderTransform != null ? primary.RenderTransform.ScaleX : 1.0;
+                            double curSy = primary.RenderTransform != null ? primary.RenderTransform.ScaleY : 1.0;
+                            double scaleMag = Math.Max(0.001, Math.Max(curSx, curSy));
+                            var handle = TransformEngine.HitTestHandle(localPt, primary.GetBounds(), 0, _zoomScale * scaleMag);
+                            if (handle != HandleType.None)
+                            {
+                                _activeHandle = handle;
+                                _isTransforming = true;
+                                _transformStartBounds = primary.GetBounds();
+                                _transformStartRot = primary.Rotation + (primary.RenderTransform != null ? primary.RenderTransform.Rotation : 0.0);
+                                _transformStartMouse = canvasPt;
+                                _startScaleX = curSx;
+                                _startScaleY = curSy;
+                                _dragInitialPositions.Clear();
+                                _dragInitialBounds.Clear();
+                                _dragInitialRotations.Clear();
+                                _dragInitialGeometries.Clear();
+                                foreach (var l in _selectedLayers) CollectDragInitialPositions(l, _dragInitialPositions);
+                                if (_canvasHost != null) _canvasHost.CaptureMouse();
+                                return;
+                            }
                         }
                     }
-                    else
+                    else if (_currentStudioMode != StudioMode.Animate)
                     {
                         var union = TransformEngine.UnionBounds(_selectedLayers);
                         double rot = (_selectedLayers.Count == 1) ? _selectedLayers[0].Rotation : 0;
@@ -12097,6 +13661,8 @@ namespace Kerf.UI
                         // Determines which object should become selected.
                         // Supports progressive parent-to-child selection, maintains hierarchy context.
                         var selectionHit = CanvasInteractionController.ResolveSelection(hitResult, _selectedLayers, clickCount, control, shift);
+                        if (_currentStudioMode == StudioMode.Animate && hitResult.DeepestNode != null)
+                            selectionHit = hitResult.DeepestNode;
 
                         if (control)
                         {
@@ -12124,10 +13690,19 @@ namespace Kerf.UI
                         // Resolves the active transformation target.
                         // Pointer-down over descendants of an already-selected parent maintains that parent as drag target!
                         var dragTargets = CanvasInteractionController.ResolveDragTargets(hitResult, _selectedLayers, selectionHit, control, clickCount);
+                        if (_currentStudioMode == StudioMode.Animate)
+                        {
+                            // Animate the hit element itself. A frame is a fixed viewport and
+                            // must never become a drag target or move its child hierarchy.
+                            LayerNode animationTarget = hitResult.DeepestNode;
+                            dragTargets = animationTarget != null && animationTarget.Type != ElementType.Frame
+                                ? new List<LayerNode> { animationTarget }
+                                : new List<LayerNode>();
+                        }
 
                         _activeHandle = HandleType.None;
-                        _isTransforming = true;
-                        _transformStartBounds = TransformEngine.UnionBounds(_selectedLayers);
+                        _isTransforming = dragTargets.Count > 0;
+                        _transformStartBounds = dragTargets.Count > 0 ? TransformEngine.UnionBounds(dragTargets) : Rect.Empty;
                         _transformStartRot = 0;
                         _transformStartMouse = canvasPt;
                         _dragInitialPositions.Clear();
@@ -12172,10 +13747,9 @@ namespace Kerf.UI
             if (_currentStudioMode == StudioMode.Animate && _timelineController != null && _timelineController.IsPlaying)
             {
                 var sm = _timelineController.ActiveStateMachine;
-                var page = Document != null ? Document.GetActivePage() : null;
                 if (sm != null && _sceneGraph != null && _interactiveEventDispatcher != null)
                 {
-                    _interactiveEventDispatcher.OnPointerMove(sm, _sceneGraph, new Point(-999999, -999999), page);
+                    _interactiveEventDispatcher.OnPointerLeave(sm);
                     TriggerStateMachineStep(continuePlayback: true);
                 }
             }
@@ -12312,7 +13886,8 @@ namespace Kerf.UI
             // Vector Edit Mode: Bend tool dragging segment
             if (_isVectorEditing && _isDraggingSegment && _editingVectorNode != null && _editingVectorNode.Geometry != null && _draggingSegmentIndex >= 0)
             {
-                BezierVectorEngine.BendSegment(_editingVectorNode.Geometry, _draggingSegmentIndex, canvasPt);
+                Point editPoint = RetainedSceneGraph.CanvasToLocalPoint(_editingVectorNode, canvasPt, Document != null ? Document.GetActivePage() : null);
+                BezierVectorEngine.BendSegment(_editingVectorNode.Geometry, _draggingSegmentIndex, editPoint);
                 _sceneGraph.InvalidateNode(_editingVectorNode.Id);
                 RefreshCanvas();
                 return;
@@ -12321,9 +13896,21 @@ namespace Kerf.UI
             // Vector Edit Mode: Dragging anchor node or tangent handle
             if (_isVectorEditing && _editingVectorNode != null && _editingVectorNode.Geometry != null && _selectedNodeIndex >= 0)
             {
+                Point editPoint = RetainedSceneGraph.CanvasToLocalPoint(_editingVectorNode, canvasPt, Document != null ? Document.GetActivePage() : null);
                 if (_isDraggingNodeAnchor)
                 {
-                    BezierVectorEngine.MoveAnchor(_editingVectorNode.Geometry, _selectedNodeIndex, canvasPt);
+                    var startAnchor = _startVectorGeometry.Nodes[_selectedNodeIndex].Anchor;
+                    double dx = editPoint.X - startAnchor.X;
+                    double dy = editPoint.Y - startAnchor.Y;
+                    foreach (int index in GetSelectedVectorNodeIndices(_editingVectorNode.Geometry))
+                    {
+                        if (index < _startVectorGeometry.Nodes.Count)
+                        {
+                            var originalAnchor = _startVectorGeometry.Nodes[index].Anchor;
+                            BezierVectorEngine.MoveAnchor(_editingVectorNode.Geometry, index,
+                                new Point(originalAnchor.X + dx, originalAnchor.Y + dy));
+                        }
+                    }
                     _sceneGraph.InvalidateNode(_editingVectorNode.Id);
                     RefreshCanvas();
                     return;
@@ -12337,7 +13924,7 @@ namespace Kerf.UI
                         // Holding Alt splits the handles like in Illustrator!
                         node.Type = BezierNodeType.Split;
                     }
-                    BezierVectorEngine.MoveHandle(_editingVectorNode.Geometry, _selectedNodeIndex, _draggingOutHandle, canvasPt);
+                    BezierVectorEngine.MoveHandle(_editingVectorNode.Geometry, _selectedNodeIndex, _draggingOutHandle, editPoint);
                     _sceneGraph.InvalidateNode(_editingVectorNode.Id);
                     RefreshCanvas();
                     return;
@@ -12444,14 +14031,14 @@ namespace Kerf.UI
                         double dMouseX = canvasPt.X - _transformStartMouse.X;
                         double dMouseY = canvasPt.Y - _transformStartMouse.Y;
                         double proj = dMouseX * ux.X + dMouseY * ux.Y;
-                        curTarget = new Point(_transformStartMouse.X + proj * ux.X, _transformStartMouse.Y + proj * ux.Y);
+                        curTarget = new Point(_anchorDragStartPoint.X + proj * ux.X, _anchorDragStartPoint.Y + proj * ux.Y);
                     }
                     else if (_activeAnchorPart == AnchorGizmoPart.AxisY)
                     {
                         double dMouseX = canvasPt.X - _transformStartMouse.X;
                         double dMouseY = canvasPt.Y - _transformStartMouse.Y;
                         double proj = dMouseX * uy.X + dMouseY * uy.Y;
-                        curTarget = new Point(_transformStartMouse.X + proj * uy.X, _transformStartMouse.Y + proj * uy.Y);
+                        curTarget = new Point(_anchorDragStartPoint.X + proj * uy.X, _anchorDragStartPoint.Y + proj * uy.Y);
                     }
 
                     double curTx = primary.RenderTransform.TranslationX;
@@ -12990,7 +14577,7 @@ namespace Kerf.UI
             if (_selectedLayers.Count == 1 && _activeTool == ToolType.Select && !_isTransforming && !_isPanning && !_isDrawingNew && !_isDraggingGradientHandle)
             {
                 var primary = _selectedLayers[0];
-                if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
+                if (CanRoundCorners(primary) && primary.Width >= 20 && primary.Height >= 20)
                 {
                     if (TransformEngine.HitTestCornerRadiusHandle(canvasPt, primary.GetBounds(), primary.Rotation, primary.CornerRadius, _zoomScale))
                     {
@@ -13143,36 +14730,19 @@ namespace Kerf.UI
                 _isDraggingNodeHandle = false;
                 if (_editingVectorNode != null && _editingVectorNode.Geometry != null)
                 {
-                    var b = BezierVectorEngine.CalculateBounds(_editingVectorNode.Geometry);
-                    _editingVectorNode.X = b.X;
-                    _editingVectorNode.Y = b.Y;
-                    _editingVectorNode.Width = b.Width;
-                    _editingVectorNode.Height = b.Height;
                     _sceneGraph.InvalidateNode(_editingVectorNode.Id);
 
                     if (_startVectorGeometry != null)
                     {
-                        var cmd = new ModifyVectorGeometryCommand(
-                            _editingVectorNode,
-                            _startVectorGeometry,
-                            _editingVectorNode.Geometry.Clone(),
-                            () =>
-                            {
-                                _sceneGraph.InvalidateNode(_editingVectorNode.Id);
-                                RefreshCanvas();
-                                RefreshPropertyInspector();
-                            });
-                        History.Execute(cmd);
+                        CommitVectorGeometryEdit(_startVectorGeometry, _editingVectorNode.Geometry.Clone(), "Edit Path Nodes");
                         _startVectorGeometry = null;
-                    }
-                    else
-                    {
-                        History.MarkDirty();
                     }
 
                     RefreshCanvas();
                     RefreshPropertyInspector();
                 }
+                if (_canvasHost != null && _canvasHost.IsMouseCaptured)
+                    _canvasHost.ReleaseMouseCapture();
             }
 
             if (_isDraggingSegment)
@@ -13541,18 +15111,18 @@ namespace Kerf.UI
             _dragStartPoint = canvasPt;
 
             ElementType elemType = ElementType.Rectangle;
-            string defaultColor = "#D9D9D9";
+            string defaultColor = GetReadableColorAtPoint(canvasPt);
 
             switch (tool)
             {
-                case ToolType.Frame: elemType = ElementType.Frame; defaultColor = "#D9D9D9"; break;
-                case ToolType.Rect: elemType = ElementType.Rectangle; defaultColor = "#D9D9D9"; break;
-                case ToolType.Ellipse: elemType = ElementType.Ellipse; defaultColor = "#D9D9D9"; break;
-                case ToolType.Star: elemType = ElementType.Star; defaultColor = "#D9D9D9"; break;
-                case ToolType.Polygon: elemType = ElementType.Polygon; defaultColor = "#D9D9D9"; break;
-                case ToolType.Text: elemType = ElementType.Text; defaultColor = "#D9D9D9"; break;
-                case ToolType.Line: elemType = ElementType.Line; defaultColor = "#D9D9D9"; break;
-                case ToolType.Arrow: elemType = ElementType.Arrow; defaultColor = "#D9D9D9"; break;
+                case ToolType.Frame: elemType = ElementType.Frame; break;
+                case ToolType.Rect: elemType = ElementType.Rectangle; break;
+                case ToolType.Ellipse: elemType = ElementType.Ellipse; break;
+                case ToolType.Star: elemType = ElementType.Star; break;
+                case ToolType.Polygon: elemType = ElementType.Polygon; break;
+                case ToolType.Text: elemType = ElementType.Text; break;
+                case ToolType.Line: elemType = ElementType.Line; break;
+                case ToolType.Arrow: elemType = ElementType.Arrow; break;
             }
 
             _drawingNode = new LayerNode
@@ -13586,6 +15156,58 @@ namespace Kerf.UI
             _sceneGraph.Synchronize(page);
         }
 
+        private string GetReadableColorAtPoint(Point point)
+        {
+            string background = "#1E1E22";
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page != null)
+            {
+                if (!string.IsNullOrWhiteSpace(page.BackgroundColor)) background = page.BackgroundColor;
+                var layers = page.GetAllLayersFlat().ToList();
+                for (int i = layers.Count - 1; i >= 0; i--)
+                {
+                    var layer = layers[i];
+                    if (layer == null || !layer.IsVisible || layer.Type == ElementType.Text || layer.Fills == null) continue;
+                    if (!layer.GetBounds().Contains(point)) continue;
+                    var paint = layer.Fills.FirstOrDefault(fill => fill != null && fill.Enabled && fill.Opacity > 0.01 && fill.Type != PaintType.Image);
+                    if (paint == null) continue;
+                    if (paint.Type == PaintType.LinearGradient || paint.Type == PaintType.RadialGradient)
+                    {
+                        if (paint.GradientStops != null && paint.GradientStops.Count > 0)
+                        {
+                            var colors = paint.GradientStops.Select(stop => TryParseColor(stop.ColorHex)).Where(color => color.HasValue).Select(color => color.Value).ToList();
+                            if (colors.Count > 0)
+                            {
+                                int r = (int)colors.Average(color => color.R);
+                                int g = (int)colors.Average(color => color.G);
+                                int b = (int)colors.Average(color => color.B);
+                                background = string.Format("#{0:X2}{1:X2}{2:X2}", r, g, b);
+                                break;
+                            }
+                        }
+                    }
+                    if (!string.IsNullOrWhiteSpace(paint.ColorHex)) background = paint.ColorHex;
+                    break;
+                }
+            }
+
+            var bg = TryParseColor(background) ?? Color.FromRgb(30, 30, 34);
+            double luminance = (0.2126 * Linearize(bg.R / 255.0)) + (0.7152 * Linearize(bg.G / 255.0)) + (0.0722 * Linearize(bg.B / 255.0));
+            return luminance > 0.45 ? "#111111" : "#FFFFFF";
+        }
+
+        private static Color? TryParseColor(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            try { return (Color)ColorConverter.ConvertFromString(value); }
+            catch { return null; }
+        }
+
+        private static double Linearize(double value)
+        {
+            return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+        }
+
         private void HandlePenClick(Point canvasPt)
         {
             var page = Document.GetActivePage();
@@ -13602,8 +15224,8 @@ namespace Kerf.UI
                     Width = 10,
                     Height = 10,
                     Geometry = _activePenGeometry,
-                    Fills = new List<Paint> { Paint.Solid("#D9D9D9", 0.25) },
-                    Strokes = new List<StrokeData> { new StrokeData { Paint = Paint.Solid("#D9D9D9"), Width = 2.0 } }
+                    Fills = new List<Paint> { Paint.Solid(GetReadableColorAtPoint(canvasPt), 0.25) },
+                    Strokes = new List<StrokeData> { new StrokeData { Paint = Paint.Solid(GetReadableColorAtPoint(canvasPt)), Width = 2.0 } }
                 };
                 InsertionTargetResolver.InsertObject(page, target, _activePenNode, reflowAutoLayout: false);
                 _sceneGraph.Synchronize(page);
@@ -13733,7 +15355,7 @@ namespace Kerf.UI
             _editingVectorNode = pathNode;
             _selectedLayers.Clear();
             _selectedLayers.Add(pathNode);
-            _selectedNodeIndex = (pathNode.Geometry.Nodes.Count > 0) ? 0 : -1;
+            SelectSingleVectorNode(pathNode.Geometry.Nodes.Count > 0 ? 0 : -1, pathNode.Geometry);
             _isDraggingNodeAnchor = false;
             _isDraggingNodeHandle = false;
             SetActiveTool(ToolType.Select);
@@ -13746,17 +15368,12 @@ namespace Kerf.UI
             if (!_isVectorEditing) return;
             if (_editingVectorNode != null && _editingVectorNode.Geometry != null)
             {
-                var b = BezierVectorEngine.CalculateBounds(_editingVectorNode.Geometry);
-                _editingVectorNode.X = b.X;
-                _editingVectorNode.Y = b.Y;
-                _editingVectorNode.Width = b.Width;
-                _editingVectorNode.Height = b.Height;
                 _sceneGraph.InvalidateNode(_editingVectorNode.Id);
-                History.MarkDirty();
             }
             _isVectorEditing = false;
             _editingVectorNode = null;
             _selectedNodeIndex = -1;
+            _selectedNodeIndices.Clear();
             _isDraggingNodeAnchor = false;
             _isDraggingNodeHandle = false;
             RefreshCanvas();
@@ -13768,6 +15385,15 @@ namespace Kerf.UI
             return tool == ToolType.Rect || tool == ToolType.Ellipse || tool == ToolType.Star ||
                    tool == ToolType.Polygon || tool == ToolType.Frame || tool == ToolType.Text ||
                    tool == ToolType.Line || tool == ToolType.Arrow;
+        }
+
+        private static bool CanRoundCorners(LayerNode layer)
+        {
+            if (layer == null) return false;
+            return layer.Type == ElementType.Rectangle || layer.Type == ElementType.Frame ||
+                   layer.Type == ElementType.Image || layer.Type == ElementType.Star ||
+                   layer.Type == ElementType.Polygon || layer.Type == ElementType.Arrow ||
+                   layer.Type == ElementType.Path || layer.Type == ElementType.ComponentInstance;
         }
 
         public void RenderOverlays(DrawingContext dc)
@@ -13978,11 +15604,11 @@ namespace Kerf.UI
                 dc.DrawText(tag, new Point(tagRect.X + 6 / _zoomScale, tagRect.Y + 2 / _zoomScale));
             }
 
-            // 4 Corner radius circular handles inside corners for rectangles & frames
+            // 4 Corner radius controls for supported shapes with sharp corners
             if (_selectedLayers.Count == 1)
             {
                 var primary = _selectedLayers[0];
-                if ((primary.Type == ElementType.Rectangle || primary.Type == ElementType.Frame || primary.Type == ElementType.Image) && primary.Width >= 20 && primary.Height >= 20)
+                if (CanRoundCorners(primary) && primary.Width >= 20 && primary.Height >= 20)
                 {
                     var crPoints = TransformEngine.GetCornerRadiusHandlePositions(union, primary.CornerRadius, _zoomScale);
                     double crRadius = 4.0 / _zoomScale;
@@ -14503,6 +16129,8 @@ namespace Kerf.UI
         private void RenderVectorEditModeOverlay(DrawingContext dc, VectorGeometry geo)
         {
             if (geo == null || geo.Nodes == null) return;
+            var page = Document != null ? Document.GetActivePage() : null;
+            Func<Point, Point> toCanvas = point => RetainedSceneGraph.LocalToCanvasPoint(_editingVectorNode, point, page);
 
             double aSize = 7.0 / _zoomScale;
             var anchorPen = new Pen(Brushes.White, 1.5 / _zoomScale);
@@ -14522,37 +16150,52 @@ namespace Kerf.UI
             for (int i = 0; i < geo.Nodes.Count; i++)
             {
                 var node = geo.Nodes[i];
-                bool isSelected = (i == _selectedNodeIndex);
+                bool isSelected = _selectedNodeIndices.Contains(i) ||
+                                  (_selectedNodeIndices.Count == 0 && i == _selectedNodeIndex);
 
-                // Draw handles and tangent lines (if selected or if handles moved)
-                if (isSelected || node.Type != BezierNodeType.Corner)
+                // Sharp corner nodes have no visible or draggable tangent handles.
+                if (node.Type != BezierNodeType.Corner)
                 {
                     if (node.InHandle.X != node.Anchor.X || node.InHandle.Y != node.Anchor.Y)
                     {
-                        dc.DrawLine(handlePen, node.Anchor, node.InHandle);
-                        dc.DrawEllipse(Brushes.White, handlePen, node.InHandle, aSize * 0.5, aSize * 0.5);
+                        Point anchor = toCanvas(node.Anchor);
+                        Point inHandle = toCanvas(node.InHandle);
+                        dc.DrawLine(handlePen, anchor, inHandle);
+                        dc.DrawEllipse(Brushes.White, handlePen, inHandle, aSize * 0.5, aSize * 0.5);
                     }
                     if (node.OutHandle.X != node.Anchor.X || node.OutHandle.Y != node.Anchor.Y)
                     {
-                        dc.DrawLine(handlePen, node.Anchor, node.OutHandle);
-                        dc.DrawEllipse(Brushes.White, handlePen, node.OutHandle, aSize * 0.5, aSize * 0.5);
+                        Point anchor = toCanvas(node.Anchor);
+                        Point outHandle = toCanvas(node.OutHandle);
+                        dc.DrawLine(handlePen, anchor, outHandle);
+                        dc.DrawEllipse(Brushes.White, handlePen, outHandle, aSize * 0.5, aSize * 0.5);
                     }
                 }
 
                 // Draw anchor node
+                Point canvasAnchor = toCanvas(node.Anchor);
                 if (isSelected)
                 {
-                    dc.DrawRectangle(null, selGlowPen, new Rect(node.Anchor.X - aSize * 0.75, node.Anchor.Y - aSize * 0.75, aSize * 1.5, aSize * 1.5));
-                    dc.DrawRectangle(selAnchorBrush, anchorPen, new Rect(node.Anchor.X - aSize / 2, node.Anchor.Y - aSize / 2, aSize, aSize));
+                    dc.DrawRectangle(null, selGlowPen, new Rect(canvasAnchor.X - aSize * 0.75, canvasAnchor.Y - aSize * 0.75, aSize * 1.5, aSize * 1.5));
+                    dc.DrawRectangle(selAnchorBrush, anchorPen, new Rect(canvasAnchor.X - aSize / 2, canvasAnchor.Y - aSize / 2, aSize, aSize));
                 }
                 else
                 {
-                    dc.DrawRectangle(normalAnchorBrush, normalAnchorPen, new Rect(node.Anchor.X - aSize / 2, node.Anchor.Y - aSize / 2, aSize, aSize));
+                    dc.DrawRectangle(normalAnchorBrush, normalAnchorPen, new Rect(canvasAnchor.X - aSize / 2, canvasAnchor.Y - aSize / 2, aSize, aSize));
                 }
             }
 
             // Draw "Vector Edit Mode (Esc / Enter to exit)" badge
             var b = BezierVectorEngine.CalculateBounds(geo);
+            if (!b.IsEmpty && _editingVectorNode != null)
+            {
+                Point p1 = toCanvas(new Point(b.Left, b.Top));
+                Point p2 = toCanvas(new Point(b.Right, b.Top));
+                Point p3 = toCanvas(new Point(b.Right, b.Bottom));
+                Point p4 = toCanvas(new Point(b.Left, b.Bottom));
+                b = new Rect(p1, p1);
+                b.Union(p2); b.Union(p3); b.Union(p4);
+            }
             if (!b.IsEmpty)
             {
                 var typeFace = new Typeface("Segoe UI");
@@ -14574,6 +16217,9 @@ namespace Kerf.UI
         private void RenderBezierNodesOverlay(DrawingContext dc, VectorGeometry geo)
         {
             if (geo == null || geo.Nodes == null) return;
+            LayerNode layer = _isVectorEditing ? _editingVectorNode : _selectedLayers.FirstOrDefault(candidate => candidate != null && ReferenceEquals(candidate.Geometry, geo));
+            var page = Document != null ? Document.GetActivePage() : null;
+            Func<Point, Point> toCanvas = point => RetainedSceneGraph.LocalToCanvasPoint(layer, point, page);
 
             var anchorBrush = KerfBrand.MintBrush;
             var anchorPen = new Pen(Brushes.White, 1.5 / _zoomScale);
@@ -14585,20 +16231,23 @@ namespace Kerf.UI
 
             foreach (var node in geo.Nodes)
             {
+                Point anchor = toCanvas(node.Anchor);
+                Point inHandle = toCanvas(node.InHandle);
+                Point outHandle = toCanvas(node.OutHandle);
                 // In Handle line
                 if (node.InHandle.X != node.Anchor.X || node.InHandle.Y != node.Anchor.Y)
                 {
-                    dc.DrawLine(handlePen, node.Anchor, node.InHandle);
-                    dc.DrawEllipse(Brushes.White, anchorPen, node.InHandle, aSize * 0.6, aSize * 0.6);
+                    dc.DrawLine(handlePen, anchor, inHandle);
+                    dc.DrawEllipse(Brushes.White, anchorPen, inHandle, aSize * 0.6, aSize * 0.6);
                 }
                 // Out Handle line
                 if (node.OutHandle.X != node.Anchor.X || node.OutHandle.Y != node.Anchor.Y)
                 {
-                    dc.DrawLine(handlePen, node.Anchor, node.OutHandle);
-                    dc.DrawEllipse(Brushes.White, anchorPen, node.OutHandle, aSize * 0.6, aSize * 0.6);
+                    dc.DrawLine(handlePen, anchor, outHandle);
+                    dc.DrawEllipse(Brushes.White, anchorPen, outHandle, aSize * 0.6, aSize * 0.6);
                 }
                 // Anchor node
-                dc.DrawRectangle(anchorBrush, anchorPen, new Rect(node.Anchor.X - aSize / 2, node.Anchor.Y - aSize / 2, aSize, aSize));
+                dc.DrawRectangle(anchorBrush, anchorPen, new Rect(anchor.X - aSize / 2, anchor.Y - aSize / 2, aSize, aSize));
             }
         }
 
@@ -14746,12 +16395,23 @@ namespace Kerf.UI
                 _renderer.CurrentPage = Document != null ? Document.GetActivePage() : null;
             }
 
+            if (Document != null)
+            {
+                var activePage = Document.GetActivePage();
+                if (activePage != null)
+                {
+                    ConstraintsEngine.Solve(activePage);
+                }
+            }
+
             // Invalidate viewport
             Rect viewport = new Rect(-_panOffset.X / _zoomScale, -_panOffset.Y / _zoomScale,
                                      _canvasHost.ActualWidth / _zoomScale, _canvasHost.ActualHeight / _zoomScale);
 
             var diag = _sceneGraph.UpdateAndRender(viewport, _zoomScale);
-            _telemetryBlock.Text = diag.ToString();
+            _telemetryBlock.Text = string.Format(CultureInfo.InvariantCulture, "GPU {0} · {1:F1} µs · {2}/{3}",
+                diag.RenderingTier, diag.FrameTimeMicroseconds, diag.VisibleNodes, diag.TotalNodes);
+            _telemetryBlock.ToolTip = diag.ToString();
 
             _canvasHost.InvalidateVisual();
         }
@@ -14979,7 +16639,14 @@ namespace Kerf.UI
             {
                 SyncAnimationToDocument();
 
-                StorageManager.SaveAtomic(Document, targetPath);
+                if (string.Equals(System.IO.Path.GetExtension(targetPath), ".kfx", StringComparison.OrdinalIgnoreCase))
+                {
+                    KfxPackage.ExportPackage(Document, targetPath, true);
+                }
+                else
+                {
+                    StorageManager.SaveAtomic(Document, targetPath);
+                }
                 StorageManager.AddRecentProject(targetPath);
                 CurrentFilePath = targetPath;
                 History.MarkClean();
@@ -14990,7 +16657,7 @@ namespace Kerf.UI
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Failed to save project: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("Failed to save project: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
             }
             finally
@@ -15005,9 +16672,9 @@ namespace Kerf.UI
             if (Document == null) return false;
             var dlg = new SaveFileDialog
             {
-                Filter = "Kerf Design Files (*.kerf)|*.kerf|All Files (*.*)|*.*",
+                Filter = "Kerf Project or Animation Package (*.kerf;*.kfx)|*.kerf;*.kfx|Kerf Design Files (*.kerf)|*.kerf|Kerf Animation Packages (*.kfx)|*.kfx|All Files (*.*)|*.*",
                 FileName = (string.IsNullOrEmpty(Document.Name) ? "Untitled Project" : Document.Name) + ".kerf",
-                Title = "Save Kerf Design As...",
+                Title = "Save Kerf Project As...",
                 DefaultExt = ".kerf",
                 AddExtension = true,
                 OverwritePrompt = true,
@@ -15029,14 +16696,12 @@ namespace Kerf.UI
                 string previousName = Document.Name;
                 Document.Name = System.IO.Path.GetFileNameWithoutExtension(dlg.FileName);
                 _titleBlock.Text = Document.Name;
-                _titleTextBox.Text = Document.Name;
                 if (SaveDocumentToPath(dlg.FileName))
                 {
                     return true;
                 }
                 Document.Name = previousName;
                 _titleBlock.Text = Document.Name;
-                _titleTextBox.Text = Document.Name;
                 UpdateSaveStatus();
                 return false;
             }
@@ -15049,7 +16714,7 @@ namespace Kerf.UI
             {
                 var res = MessageBox.Show(
                     string.Format("Do you want to save changes to \"{0}\" before opening another project?", Document.Name),
-                    "Kerf Studio",
+                    "Kerf",
                     MessageBoxButton.YesNoCancel,
                     MessageBoxImage.Question);
 
@@ -15065,8 +16730,8 @@ namespace Kerf.UI
 
             var dlg = new OpenFileDialog
             {
-                Filter = "Kerf Design Files (*.kerf)|*.kerf|All Files (*.*)|*.*",
-                Title = "Open Kerf Design File"
+                Filter = "Kerf Projects and Packages (*.kerf;*.kfx;*.json)|*.kerf;*.kfx;*.json|Kerf Design Files (*.kerf)|*.kerf|Kerf Animation Packages (*.kfx)|*.kfx|JSON Projects (*.json)|*.json|All Files (*.*)|*.*",
+                Title = "Open Kerf Project or Animation Package"
             };
 
             if (!string.IsNullOrEmpty(CurrentFilePath))
@@ -15100,7 +16765,7 @@ namespace Kerf.UI
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Failed to open file: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("Failed to open file: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -16111,11 +17776,11 @@ namespace Kerf.UI
                 try
                 {
                     KfxPackage.ExportPackage(Document, dlg.FileName, true);
-                    MessageBox.Show("Package exported successfully to: " + dlg.FileName, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Package exported successfully to: " + dlg.FileName, "Kerf", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Export failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("Export failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -16137,18 +17802,28 @@ namespace Kerf.UI
                     if (importedDoc != null)
                     {
                         LoadDocument(importedDoc, dlg.FileName);
-                        MessageBox.Show("Package imported successfully.", "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+                        MessageBox.Show("Package imported successfully.", "Kerf", MessageBoxButton.OK, MessageBoxImage.Information);
                     }
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Import failed: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("Import failed: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
 
         private void OnStudioKeyDown(object sender, KeyEventArgs e)
         {
+            if (_pendingClipTarget != null && e.Key == Key.Escape)
+            {
+                _pendingClipTarget = null;
+                _clipTargetOwner = null;
+                if (_canvasHost != null) _canvasHost.Cursor = Cursors.Arrow;
+                RefreshPropertyInspector();
+                e.Handled = true;
+                return;
+            }
+
             if (e.OriginalSource is TextBox)
             {
                 if (e.Key == Key.Escape)
@@ -16157,6 +17832,14 @@ namespace Kerf.UI
                     e.Handled = true;
                 }
                 return;
+            }
+
+            if (_currentStudioMode == StudioMode.Animate && _timelineController != null && _timelineController.IsPlaying &&
+                _timelineController.ActiveStateMachine != null && _isStateMachineMode)
+            {
+                Key listenerKey = e.Key == Key.System ? e.SystemKey : e.Key;
+                _interactiveEventDispatcher.OnKeyDown(_timelineController.ActiveStateMachine, listenerKey.ToString());
+                TriggerStateMachineStep(continuePlayback: true);
             }
 
             bool isCtrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
@@ -16266,6 +17949,7 @@ namespace Kerf.UI
                         else
                         {
                             _selectedNodeIndex = Math.Min(_selectedNodeIndex, _editingVectorNode.Geometry.Nodes.Count - 1);
+                            SelectSingleVectorNode(_selectedNodeIndex, _editingVectorNode.Geometry);
                             InvalidateAndRefresh(_editingVectorNode);
                             RefreshPropertyInspector();
                         }
@@ -16462,6 +18146,7 @@ namespace Kerf.UI
                             else
                             {
                                 _selectedNodeIndex = Math.Min(_selectedNodeIndex, _editingVectorNode.Geometry.Nodes.Count - 1);
+                                SelectSingleVectorNode(_selectedNodeIndex, _editingVectorNode.Geometry);
                                 InvalidateAndRefresh(_editingVectorNode);
                                 RefreshPropertyInspector();
                             }
@@ -16518,6 +18203,15 @@ namespace Kerf.UI
                     else if (e.Key == Key.OemMinus || e.Key == Key.Subtract) { ZoomOut(); e.Handled = true; }
                 }
             }
+        }
+
+        private void OnStudioTextInput(object sender, TextCompositionEventArgs e)
+        {
+            if (e == null || e.OriginalSource is TextBox) return;
+            if (_currentStudioMode != StudioMode.Animate || !_isStateMachineMode || _timelineController == null ||
+                !_timelineController.IsPlaying || _timelineController.ActiveStateMachine == null) return;
+            _interactiveEventDispatcher.OnTextInput(_timelineController.ActiveStateMachine, e.Text);
+            TriggerStateMachineStep(continuePlayback: true);
         }
 
         #endregion
@@ -16676,7 +18370,8 @@ namespace Kerf.UI
             };
 
             var grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) }); // Two-row transport bar
+            _timelineTransportRow = new RowDefinition { Height = new GridLength(_isStateMachineMode ? 68 : 100) };
+            grid.RowDefinitions.Add(_timelineTransportRow); // Transport and work-area controls
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Tracks & Timeline
 
             // 1. Transport Bar
@@ -16688,7 +18383,59 @@ namespace Kerf.UI
             var bodyGrid = new Grid();
             bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) }); // Left: Track headers
             bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Right: Ruler & Lanes
+            bodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) }); // Dedicated work-area editing strip
             bodyGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var workAreaLabel = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(16, 20, 28)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                BorderThickness = new Thickness(0, 0, 1, 1),
+                Child = new TextBlock
+                {
+                    Text = "WORK AREA",
+                    FontSize = 9,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(115, 132, 158)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(10, 0, 0, 0)
+                }
+            };
+            Grid.SetRow(workAreaLabel, 0);
+            Grid.SetColumn(workAreaLabel, 0);
+            bodyGrid.Children.Add(workAreaLabel);
+
+            var workAreaBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(16, 20, 28)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 66)),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                ClipToBounds = true
+            };
+            _timelineWorkAreaScroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden
+            };
+            _timelineWorkAreaCanvas = new Canvas
+            {
+                Height = 22,
+                Width = 1200,
+                Background = Brushes.Transparent,
+                Cursor = Cursors.Arrow
+            };
+            _timelineWorkAreaCanvas.PreviewMouseLeftButtonDown += HandleTimelineWorkAreaMouseDown;
+            _timelineWorkAreaCanvas.PreviewMouseMove += HandleTimelineWorkAreaMouseMove;
+            _timelineWorkAreaCanvas.PreviewMouseLeftButtonUp += HandleTimelineWorkAreaMouseUp;
+            _timelineWorkAreaCanvas.MouseLeave += (s, e) =>
+            {
+                if (_timelineWorkAreaDragMode == TimelineWorkAreaDragMode.None) _timelineWorkAreaCanvas.Cursor = Cursors.Arrow;
+            };
+            _timelineWorkAreaScroll.Content = _timelineWorkAreaCanvas;
+            workAreaBorder.Child = _timelineWorkAreaScroll;
+            Grid.SetRow(workAreaBorder, 0);
+            Grid.SetColumn(workAreaBorder, 1);
+            bodyGrid.Children.Add(workAreaBorder);
 
             // Left: Track Headers Stack (clean track list, no graph editor)
             var leftTrackBorder = new Border
@@ -16701,7 +18448,7 @@ namespace Kerf.UI
             _timelineTracksStack = new StackPanel { Margin = new Thickness(0) };
             trackScroll.Content = _timelineTracksStack;
             leftTrackBorder.Child = trackScroll;
-            Grid.SetRow(leftTrackBorder, 0);
+            Grid.SetRow(leftTrackBorder, 1);
             Grid.SetColumn(leftTrackBorder, 0);
             bodyGrid.Children.Add(leftTrackBorder);
 
@@ -16732,7 +18479,7 @@ namespace Kerf.UI
             timelineCanvasScroll.Content = _timelineCanvasHost;
 
             rightCanvasBorder.Child = timelineCanvasScroll;
-            Grid.SetRow(rightCanvasBorder, 0);
+            Grid.SetRow(rightCanvasBorder, 1);
             Grid.SetColumn(rightCanvasBorder, 1);
             bodyGrid.Children.Add(rightCanvasBorder);
 
@@ -16744,6 +18491,12 @@ namespace Kerf.UI
             timelineCanvasScroll.ScrollChanged += (s, e) =>
             {
                 if (e.VerticalChange != 0) trackScroll.ScrollToVerticalOffset(timelineCanvasScroll.VerticalOffset);
+                if (e.HorizontalChange != 0 && _timelineWorkAreaScroll != null)
+                    _timelineWorkAreaScroll.ScrollToHorizontalOffset(timelineCanvasScroll.HorizontalOffset);
+            };
+            _timelineWorkAreaScroll.ScrollChanged += (s, e) =>
+            {
+                if (e.HorizontalChange != 0) timelineCanvasScroll.ScrollToHorizontalOffset(_timelineWorkAreaScroll.HorizontalOffset);
             };
 
             _timelineTracksContainer = bodyGrid;
@@ -16776,6 +18529,7 @@ namespace Kerf.UI
             var transportGrid = new Grid();
             transportGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
             transportGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
+            transportGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(_isStateMachineMode ? 0 : 32) });
 
             // Left: Transport Buttons
             var leftStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -17003,8 +18757,247 @@ namespace Kerf.UI
             Grid.SetRow(rightStack, 1);
             transportGrid.Children.Add(rightStack);
 
+            _timelineWorkAreaBar = CreateTimelineWorkAreaBar();
+            Grid.SetRow(_timelineWorkAreaBar, 2);
+            transportGrid.Children.Add(_timelineWorkAreaBar);
+
             border.Child = transportGrid;
             return border;
+        }
+
+        private FrameworkElement CreateTimelineWorkAreaBar()
+        {
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Visibility = _isStateMachineMode ? Visibility.Collapsed : Visibility.Visible
+            };
+            stack.Children.Add(new TextBlock
+            {
+                Text = "Work area",
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = KerfBrand.MintBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
+            });
+            _timelineWorkAreaStartBox = KerfBrand.CreateDarkRoundedTextBox("0.000", 68, 25, 5);
+            _timelineWorkAreaStartBox.ToolTip = "Work area start time in seconds";
+            _timelineWorkAreaEndBox = KerfBrand.CreateDarkRoundedTextBox("2.000", 68, 25, 5);
+            _timelineWorkAreaEndBox.ToolTip = "Work area end time in seconds";
+            _timelineWorkAreaStartBox.Margin = new Thickness(0, 0, 5, 0);
+            _timelineWorkAreaEndBox.Margin = new Thickness(0, 0, 8, 0);
+            _timelineWorkAreaStartBox.LostKeyboardFocus += (s, e) => CommitTimelineWorkAreaFields();
+            _timelineWorkAreaEndBox.LostKeyboardFocus += (s, e) => CommitTimelineWorkAreaFields();
+            _timelineWorkAreaStartBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { CommitTimelineWorkAreaFields(); Keyboard.ClearFocus(); } };
+            _timelineWorkAreaEndBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { CommitTimelineWorkAreaFields(); Keyboard.ClearFocus(); } };
+            stack.Children.Add(_timelineWorkAreaStartBox);
+            stack.Children.Add(new TextBlock { Text = "to", Foreground = KerfBrand.TextMutedBrush, FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
+            stack.Children.Add(_timelineWorkAreaEndBox);
+            stack.Children.Add(CreateSmallTimelineButton("Use selected keys", SetTimelineWorkAreaFromSelection));
+            stack.Children.Add(CreateSmallTimelineButton("Offset keys to start", OffsetSelectedKeysToWorkAreaStart));
+            stack.Children.Add(CreateSmallTimelineButton("Reset", ResetTimelineWorkArea));
+            return stack;
+        }
+
+        private void CommitTimelineWorkAreaFields()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null) return;
+            double start;
+            double end;
+            if (_timelineWorkAreaStartBox == null || _timelineWorkAreaEndBox == null ||
+                !double.TryParse(_timelineWorkAreaStartBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out start) ||
+                !double.TryParse(_timelineWorkAreaEndBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out end)) return;
+            SetTimelineWorkArea(start, end);
+        }
+
+        private void SetTimelineWorkArea(double start, double end)
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null) return;
+            var clip = _timelineController.ActiveClip;
+            double duration = Math.Max(0.001, clip.Duration);
+            start = Math.Max(0.0, Math.Min(Math.Max(0.0, duration - 0.001), start));
+            end = Math.Max(start + 0.001, Math.Min(duration, end));
+            double beforeStart = clip.GetNormalizedWorkAreaStart();
+            double beforeEnd = clip.GetNormalizedWorkAreaEnd();
+            if (Math.Abs(beforeStart - start) < 0.0001 && Math.Abs(beforeEnd - end) < 0.0001)
+            {
+                UpdateTimelineWorkAreaFields();
+                return;
+            }
+            Action onChanged = () =>
+            {
+                if (_timelineController != null)
+                    _timelineController.Seek(Math.Max(_timelineController.WorkAreaStart, Math.Min(_timelineController.WorkAreaEnd, _timelineController.CurrentTime)));
+                RefreshTimelineUI();
+            };
+            var command = new AnimationClipWorkAreaCommand(clip, start, end, onChanged);
+            if (History != null) History.Execute(command);
+            else command.Execute();
+        }
+
+        private void SetTimelineWorkAreaFromSelection()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null || _selectedTimelineKeyframes.Count == 0) return;
+            double fps = Math.Max(1.0, _timelineController.Fps);
+            double start = _selectedTimelineKeyframes.Min(key => key.Time);
+            double end = Math.Min(_timelineController.Duration, _selectedTimelineKeyframes.Max(key => key.Time) + 1.0 / fps);
+            if (end <= start) end = Math.Min(_timelineController.Duration, start + 1.0 / fps);
+            SetTimelineWorkArea(start, end);
+        }
+
+        private void ResetTimelineWorkArea()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null) return;
+            SetTimelineWorkArea(0.0, _timelineController.Duration);
+        }
+
+        private void OffsetSelectedKeysToWorkAreaStart()
+        {
+            if (_selectedTimelineKeyframes.Count == 0 || _timelineController == null) return;
+            double minTime = _selectedTimelineKeyframes.Min(key => key.Time);
+            double delta = _timelineController.WorkAreaStart - minTime;
+            double frameDuration = 1.0 / Math.Max(1.0, _timelineController.Fps);
+            int frames = (int)Math.Round(delta / frameDuration);
+            OffsetSelectedTimelineKeyframes(frames);
+        }
+
+        private void UpdateTimelineWorkAreaFields()
+        {
+            if (_timelineController == null || _timelineController.ActiveClip == null) return;
+            if (_timelineWorkAreaStartBox != null && !_timelineWorkAreaStartBox.IsKeyboardFocusWithin)
+                _timelineWorkAreaStartBox.Text = _timelineController.WorkAreaStart.ToString("0.000", CultureInfo.InvariantCulture);
+            if (_timelineWorkAreaEndBox != null && !_timelineWorkAreaEndBox.IsKeyboardFocusWithin)
+                _timelineWorkAreaEndBox.Text = _timelineController.WorkAreaEnd.ToString("0.000", CultureInfo.InvariantCulture);
+        }
+
+        private TimelineWorkAreaDragMode GetTimelineWorkAreaDragMode(Point point)
+        {
+            if (_timelineWorkAreaCanvas == null || _timelineController == null || _timelineController.ActiveClip == null || _isStateMachineMode || point.Y < 0 || point.Y > 22)
+                return TimelineWorkAreaDragMode.None;
+            double startX = _timelineController.WorkAreaStart * _timelinePixelsPerSecond;
+            double endX = _timelineController.WorkAreaEnd * _timelinePixelsPerSecond;
+            const double hitRadius = 8.0;
+            if (Math.Abs(point.X - startX) <= hitRadius) return TimelineWorkAreaDragMode.Start;
+            if (Math.Abs(point.X - endX) <= hitRadius) return TimelineWorkAreaDragMode.End;
+            if (point.X > startX + hitRadius && point.X < endX - hitRadius)
+                return TimelineWorkAreaDragMode.Range;
+            return TimelineWorkAreaDragMode.None;
+        }
+
+        private bool BeginTimelineWorkAreaDrag(Point point)
+        {
+            var mode = GetTimelineWorkAreaDragMode(point);
+            if (mode == TimelineWorkAreaDragMode.None) return false;
+            _timelineWorkAreaDragMode = mode;
+            _timelineWorkAreaDragOrigin = point;
+            _timelineWorkAreaDragStart = _timelineController.WorkAreaStart;
+            _timelineWorkAreaDragEnd = _timelineController.WorkAreaEnd;
+            _timelineWorkAreaDragMoved = false;
+            _timelineWorkAreaCanvas.Cursor = mode == TimelineWorkAreaDragMode.Range ? Cursors.SizeAll : Cursors.SizeWE;
+            _timelineWorkAreaCanvas.CaptureMouse();
+            return true;
+        }
+
+        private void UpdateTimelineWorkAreaDrag(Point point)
+        {
+            if (_timelineWorkAreaDragMode == TimelineWorkAreaDragMode.None || _timelineController == null || _timelineController.ActiveClip == null) return;
+            Vector drag = point - _timelineWorkAreaDragOrigin;
+            if (!_timelineWorkAreaDragMoved && drag.Length < 3.0) return;
+            _timelineWorkAreaDragMoved = true;
+
+            var clip = _timelineController.ActiveClip;
+            double duration = Math.Max(0.001, clip.Duration);
+            double fps = Math.Max(1.0, _timelineController.Fps);
+            double minSpan = Math.Min(1.0 / fps, duration);
+            double delta = drag.X / Math.Max(1.0, _timelinePixelsPerSecond);
+            bool precise = Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt);
+            double start = _timelineWorkAreaDragStart;
+            double end = _timelineWorkAreaDragEnd;
+
+            if (_timelineWorkAreaDragMode == TimelineWorkAreaDragMode.Start)
+            {
+                double nextStart = Math.Max(0.0, Math.Min(_timelineWorkAreaDragEnd - minSpan, _timelineWorkAreaDragStart + delta));
+                start = precise ? nextStart : _timelineController.SnapTime(nextStart);
+                start = Math.Max(0.0, Math.Min(_timelineWorkAreaDragEnd - minSpan, start));
+            }
+            else if (_timelineWorkAreaDragMode == TimelineWorkAreaDragMode.End)
+            {
+                double nextEnd = Math.Max(_timelineWorkAreaDragStart + minSpan, Math.Min(duration, _timelineWorkAreaDragEnd + delta));
+                end = precise ? nextEnd : _timelineController.SnapTime(nextEnd);
+                end = Math.Max(_timelineWorkAreaDragStart + minSpan, Math.Min(duration, end));
+            }
+            else
+            {
+                double span = _timelineWorkAreaDragEnd - _timelineWorkAreaDragStart;
+                double nextStart = Math.Max(0.0, Math.Min(duration - span, _timelineWorkAreaDragStart + delta));
+                start = precise ? nextStart : _timelineController.SnapTime(nextStart);
+                start = Math.Max(0.0, Math.Min(duration - span, start));
+                end = start + span;
+            }
+
+            clip.WorkAreaStart = start;
+            clip.WorkAreaEnd = end;
+            _timelineController.Seek(Math.Max(start, Math.Min(end, _timelineController.CurrentTime)));
+            UpdateTimelineWorkAreaFields();
+            RefreshTimelineCanvas();
+        }
+
+        private void EndTimelineWorkAreaDrag()
+        {
+            if (_timelineWorkAreaDragMode == TimelineWorkAreaDragMode.None) return;
+            var mode = _timelineWorkAreaDragMode;
+            double start = _timelineController != null && _timelineController.ActiveClip != null
+                ? _timelineController.ActiveClip.WorkAreaStart
+                : _timelineWorkAreaDragStart;
+            double end = _timelineController != null && _timelineController.ActiveClip != null
+                ? _timelineController.ActiveClip.WorkAreaEnd
+                : _timelineWorkAreaDragEnd;
+            if (_timelineController != null && _timelineController.ActiveClip != null)
+            {
+                _timelineController.ActiveClip.WorkAreaStart = _timelineWorkAreaDragStart;
+                _timelineController.ActiveClip.WorkAreaEnd = _timelineWorkAreaDragEnd;
+            }
+            _timelineWorkAreaDragMode = TimelineWorkAreaDragMode.None;
+            _timelineWorkAreaDragMoved = false;
+            if (_timelineWorkAreaCanvas != null && _timelineWorkAreaCanvas.IsMouseCaptured) _timelineWorkAreaCanvas.ReleaseMouseCapture();
+            if (_timelineWorkAreaCanvas != null) _timelineWorkAreaCanvas.Cursor = Cursors.Arrow;
+            if (mode != TimelineWorkAreaDragMode.None && (start != _timelineWorkAreaDragStart || end != _timelineWorkAreaDragEnd))
+                SetTimelineWorkArea(start, end);
+            else
+            {
+                UpdateTimelineWorkAreaFields();
+                RefreshTimelineCanvas();
+            }
+        }
+
+        private void HandleTimelineWorkAreaMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton != MouseButton.Left || _timelineWorkAreaCanvas == null) return;
+            if (BeginTimelineWorkAreaDrag(e.GetPosition(_timelineWorkAreaCanvas))) e.Handled = true;
+        }
+
+        private void HandleTimelineWorkAreaMouseMove(object sender, MouseEventArgs e)
+        {
+            if (_timelineWorkAreaCanvas == null) return;
+            Point point = e.GetPosition(_timelineWorkAreaCanvas);
+            if (_timelineWorkAreaDragMode != TimelineWorkAreaDragMode.None)
+            {
+                UpdateTimelineWorkAreaDrag(point);
+                return;
+            }
+            var hoverMode = GetTimelineWorkAreaDragMode(point);
+            _timelineWorkAreaCanvas.Cursor = hoverMode == TimelineWorkAreaDragMode.Range
+                ? Cursors.SizeAll
+                : hoverMode == TimelineWorkAreaDragMode.None ? Cursors.Arrow : Cursors.SizeWE;
+        }
+
+        private void HandleTimelineWorkAreaMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton != MouseButton.Left || _timelineWorkAreaDragMode == TimelineWorkAreaDragMode.None) return;
+            EndTimelineWorkAreaDrag();
+            e.Handled = true;
         }
 
         private Border CreateSmallTimelineButton(string text, Action onClick)
@@ -17901,7 +19894,10 @@ namespace Kerf.UI
                 mode = key.Interp;
                 x1 = key.X1; y1 = key.Y1; x2 = key.X2; y2 = key.Y2;
                 hasTarget = true;
-                if (caption != null) caption.Text = string.Format("{0} · {1:0.00}s", _editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Key", key.Time);
+                string trackName = _editingInterpolationTrack != null && !string.IsNullOrEmpty(_editingInterpolationTrack.PropertyPath)
+                    ? _editingInterpolationTrack.PropertyPath
+                    : (_editingInterpolationTrack != null ? ((PropKey)_editingInterpolationTrack.Prop).ToString() : "Key");
+                if (caption != null) caption.Text = string.Format("{0} · {1:0.00}s", trackName, key.Time);
             }
             else if (caption != null)
             {
@@ -18600,7 +20596,7 @@ namespace Kerf.UI
                     search.Foreground = new SolidColorBrush(Color.FromRgb(118, 130, 149));
                 }
             };
-            var list = new ScrollViewer { Height = 83, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = items };
+            var list = new ScrollViewer { Height = string.Equals(title, "Listeners", StringComparison.OrdinalIgnoreCase) ? 260 : 83, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = items };
             content.Children.Add(list);
             toggle.MouseLeftButtonUp += (s, e) =>
             {
@@ -18720,6 +20716,34 @@ namespace Kerf.UI
                 if (History != null) History.Execute(cmd);
                 else cmd.Execute();
             }, null, null, purpleBrush));
+
+            menu.Items.Add(CreateContextMenuItem("▰  Folder", () =>
+            {
+                int count = (sm.Definition.Inputs != null ? sm.Definition.Inputs.Count : 0) + 1;
+                var folder = MachineInput.Folder("Folder" + count);
+                var cmd = new CreateInputCommand(sm.Definition, folder, () =>
+                {
+                    BuildStateMachineInputsControls();
+                    RefreshStateMachineInspector();
+                    RefreshStateMachineValidationBadge();
+                });
+                if (History != null) History.Execute(cmd);
+                else cmd.Execute();
+            }, null, null, KerfBrand.TextMutedBrush));
+
+            menu.Items.Add(CreateContextMenuItem("▰  Folder", () =>
+            {
+                int count = (sm.Definition.Inputs != null ? sm.Definition.Inputs.Count : 0) + 1;
+                var folder = MachineInput.Folder("Folder" + count);
+                var cmd = new CreateInputCommand(sm.Definition, folder, () =>
+                {
+                    BuildStateMachineInputsControls();
+                    RefreshStateMachineInspector();
+                    RefreshStateMachineValidationBadge();
+                });
+                if (History != null) History.Execute(cmd);
+                else cmd.Execute();
+            }, null, null, KerfBrand.TextMutedBrush));
 
             menu.PlacementTarget = anchor;
             menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
@@ -18949,9 +20973,18 @@ namespace Kerf.UI
                         if (selItem != null && selItem.Tag is LoopMode)
                         {
                             var mode = (LoopMode)selItem.Tag;
-                            state.LoopMode = mode;
-                            state.Loop = (mode != LoopMode.OneShot);
-                            if (History != null) History.MarkDirty();
+                            if (state.LoopMode == mode) return;
+                            var before = new StateSnapshot(state);
+                            var after = before.Clone();
+                            after.LoopMode = mode;
+                            after.Loop = mode != LoopMode.OneShot;
+                            var command = new ModifyStateNodeCommand(state, before, after, () =>
+                            {
+                                if (History != null) History.MarkDirty();
+                                RefreshStateMachineInspector();
+                                BuildStateMachineStatesGraph();
+                            });
+                            if (History != null) History.Execute(command); else command.Execute();
                         }
                     };
                     sp.Children.Add(CreateTransitionFormRow("Playback", loopCombo));
@@ -19355,7 +21388,7 @@ namespace Kerf.UI
                             for (int i = 0; i < sm.Definition.Inputs.Count; i++)
                             {
                                 var inp = sm.Definition.Inputs[i];
-                                if (inp == null) continue;
+                                if (inp == null || inp.Kind == InputKind.Folder) continue;
                                 string prefix = (inp.Kind == InputKind.Trigger) ? "⚡ " : (inp.Kind == InputKind.Bool ? "⏻ " : "🎚 ");
                                 var item = new ComboBoxItem { Content = prefix + inp.Name, Tag = inp.InputId };
                                 inBox.Items.Add(item);
@@ -19372,8 +21405,9 @@ namespace Kerf.UI
                         else if (inBox.Items.Count > 0)
                         {
                             inBox.SelectedIndex = 0;
-                            if (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0)
-                                activeInput = sm.Definition.Inputs[0];
+                            var firstInputItem = inBox.Items[0] as ComboBoxItem;
+                            if (firstInputItem != null && firstInputItem.Tag is string && sm.Definition != null)
+                                activeInput = sm.Definition.FindInputById((string)firstInputItem.Tag);
                         }
 
                         inBox.SelectionChanged += (s, e) =>
@@ -19575,7 +21609,8 @@ namespace Kerf.UI
                         var newGroups = CloneConditionGroups(trans.ConditionGroups);
                         if (groupIndex < newGroups.Count)
                         {
-                            var firstInput = (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0) ? sm.Definition.Inputs[0] : null;
+                            var firstInput = sm.Definition != null && sm.Definition.Inputs != null
+                                ? sm.Definition.Inputs.FirstOrDefault(input => input != null && input.Kind != InputKind.Folder) : null;
                             string firstId = firstInput != null ? firstInput.InputId : null;
                             string firstName = firstInput != null ? firstInput.Name : null;
                             double defaultCondVal = (firstInput != null && firstInput.Kind == InputKind.Bool) ? 1.0 : 0.0;
@@ -19645,9 +21680,9 @@ namespace Kerf.UI
                     var oldGroups = CloneConditionGroups(trans.ConditionGroups);
                     var newGroups = CloneConditionGroups(trans.ConditionGroups);
                     var newGrp = new ConditionGroup();
-                    if (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Count > 0)
+                    if (sm.Definition != null && sm.Definition.Inputs != null && sm.Definition.Inputs.Any(input => input != null && input.Kind != InputKind.Folder))
                     {
-                        var firstInp = sm.Definition.Inputs[0];
+                        var firstInp = sm.Definition.Inputs.FirstOrDefault(input => input != null && input.Kind != InputKind.Folder);
                         double defaultCondVal = (firstInp != null && firstInp.Kind == InputKind.Bool) ? 1.0 : 0.0;
                         if (firstInp != null && firstInp.Kind == InputKind.Bool && layer != null && layer.Transitions != null)
                         {
@@ -20091,7 +22126,7 @@ namespace Kerf.UI
                 GraphX = posX,
                 GraphY = posY,
                 Speed = 1.0,
-                Loop = clip.LoopMode == LoopMode.Loop
+                LoopMode = clip.LoopMode
             };
 
             var cmd = new CreateStateNodeCommand(layer, newState, () =>
@@ -20174,11 +22209,13 @@ namespace Kerf.UI
 
             if (sm.Definition.Inputs != null)
             {
-                for (int i = 0; i < sm.Definition.Inputs.Count; i++)
+                var orderedInputs = sm.Definition.Inputs.Where(input => input != null)
+                    .OrderBy(input => input.Kind == InputKind.Folder ? 0 : 1).ToList();
+                for (int i = 0; i < orderedInputs.Count; i++)
                 {
-                    int inIdx = i;
-                    var input = sm.Definition.Inputs[i];
-                    if (input == null) continue;
+                    var input = orderedInputs[i];
+                    int inIdx = sm.Definition.Inputs.IndexOf(input);
+                    if (inIdx < 0) continue;
 
                     var card = new Border
                     {
@@ -20187,7 +22224,7 @@ namespace Kerf.UI
                         BorderThickness = new Thickness(1),
                         CornerRadius = new CornerRadius(5),
                         Padding = new Thickness(8, 6, 8, 6),
-                        Margin = new Thickness(0, 0, 0, 6)
+                        Margin = new Thickness(string.IsNullOrEmpty(input.ParentFolderId) ? 0 : 14, 0, 0, 6)
                     };
                     card.Tag = input.Name;
 
@@ -20237,7 +22274,20 @@ namespace Kerf.UI
                     // Badge on the left
                     Border badge;
                     TextBlock badgeText;
-                    if (input.Kind == InputKind.Trigger)
+                    if (input.Kind == InputKind.Folder)
+                    {
+                        badge = new Border
+                        {
+                            Background = new SolidColorBrush(Color.FromRgb(75, 85, 99)),
+                            CornerRadius = new CornerRadius(4),
+                            Padding = new Thickness(6, 2, 6, 2),
+                            Margin = new Thickness(0, 0, 6, 0),
+                            ToolTip = "Folder for organizing state machine inputs"
+                        };
+                        badgeText = new TextBlock { Text = "▰", FontSize = 10, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
+                        badge.Child = badgeText;
+                    }
+                    else if (input.Kind == InputKind.Trigger)
                     {
                         badge = new Border
                         {
@@ -20253,7 +22303,6 @@ namespace Kerf.UI
                         badge.MouseLeftButtonUp += (s, e) =>
                         {
                             sm.FireTrigger(inIdx);
-                            if (!string.IsNullOrEmpty(input.InputId)) sm.FireTrigger(input.InputId);
                             TriggerStateMachineStep(continuePlayback: true);
                         };
                     }
@@ -20338,6 +22387,51 @@ namespace Kerf.UI
                     };
                     headerDock.Children.Add(nameBox);
                     cardStack.Children.Add(headerDock);
+
+                    if (input.Kind != InputKind.Folder)
+                    {
+                        var folderRow = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
+                        var folderLabel = new TextBlock
+                        {
+                            Text = "Folder",
+                            Width = 46,
+                            FontSize = 10,
+                            Foreground = KerfBrand.TextMutedBrush,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        DockPanel.SetDock(folderLabel, Dock.Left);
+                        folderRow.Children.Add(folderLabel);
+                        var folderCombo = CreateModernComboBox(21);
+                        folderCombo.Items.Add(CreateModernComboBoxItem("No folder", string.Empty));
+                        int selectedFolderIndex = 0;
+                        for (int fi = 0; fi < sm.Definition.Inputs.Count; fi++)
+                        {
+                            var folder = sm.Definition.Inputs[fi];
+                            if (folder == null || folder.Kind != InputKind.Folder || folder.InputId == input.InputId) continue;
+                            folderCombo.Items.Add(CreateModernComboBoxItem(folder.Name, folder.InputId));
+                            if (string.Equals(folder.InputId, input.ParentFolderId, StringComparison.OrdinalIgnoreCase))
+                                selectedFolderIndex = folderCombo.Items.Count - 1;
+                        }
+                        folderCombo.SelectedIndex = selectedFolderIndex;
+                        folderCombo.SelectionChanged += (s, e) =>
+                        {
+                            var selectedFolder = folderCombo.SelectedItem as ComboBoxItem;
+                            string folderId = selectedFolder != null ? (selectedFolder.Tag as string) : string.Empty;
+                            folderId = folderId ?? string.Empty;
+                            if (!string.Equals(input.ParentFolderId ?? string.Empty, folderId, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var moveCmd = new ModifyInputFolderCommand(input, input.ParentFolderId, folderId, () =>
+                                {
+                                    BuildStateMachineInputsControls();
+                                    RefreshStateMachineInspector();
+                                });
+                                if (History != null) History.Execute(moveCmd);
+                                else moveCmd.Execute();
+                            }
+                        };
+                        folderRow.Children.Add(folderCombo);
+                        cardStack.Children.Add(folderRow);
+                    }
 
                     // Row 1: Default / Initial / Live Controls
                     if (input.Kind == InputKind.Bool)
@@ -20554,367 +22648,60 @@ namespace Kerf.UI
             dialog.ShowDialog();
         }
 
+        private string GetNextListenerName(StateMachineDefinition definition)
+        {
+            int suffix = 1;
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (definition != null && definition.Listeners != null)
+            {
+                for (int i = 0; i < definition.Listeners.Count; i++)
+                {
+                    var listener = definition.Listeners[i];
+                    if (listener != null && !string.IsNullOrWhiteSpace(listener.Name)) existing.Add(listener.Name.Trim());
+                }
+            }
+            while (existing.Contains("Listener" + suffix)) suffix++;
+            return "Listener" + suffix;
+        }
+
         private void ShowAddStateMachineListenerDialog()
         {
             if (_timelineController == null) EnsureTimelineControllerInitialized();
             var sm = EnsureStateMachineRuntime();
             if (sm == null || sm.Definition == null) return;
-            if (Document == null) return;
 
-            var page = Document.GetActivePage();
-            var layers = page != null ? page.GetAllLayersFlat().Where(l => l != null).ToList() : new List<LayerNode>();
-
-            if (sm.Definition.Inputs == null) sm.Definition.Inputs = new List<MachineInput>();
-            if (sm.Definition.Inputs.Count == 0)
+            var targetLayer = _selectedLayers != null ? _selectedLayers.FirstOrDefault(layer => layer != null) : null;
+            var listener = new NodeListener(targetLayer != null ? PropertyBinder.GetNumericNodeId(targetLayer.Id) : 0u, PointerEventKind.None);
+            listener.Name = GetNextListenerName(sm.Definition);
+            listener.TargetLayerId = targetLayer != null ? targetLayer.Id : string.Empty;
+            var addCmd = new AddListenerCommand(sm.Definition, listener, () =>
             {
-                sm.Definition.AddInput(MachineInput.Bool("isHovered", false));
-                BuildStateMachineInputsControls();
-            }
-
-            var dialog = new Window
-            {
-                Title = "Add Pointer Listener",
-                Width = 400,
-                Height = 420,
-                ResizeMode = ResizeMode.NoResize,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = KerfBrand.FigmaPanelBrush,
-                Foreground = Brushes.White
-            };
-            dialog.Resources[typeof(TextBox)] = KerfBrand.CreateDarkTextBoxStyle(6);
-            dialog.Resources[typeof(ComboBox)] = KerfBrand.CreateDarkComboBoxStyle(6);
-            var owner = Window.GetWindow(this);
-            if (owner != null) dialog.Owner = owner;
-
-            var form = new StackPanel { Margin = new Thickness(18) };
-
-            // 1. Target (Canvas or Layer)
-            var targetBox = CreateModernComboBox(30);
-            targetBox.Items.Add(new ComboBoxItem { Content = "(Artboard / Entire Canvas)", Tag = 0u });
-            uint selectedNodeId = 0u;
-            if (_selectedLayers != null && _selectedLayers.Count > 0 && _selectedLayers[0] != null)
-            {
-                selectedNodeId = PropertyBinder.GetNumericNodeId(_selectedLayers[0].Id);
-            }
-            int targetIdxToSelect = 0;
-            for (int li = 0; li < layers.Count; li++)
-            {
-                var layer = layers[li];
-                uint nid = PropertyBinder.GetNumericNodeId(layer.Id);
-                var cbi = new ComboBoxItem { Content = layer.Name, Tag = nid };
-                targetBox.Items.Add(cbi);
-                if (selectedNodeId != 0u && nid == selectedNodeId)
-                {
-                    targetIdxToSelect = targetBox.Items.Count - 1;
-                }
-            }
-            if (targetIdxToSelect == 0 && layers.Count > 0 && selectedNodeId == 0u)
-            {
-                targetIdxToSelect = 1;
-            }
-            targetBox.SelectedIndex = targetIdxToSelect;
-            form.Children.Add(CreateTransitionFormRow("Target", targetBox));
-
-            // 2. Event Kind
-            var eventBox = CreateModernComboBox(30);
-            eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Enter (Hover)", Tag = PointerEventKind.Enter });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Exit (Unhover)", Tag = PointerEventKind.Exit });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Down (Press)", Tag = PointerEventKind.Down });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Up (Release)", Tag = PointerEventKind.Up });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Click", Tag = PointerEventKind.Click });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Tap", Tag = PointerEventKind.Tap });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Drag Start", Tag = PointerEventKind.DragStart });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Drag", Tag = PointerEventKind.Drag });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Drag End", Tag = PointerEventKind.DragEnd });
-            eventBox.Items.Add(new ComboBoxItem { Content = "Pointer Move", Tag = PointerEventKind.Move });
-            eventBox.SelectedIndex = 0;
-            form.Children.Add(CreateTransitionFormRow("Event", eventBox));
-
-            // 3. Target Input
-            var inputBox = CreateModernComboBox(30);
-            for (int i = 0; i < sm.Definition.Inputs.Count; i++)
-            {
-                var inp = sm.Definition.Inputs[i];
-                if (inp == null) continue;
-                string typeLabel = inp.Kind == InputKind.Bool ? "Bool" : (inp.Kind == InputKind.Number ? "Number" : "Trigger");
-                inputBox.Items.Add(new ComboBoxItem { Content = inp.Name + " (" + typeLabel + ")", Tag = inp });
-            }
-            if (inputBox.Items.Count > 0) inputBox.SelectedIndex = 0;
-            form.Children.Add(CreateTransitionFormRow("Input", inputBox));
-
-            // 4. Action Value Row (dynamic based on input kind)
-            var valueContainer = new StackPanel();
-            form.Children.Add(valueContainer);
-
-            var boolValBox = CreateModernComboBox(30);
-            boolValBox.Items.Add(new ComboBoxItem { Content = "Set True (1)", Tag = 1.0 });
-            boolValBox.Items.Add(new ComboBoxItem { Content = "Set False (0)", Tag = 0.0 });
-            boolValBox.Items.Add(new ComboBoxItem { Content = "Toggle (Flip)", Tag = -1.0 });
-            boolValBox.Items.Add(new ComboBoxItem { Content = "Reset to Default", Tag = -2.0 });
-            boolValBox.SelectedIndex = 0;
-
-            eventBox.SelectionChanged += (s, e) =>
-            {
-                var eventItem = eventBox.SelectedItem as ComboBoxItem;
-                if (eventItem != null && eventItem.Tag is PointerEventKind)
-                {
-                    var k = (PointerEventKind)eventItem.Tag;
-                    if (k == PointerEventKind.Exit || k == PointerEventKind.PointerExit)
-                    {
-                        if (boolValBox.Items.Count > 1) boolValBox.SelectedIndex = 1; // Set False
-                    }
-                    else if (k == PointerEventKind.Enter || k == PointerEventKind.PointerEnter)
-                    {
-                        if (boolValBox.Items.Count > 0) boolValBox.SelectedIndex = 0; // Set True
-                    }
-                }
-            };
-
-            var numActionBox = CreateModernComboBox(30);
-            numActionBox.Items.Add(new ComboBoxItem { Content = "Set Value", Tag = 0 });
-            numActionBox.Items.Add(new ComboBoxItem { Content = "Reset to Default", Tag = 1 });
-            numActionBox.SelectedIndex = 0;
-
-            var numValBox = new TextBox
-            {
-                Text = "1.0",
-                Height = 28
-            };
-            KerfBrand.ApplyDarkRoundedTextBoxStyle(numValBox, 6);
-
-            var triggerHelp = new TextBlock
-            {
-                Text = "⚡ Fires trigger impulse when event occurs",
-                FontSize = 10,
-                Foreground = KerfBrand.MintBrush,
-                Margin = new Thickness(0, 4, 0, 4)
-            };
-
-            Action updateValueRow = () =>
-            {
-                valueContainer.Children.Clear();
-                var selectedItem = inputBox.SelectedItem as ComboBoxItem;
-                var inp = selectedItem != null ? selectedItem.Tag as MachineInput : null;
-                if (inp == null || inp.Kind == InputKind.Bool)
-                {
-                    valueContainer.Children.Add(CreateTransitionFormRow("Action / Value", boolValBox));
-                }
-                else if (inp.Kind == InputKind.Number)
-                {
-                    valueContainer.Children.Add(CreateTransitionFormRow("Action", numActionBox));
-                    if (numActionBox.SelectedIndex == 0)
-                    {
-                        valueContainer.Children.Add(CreateTransitionFormRow("Value", numValBox));
-                    }
-                }
-                else if (inp.Kind == InputKind.Trigger)
-                {
-                    valueContainer.Children.Add(triggerHelp);
-                }
-            };
-            numActionBox.SelectionChanged += (s, e) => updateValueRow();
-            inputBox.SelectionChanged += (s, e) => updateValueRow();
-            updateValueRow();
-
-            form.Children.Add(new TextBlock
-            {
-                Text = "💡 Listener reacts to pointer interaction on the target and sets the input.",
-                FontSize = 9.5,
-                Foreground = KerfBrand.TextMutedBrush,
-                Margin = new Thickness(0, 10, 0, 4)
+                BuildStateMachineListeners();
+                RefreshPropertyInspector();
+                RefreshCanvas();
             });
-
-            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
-            var cancel = KerfBrand.CreateSecondaryButton("Cancel", () => dialog.Close(), 6);
-            cancel.Width = 72;
-            cancel.Height = 26;
-            cancel.Padding = new Thickness(0);
-
-            var create = KerfBrand.CreatePrimaryButton("Create", () =>
-            {
-                var targetItem = targetBox.SelectedItem as ComboBoxItem;
-                var eventItem = eventBox.SelectedItem as ComboBoxItem;
-                var inputItem = inputBox.SelectedItem as ComboBoxItem;
-                if (eventItem == null || inputItem == null) return;
-
-                uint targetId = targetItem != null && targetItem.Tag is uint ? (uint)targetItem.Tag : 0u;
-                var kind = (PointerEventKind)eventItem.Tag;
-                var inp = inputItem.Tag as MachineInput;
-                if (inp == null) return;
-                int inputIdx = sm.Definition.Inputs.IndexOf(inp);
-
-                var listener = new NodeListener(targetId, kind);
-                ListenerAction action;
-                if (inp.Kind == InputKind.Bool)
-                {
-                    var bvItem = boolValBox.SelectedItem as ComboBoxItem;
-                    double bv = bvItem != null && bvItem.Tag is double ? (double)bvItem.Tag : 1.0;
-                    if (bv == -1.0)
-                        action = new ListenerAction(ActionKind.ToggleBool, inputIdx, 0.0);
-                    else if (bv == -2.0)
-                        action = new ListenerAction(ActionKind.Reset, inputIdx, 0.0);
-                    else
-                        action = new ListenerAction(ActionKind.SetBool, inputIdx, bv);
-                }
-                else if (inp.Kind == InputKind.Number)
-                {
-                    var naItem = numActionBox.SelectedItem as ComboBoxItem;
-                    int na = naItem != null && naItem.Tag is int ? (int)naItem.Tag : 0;
-                    if (na == 1)
-                    {
-                        action = new ListenerAction(ActionKind.Reset, inputIdx, 0.0);
-                    }
-                    else
-                    {
-                        double nv;
-                        if (!double.TryParse(numValBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out nv)) nv = 1.0;
-                        action = new ListenerAction(ActionKind.SetNumber, inputIdx, nv);
-                    }
-                }
-                else // Trigger
-                {
-                    action = new ListenerAction(ActionKind.Fire, inputIdx, 0.0);
-                }
-                action.InputId = inp.InputId;
-                action.PropertyName = inp.Name;
-                listener.Actions.Add(action);
-
-                if (sm.Definition.Listeners == null) sm.Definition.Listeners = new List<NodeListener>();
-                var addCmd = new AddListenerCommand(sm.Definition, listener, () =>
-                {
-                    BuildStateMachineListeners();
-                    RefreshCanvas();
-                });
-                if (History != null) History.Execute(addCmd);
-                else addCmd.Execute();
-                dialog.Close();
-            }, 6);
-            create.Width = 78;
-            create.Height = 26;
-            create.Padding = new Thickness(0);
-            create.Margin = new Thickness(8, 0, 0, 0);
-
-            buttons.Children.Add(cancel);
-            buttons.Children.Add(create);
-            form.Children.Add(buttons);
-
-            dialog.Content = form;
-            dialog.ShowDialog();
+            if (History != null) History.Execute(addCmd);
+            else addCmd.Execute();
         }
-
         private void BuildStateMachineListeners()
         {
             if (_stateMachineListenersStack == null) return;
             _stateMachineListenersStack.Children.Clear();
             var sm = _timelineController != null ? _timelineController.ActiveStateMachine : null;
-            if (sm == null || sm.Definition == null || sm.Definition.Listeners == null) return;
-            var page = Document != null ? Document.GetActivePage() : null;
-            var allLayers = page != null ? page.GetAllLayersFlat() : new List<LayerNode>();
+            if (sm == null || sm.Definition == null) return;
+            if (sm.Definition.Listeners == null) sm.Definition.Listeners = new List<NodeListener>();
 
             foreach (var listener in sm.Definition.Listeners.ToList())
             {
                 if (listener == null) continue;
-                string targetName = "Canvas";
-                if (listener.TargetNodeId != 0)
-                {
-                    var layer = allLayers.FirstOrDefault(l => l != null && PropertyBinder.GetNumericNodeId(l.Id) == listener.TargetNodeId);
-                    if (layer != null) targetName = layer.Name;
-                    else targetName = "Node #" + listener.TargetNodeId;
-                }
-
-                string actionText = "action";
-                if (listener.Actions != null && listener.Actions.Count > 0 && listener.Actions[0] != null)
-                {
-                    var act = listener.Actions[0];
-                    string prop = !string.IsNullOrEmpty(act.PropertyName) ? act.PropertyName : ("Input #" + act.InputIndex);
-                    if (act.Kind == ActionKind.SetBool)
-                        actionText = prop + " = " + (act.Parameter > 0.5 ? "True" : "False");
-                    else if (act.Kind == ActionKind.ToggleBool)
-                        actionText = "Toggle " + prop;
-                    else if (act.Kind == ActionKind.SetNumber)
-                        actionText = prop + " = " + act.Parameter.ToString("0.##", CultureInfo.InvariantCulture);
-                    else if (act.Kind == ActionKind.Fire)
-                        actionText = "Fire " + prop;
-                    else if (act.Kind == ActionKind.Reset)
-                        actionText = "Reset " + prop;
-                    else
-                        actionText = prop;
-                }
-
-                var chip = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromRgb(27, 32, 46)),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(48, 58, 80)),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(4),
-                    Padding = new Thickness(7, 5, 7, 5),
-                    Margin = new Thickness(0, 2, 0, 2),
-                    ToolTip = "Listener"
-                };
-                var chipGrid = new DockPanel { LastChildFill = true };
-
-                var delBtn = new TextBlock
-                {
-                    Text = "×",
-                    FontSize = 13,
-                    Foreground = KerfBrand.TextMutedBrush,
-                    Cursor = Cursors.Hand,
-                    Margin = new Thickness(6, 0, 0, 0),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    ToolTip = "Delete listener"
-                };
-                delBtn.MouseEnter += (s, e) => delBtn.Foreground = new SolidColorBrush(Color.FromRgb(255, 107, 107));
-                delBtn.MouseLeave += (s, e) => delBtn.Foreground = KerfBrand.TextMutedBrush;
-                delBtn.MouseLeftButtonDown += (s, e) =>
-                {
-                    var delCmd = new DeleteListenerCommand(sm.Definition, listener, () =>
-                    {
-                        BuildStateMachineListeners();
-                        RefreshCanvas();
-                    });
-                    if (History != null) History.Execute(delCmd);
-                    else delCmd.Execute();
-                    e.Handled = true;
-                };
-                DockPanel.SetDock(delBtn, Dock.Right);
-                chipGrid.Children.Add(delBtn);
-
-                var enCheck = new CheckBox
-                {
-                    IsChecked = listener.Enabled,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 8, 0),
-                    ToolTip = "Enable or disable listener"
-                };
-                enCheck.Checked += (s, e) =>
-                {
-                    listener.Enabled = true;
-                    if (History != null) History.MarkDirty();
-                };
-                enCheck.Unchecked += (s, e) =>
-                {
-                    listener.Enabled = false;
-                    if (History != null) History.MarkDirty();
-                };
-                DockPanel.SetDock(enCheck, Dock.Left);
-                chipGrid.Children.Add(enCheck);
-
-                var lbl = new TextBlock
-                {
-                    Text = targetName + " · " + listener.Kind + " → " + actionText,
-                    FontSize = 9.5,
-                    Foreground = new SolidColorBrush(Color.FromRgb(165, 178, 201)),
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                chipGrid.Children.Add(lbl);
-                chip.Child = chipGrid;
-                chip.Tag = targetName + " " + listener.Kind + " " + actionText;
-                _stateMachineListenersStack.Children.Add(chip);
+                var card = BuildListenerCard(listener, sm.Definition);
+                card.Tag = string.IsNullOrWhiteSpace(listener.Name) ? "Listener" : listener.Name;
+                _stateMachineListenersStack.Children.Add(card);
             }
+
             if (_stateMachineListenerSearch != null)
                 FilterStateMachineItems(_stateMachineListenersStack, _stateMachineListenerSearch.Text);
         }
-
         private void ShowAddFocusDialog()
         {
             if (_timelineController == null) EnsureTimelineControllerInitialized();
@@ -21105,7 +22892,7 @@ namespace Kerf.UI
             foreach (var property in sm.Definition.ViewModelProperties ?? new List<ViewModelPropertyDefinition>())
                 if (property != null) conditionPicker.Items.Add(new ComboBoxItem { Content = property.Name, Tag = property });
             for (int i = 0; i < sm.Definition.Inputs.Count; i++)
-                if (sm.Definition.Inputs[i] != null) conditionPicker.Items.Add(new ComboBoxItem { Content = sm.Definition.Inputs[i].Name, Tag = i });
+                if (sm.Definition.Inputs[i] != null && sm.Definition.Inputs[i].Kind != InputKind.Folder) conditionPicker.Items.Add(new ComboBoxItem { Content = sm.Definition.Inputs[i].Name, Tag = i });
             conditionPicker.SelectedIndex = 0;
             form.Children.Add(CreateTransitionFormRow("When", conditionPicker));
 
@@ -21228,7 +23015,7 @@ namespace Kerf.UI
             foreach (var property in sm.Definition.ViewModelProperties ?? new List<ViewModelPropertyDefinition>())
                 if (property != null) conditionPicker.Items.Add(new ComboBoxItem { Content = property.Name, Tag = property });
             for (int i = 0; i < sm.Definition.Inputs.Count; i++)
-                if (sm.Definition.Inputs[i] != null) conditionPicker.Items.Add(new ComboBoxItem { Content = sm.Definition.Inputs[i].Name, Tag = i });
+                if (sm.Definition.Inputs[i] != null && sm.Definition.Inputs[i].Kind != InputKind.Folder) conditionPicker.Items.Add(new ComboBoxItem { Content = sm.Definition.Inputs[i].Name, Tag = i });
             var existingCondition = transition.Conditions != null ? transition.Conditions.FirstOrDefault() : null;
             if (existingCondition == null) conditionPicker.SelectedIndex = 0;
             else
@@ -22843,6 +24630,7 @@ namespace Kerf.UI
         {
             if (_timelineController == null) EnsureTimelineControllerInitialized();
             _isStateMachineMode = stateMachineMode;
+            UpdateTimelineTransportLayout();
             if (_timelineController != null) _timelineController.UseStateMachine = stateMachineMode;
             if (stateMachineMode)
             {
@@ -22869,6 +24657,15 @@ namespace Kerf.UI
             UpdateDefaultInterpolationFromSelection();
             UpdateTimelineModeTabs();
             if (_timelineController != null) _timelineController.Seek(_timelineController.CurrentTime);
+        }
+
+        private void UpdateTimelineTransportLayout()
+        {
+            if (_timelineTransportRow != null) _timelineTransportRow.Height = new GridLength(_isStateMachineMode ? 68 : 100);
+            if (_timelineWorkAreaBar != null) _timelineWorkAreaBar.Visibility = _isStateMachineMode ? Visibility.Collapsed : Visibility.Visible;
+            var transportGrid = _timelineWorkAreaBar != null ? _timelineWorkAreaBar.Parent as Grid : null;
+            if (transportGrid != null && transportGrid.RowDefinitions.Count > 2)
+                transportGrid.RowDefinitions[2].Height = new GridLength(_isStateMachineMode ? 0 : 32);
         }
 
         private void UpdateTimelineModeTabs()
@@ -23367,6 +25164,7 @@ namespace Kerf.UI
             _timelineController.LoopMode = clip.LoopMode;
             _timelineController.UseStateMachine = false;
             _isStateMachineMode = false;
+            UpdateTimelineTransportLayout();
             if (_timelineController.ActiveStateMachine != null && Document.Animation != null && Document.Animation.StateMachine != null)
                 _timelineController.ActiveStateMachine = new StateMachineRuntime(Document.Animation.StateMachine, Document.Animation.Clips);
             if (Document.Animation != null) Document.Animation.ActiveClipId = clip.Id;
@@ -23970,6 +25768,7 @@ namespace Kerf.UI
         {
             if (page == null) return;
             var layers = page.GetAllLayersFlat().ToList();
+            ConstraintsEngine.ForgetSolvedTransforms(layers);
             foreach (var layer in layers)
             {
                 uint id = PropertyBinder.GetNumericNodeId(layer.Id);
@@ -23986,6 +25785,7 @@ namespace Kerf.UI
                     layer.CornerRadiusBottomRight = rest.CornerRadiusBottomRight;
                     layer.CornerRadiusBottomLeft = rest.CornerRadiusBottomLeft;
                     layer.Opacity = rest.Opacity;
+                    if (rest.Geometry != null) layer.Geometry = rest.Geometry.Clone();
                 }
             }
 
@@ -23997,6 +25797,33 @@ namespace Kerf.UI
                     if (_animationNodesById.TryGetValue(item.Key, out layer))
                         PropertyBinder.ApplyPoseToLayer(layer, item.Key, pose);
                 }
+            }
+
+            // Listener-driven pointer alignment overlays the sampled state-machine pose and is
+            // clamped by any Distance constraint attached to the aligned object.
+            StateMachineRuntime stateMachine = _timelineController != null ? _timelineController.ActiveStateMachine : null;
+            if (stateMachine != null && stateMachine.PointerAlignmentTargets != null)
+            {
+                foreach (var target in stateMachine.PointerAlignmentTargets)
+                {
+                    LayerNode layer;
+                    if (!_animationNodesById.TryGetValue(target.Key, out layer) || layer == null || layer.Type == ElementType.Frame) continue;
+                    if (layer.RenderTransform == null) layer.RenderTransform = new RenderTransform();
+                    Point center = ConstraintsEngine.ClampPointerCenter(page, layer, target.Value);
+                    layer.RenderTransform.TranslationX = center.X - layer.X - layer.Width * 0.5;
+                    layer.RenderTransform.TranslationY = center.Y - layer.Y - layer.Height * 0.5;
+                }
+            }
+        }
+
+        private void ApplyAnimationGeometryPose(Kerf.Model.Page page, Dictionary<uint, VectorGeometry> geometryPose)
+        {
+            if (page == null || geometryPose == null || geometryPose.Count == 0) return;
+            foreach (var item in geometryPose)
+            {
+                LayerNode layer;
+                if (!_animationNodesById.TryGetValue(item.Key, out layer) || layer == null || layer.Type != ElementType.Path || item.Value == null) continue;
+                layer.Geometry = item.Value.Clone();
             }
         }
 
@@ -24084,6 +25911,16 @@ namespace Kerf.UI
                 if (page != null)
                 {
                     ApplyAnimationPose(page, pose);
+                    _sceneGraph.InvalidateAll();
+                    RefreshCanvas();
+                }
+            };
+            _timelineController.GeometryFrameUpdated += (s, geometryPose) =>
+            {
+                var page = Document != null ? Document.GetActivePage() : null;
+                if (page != null && geometryPose != null && geometryPose.Count > 0)
+                {
+                    ApplyAnimationGeometryPose(page, geometryPose);
                     _sceneGraph.InvalidateAll();
                     RefreshCanvas();
                 }
@@ -24181,7 +26018,7 @@ namespace Kerf.UI
             var sel = _selectedLayers.FirstOrDefault();
             if (sel == null)
             {
-                MessageBox.Show("Please select a layer on canvas or in the layers list to record animation keyframes.", "Kerf Studio - Animation", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show("Please select a layer on canvas or in the layers list to record animation keyframes.", "Kerf - Animation", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -24189,16 +26026,25 @@ namespace Kerf.UI
             uint nodeId = PropertyBinder.GetNumericNodeId(sel.Id);
 
             var existingTracks = clip.GetTracksForNode(nodeId);
+            if (sel.Type == ElementType.Frame && (existingTracks == null || existingTracks.Count == 0)) return;
+            bool openedHistoryBatch = History != null && !History.IsBatching;
+            if (openedHistoryBatch) History.BeginBatch("Keyframe Layer");
+            if (sel.Type == ElementType.Path && sel.Geometry != null)
+                RecordPathKeyframe(clip, sel, time, null);
+
             if (existingTracks != null && existingTracks.Count > 0)
             {
                 foreach (var tr in existingTracks)
                 {
+                    if (tr.Prop == (ushort)PropKey.Path || tr.Prop == (ushort)PropKey.PathNode) continue;
+                    if (sel.Type == ElementType.Frame && IsFrameTransformProperty((PropKey)tr.Prop)) continue;
                     double propVal = GetEvaluatedPropertyRaw(sel, tr.Prop);
                     AddOrUpdateTrackKeyframe(clip, nodeId, tr.Prop, time, propVal);
                 }
             }
             else
             {
+                if (sel.Type == ElementType.Frame) return;
                 // No tracks yet: key ScaleX and ScaleY (or Position if translated),
                 // without adding uninvited rotation or opacity presets.
                 double sx = sel.RenderTransform != null ? sel.RenderTransform.ScaleX : 1.0;
@@ -24212,14 +26058,335 @@ namespace Kerf.UI
             if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
             Document.Animation.ActiveClipId = clip.Id;
             _timelineController.UseStateMachine = false;
-            History.MarkDirty();
+            if (openedHistoryBatch) History.EndBatch();
 
             RefreshTimelineUI();
+        }
+
+        private FrameworkElement CreatePathKeyframeControl(LayerNode layer)
+        {
+            var button = new Button
+            {
+                Content = "◇ Keyframe Path",
+                Background = KerfBrand.FigmaCardBrush,
+                Foreground = KerfBrand.MintBrush,
+                BorderBrush = KerfBrand.MintBrush,
+                BorderThickness = new Thickness(1),
+                FontWeight = FontWeights.SemiBold,
+                FontSize = 11,
+                Height = 30,
+                Margin = new Thickness(0, 0, 0, 8),
+                Cursor = Cursors.Hand,
+                ToolTip = "Record or update the selected vector path at the current playhead time",
+                Template = CreateRoundedButtonTemplate(6)
+            };
+            button.Click += (s, e) => SetPathKeyframe(layer);
+            return button;
+        }
+
+        private void SetPathKeyframe(LayerNode layer)
+        {
+            if (layer == null || layer.Type != ElementType.Path || layer.Geometry == null) return;
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (_timelineController == null) return;
+
+            Clip clip = _timelineController.ActiveClip;
+            if (clip == null)
+            {
+                clip = new Clip(100, "Default Animation", _timelineController.Duration);
+                _timelineController.ActiveClip = clip;
+            }
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
+            Document.Animation.ActiveClipId = clip.Id;
+            _timelineController.UseStateMachine = false;
+
+            RecordPathKeyframe(clip, layer, _timelineController.CurrentTime, () =>
+            {
+                _sceneGraph.InvalidateNode(layer.Id);
+                RefreshCanvas();
+                RefreshTimelineUI();
+                RefreshPropertyInspector();
+            });
+            RefreshTimelineUI();
+            RefreshPropertyInspector();
+        }
+
+        private void RecordPathKeyframe(Clip clip, LayerNode layer, double time, Action onRender)
+        {
+            ExecuteAnimationCommands("Keyframe Path", BuildPathKeyframeCommands(clip, layer, time, layer != null ? layer.Geometry : null), onRender);
+        }
+
+        private List<Kerf.Engine.ICommand> BuildPathKeyframeCommands(Clip clip, LayerNode layer, double time, VectorGeometry geometry)
+        {
+            var commands = new List<Kerf.Engine.ICommand>();
+            if (clip == null || layer == null || layer.Type != ElementType.Path || geometry == null) return commands;
+            uint nodeId = PropertyBinder.GetNumericNodeId(layer.Id);
+            AnimTrack track = clip.GetTrack(nodeId, (ushort)PropKey.Path);
+            bool isNewTrack = track == null;
+            if (isNewTrack) track = new AnimTrack(nodeId, (ushort)PropKey.Path, layer.Id, "Path");
+
+            Keyframe keyframe = track.FindKeyframeAt(time, 0.02);
+            if (keyframe != null)
+            {
+                if (!VectorGeometriesEqual(keyframe.GeometryValue, geometry))
+                    commands.Add(new ModifyKeyframeGeometryCommand(keyframe, keyframe.GeometryValue, geometry));
+                return commands;
+            }
+
+            if (isNewTrack) commands.Add(new AddTrackCommand(clip, track));
+            commands.Add(new AddKeyframeCommand(track, new Keyframe(time, 0.0, _defaultInterpolationMode,
+                _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2)
+            {
+                GeometryValue = geometry.Clone()
+            }));
+            return commands;
+        }
+
+        private List<Kerf.Engine.ICommand> BuildGeometryNodeKeyframeCommands(Clip clip, LayerNode layer, double time,
+            VectorGeometry geometry, IEnumerable<int> nodeIndices, VectorGeometry baseGeometry)
+        {
+            var commands = new List<Kerf.Engine.ICommand>();
+            if (clip == null || layer == null || layer.Type != ElementType.Path || geometry == null || geometry.Nodes == null || nodeIndices == null)
+                return commands;
+
+            uint nodeId = PropertyBinder.GetNumericNodeId(layer.Id);
+            AnimTrack pathTrack = clip.GetTrack(nodeId, (ushort)PropKey.Path);
+            bool needsBase = pathTrack == null || pathTrack.Keys == null || !pathTrack.Keys.Any(key => key != null && key.GeometryValue != null);
+            if (pathTrack == null)
+            {
+                pathTrack = new AnimTrack(nodeId, (ushort)PropKey.Path, layer.Id, "Path");
+                commands.Add(new AddTrackCommand(clip, pathTrack));
+            }
+            if (needsBase)
+            {
+                VectorGeometry baseline = baseGeometry != null ? baseGeometry : geometry;
+                commands.Add(new AddKeyframeCommand(pathTrack, new Keyframe(time, 0.0, InterpMode.Hold)
+                {
+                    GeometryValue = baseline.Clone()
+                }));
+            }
+
+            var uniqueIndices = new HashSet<int>();
+            foreach (int nodeIndex in nodeIndices)
+            {
+                if (nodeIndex < 0 || nodeIndex >= geometry.Nodes.Count || !uniqueIndices.Add(nodeIndex)) continue;
+                BezierNode nodeValue = geometry.Nodes[nodeIndex];
+                if (nodeValue == null) continue;
+
+                AnimTrack nodeTrack = clip.GetGeometryNodeTrack(nodeId, nodeIndex);
+                bool isNewTrack = nodeTrack == null;
+                if (isNewTrack)
+                {
+                    nodeTrack = new AnimTrack(nodeId, (ushort)PropKey.PathNode, layer.Id,
+                        string.Format(CultureInfo.InvariantCulture, "Path.Nodes[{0}] · Node {1}", nodeIndex, nodeIndex + 1), nodeIndex);
+                    commands.Add(new AddTrackCommand(clip, nodeTrack));
+                }
+
+                // A track's first value is held before its first key. Seed the node's
+                // pre-edit pose at the clip/work-area start (or the nearest earlier path
+                // key) so adding a node key later in the timeline does not change earlier
+                // frames or make the node jump as soon as the clip starts.
+                bool hasEarlierNodeKey = nodeTrack.Keys != null && nodeTrack.Keys.Any(key =>
+                    key != null && key.GeometryNodeValue != null && key.Time < time - 1e-6);
+                double workStart = clip.GetNormalizedWorkAreaStart();
+                if (!hasEarlierNodeKey && time > workStart + 1e-6)
+                {
+                    double baselineTime = workStart;
+                    if (pathTrack.Keys != null)
+                    {
+                        foreach (Keyframe pathKey in pathTrack.Keys)
+                        {
+                            if (pathKey != null && pathKey.GeometryValue != null &&
+                                pathKey.Time >= workStart && pathKey.Time < time - 1e-6 && pathKey.Time > baselineTime)
+                                baselineTime = pathKey.Time;
+                        }
+                    }
+
+                    bool hasBaselineAtTime = nodeTrack.Keys != null && nodeTrack.Keys.Any(key =>
+                        key != null && key.GeometryNodeValue != null && Math.Abs(key.Time - baselineTime) <= 1e-6);
+                    if (!hasBaselineAtTime && baselineTime < time - 1e-6)
+                    {
+                        VectorGeometry baselineGeometry = pathTrack.SampleGeometry(baselineTime) ?? baseGeometry ?? geometry;
+                        if (baselineGeometry.Nodes != null && nodeIndex < baselineGeometry.Nodes.Count && baselineGeometry.Nodes[nodeIndex] != null)
+                        {
+                            commands.Add(new AddKeyframeCommand(nodeTrack, new Keyframe(baselineTime, 0.0, _defaultInterpolationMode,
+                                _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2)
+                            {
+                                GeometryNodeValue = baselineGeometry.Nodes[nodeIndex].Clone()
+                            }));
+                        }
+                    }
+                }
+
+                Keyframe keyframe = nodeTrack.FindKeyframeAt(time, 0.02);
+                if (keyframe != null)
+                {
+                    if (!BezierNodesEqual(keyframe.GeometryNodeValue, nodeValue))
+                        commands.Add(new ModifyKeyframeGeometryNodeCommand(keyframe, keyframe.GeometryNodeValue, nodeValue));
+                }
+                else
+                {
+                    commands.Add(new AddKeyframeCommand(nodeTrack, new Keyframe(time, 0.0, _defaultInterpolationMode,
+                        _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2)
+                    {
+                        GeometryNodeValue = nodeValue.Clone()
+                    }));
+                }
+            }
+            return commands;
+        }
+
+        private void ExecuteAnimationCommands(string description, List<Kerf.Engine.ICommand> commands, Action onCompleted)
+        {
+            if (commands == null || commands.Count == 0) return;
+            var composite = new CompositeCommand(description, commands, onCompleted);
+            if (History != null) History.Execute(composite);
+            else composite.Execute();
+        }
+
+        private void RecordGeometryNodeKeyframes(LayerNode layer, IEnumerable<int> nodeIndices, VectorGeometry baseGeometry)
+        {
+            if (_currentStudioMode != StudioMode.Animate || layer == null || layer.Type != ElementType.Path || layer.Geometry == null) return;
+            if (_timelineController == null) EnsureTimelineControllerInitialized();
+            if (_timelineController == null) return;
+            Clip clip = _timelineController.ActiveClip;
+            if (clip == null)
+            {
+                clip = new Clip(100, "Default Animation", _timelineController.Duration);
+                _timelineController.ActiveClip = clip;
+            }
+            if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+            if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+            if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
+            Document.Animation.ActiveClipId = clip.Id;
+            _timelineController.UseStateMachine = false;
+
+            double time = _timelineController.CurrentTime;
+            var commands = BuildGeometryNodeKeyframeCommands(clip, layer, time, layer.Geometry, nodeIndices, baseGeometry);
+            ExecuteAnimationCommands("Keyframe Path Nodes", commands, () => RefreshAnimationGeometry(layer));
+            RefreshTimelineUI();
+        }
+
+        private void RefreshAnimationGeometry(LayerNode layer)
+        {
+            if (layer != null && _sceneGraph != null) _sceneGraph.InvalidateSubtree(layer.Id);
+            if (_timelineController != null) _timelineController.Seek(_timelineController.CurrentTime);
+            RefreshCanvas();
+            RefreshTimelineUI();
+            RefreshPropertyInspector();
+        }
+
+        private static bool BezierNodesEqual(BezierNode a, BezierNode b)
+        {
+            if (a == null || b == null) return a == b;
+            return a.Type == b.Type && Math.Abs(a.Anchor.X - b.Anchor.X) < 1e-7 && Math.Abs(a.Anchor.Y - b.Anchor.Y) < 1e-7 &&
+                Math.Abs(a.InHandle.X - b.InHandle.X) < 1e-7 && Math.Abs(a.InHandle.Y - b.InHandle.Y) < 1e-7 &&
+                Math.Abs(a.OutHandle.X - b.OutHandle.X) < 1e-7 && Math.Abs(a.OutHandle.Y - b.OutHandle.Y) < 1e-7;
+        }
+
+        private static bool VectorGeometriesEqual(VectorGeometry a, VectorGeometry b)
+        {
+            if (a == null || b == null) return a == b;
+            if (a.IsClosed != b.IsClosed || a.SvgPathData != b.SvgPathData || a.Nodes == null || b.Nodes == null || a.Nodes.Count != b.Nodes.Count) return false;
+            for (int i = 0; i < a.Nodes.Count; i++)
+                if (!BezierNodesEqual(a.Nodes[i], b.Nodes[i])) return false;
+            return true;
+        }
+
+        private static List<int> GetChangedVectorNodeIndices(VectorGeometry before, VectorGeometry after)
+        {
+            if (before == null || after == null || before.Nodes == null || after.Nodes == null || before.Nodes.Count != after.Nodes.Count)
+                return null;
+            var changed = new List<int>();
+            for (int i = 0; i < before.Nodes.Count; i++)
+                if (!BezierNodesEqual(before.Nodes[i], after.Nodes[i])) changed.Add(i);
+            return changed;
+        }
+
+        private void CommitVectorGeometryEdit(VectorGeometry before, VectorGeometry after, string description)
+        {
+            LayerNode layer = _editingVectorNode;
+            if (layer == null || before == null || after == null || VectorGeometriesEqual(before, after)) return;
+            var commands = new List<Kerf.Engine.ICommand>
+            {
+                new ModifyVectorGeometryCommand(layer, before, after, null)
+            };
+
+            if (_currentStudioMode == StudioMode.Animate)
+            {
+                if (_timelineController == null) EnsureTimelineControllerInitialized();
+                Clip clip = _timelineController != null ? _timelineController.ActiveClip : null;
+                if (clip == null && _timelineController != null)
+                {
+                    clip = new Clip(100, "Default Animation", _timelineController.Duration);
+                    _timelineController.ActiveClip = clip;
+                }
+                if (clip != null)
+                {
+                    if (Document.Animation == null) Document.Animation = new AnimationProjectData();
+                    if (Document.Animation.Clips == null) Document.Animation.Clips = new List<Clip>();
+                    if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
+                    Document.Animation.ActiveClipId = clip.Id;
+                    _timelineController.UseStateMachine = false;
+
+                    List<int> changedNodes = GetChangedVectorNodeIndices(before, after);
+                    if (changedNodes != null && changedNodes.Count > 0)
+                        commands.AddRange(BuildGeometryNodeKeyframeCommands(clip, layer, _timelineController.CurrentTime, after, changedNodes, before));
+                    else
+                        commands.AddRange(BuildPathKeyframeCommands(clip, layer, _timelineController.CurrentTime, after));
+                }
+            }
+
+            ExecuteAnimationCommands(description, commands, () => RefreshAnimationGeometry(layer));
+        }
+
+        private void ApplyVectorGeometryEdit(string description, Action mutation)
+        {
+            if (_editingVectorNode == null || _editingVectorNode.Geometry == null || mutation == null) return;
+            VectorGeometry before = _editingVectorNode.Geometry.Clone();
+            mutation();
+            VectorGeometry after = _editingVectorNode.Geometry.Clone();
+            CommitVectorGeometryEdit(before, after, description);
+        }
+
+        private static bool IsFrameTransformProperty(PropKey property)
+        {
+            switch (property)
+            {
+                case PropKey.X:
+                case PropKey.Y:
+                case PropKey.Width:
+                case PropKey.Height:
+                case PropKey.Rotation:
+                case PropKey.ScaleX:
+                case PropKey.ScaleY:
+                case PropKey.AnchorX:
+                case PropKey.AnchorY:
+                case PropKey.VisualWidth:
+                case PropKey.VisualHeight:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsFixedFrameTransform(LayerNode layer, PropKey property)
+        {
+            return layer != null && layer.Type == ElementType.Frame && IsFrameTransformProperty(property);
         }
 
         private FrameworkElement CreateAnimatedPropertyField(FrameworkElement field, LayerNode layer, PropKey property)
         {
             if (field == null || _currentStudioMode != StudioMode.Animate) return field;
+            bool fixedFrameTransform = layer != null && layer.Type == ElementType.Frame && IsFrameTransformProperty(property);
+            if (fixedFrameTransform)
+            {
+                field.IsEnabled = false;
+                field.ToolTip = "Frame bounds stay fixed in Animate mode. Animate the contents inside the frame.";
+                return field;
+            }
             var grid = new Grid { Margin = new Thickness(0) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Input field
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) }); // Jump Prev ◀
@@ -24299,7 +26466,8 @@ namespace Kerf.UI
                 {
                     if (track != null)
                     {
-                        track.RemoveKeyframeAt(currentTime, 0.02);
+                        var keysToDelete = new Dictionary<Keyframe, AnimTrack>();
+                        if (existingKey != null) keysToDelete[existingKey] = track;
                         if (layer != null && layer.LockAspectRatio)
                         {
                             PropKey pairedProp = PropKey.X;
@@ -24313,12 +26481,19 @@ namespace Kerf.UI
                             if (hasPaired && clip != null)
                             {
                                 var pairedTrack = clip.GetTrack(nodeId, (ushort)pairedProp);
-                                if (pairedTrack != null) pairedTrack.RemoveKeyframeAt(currentTime, 0.02);
+                                Keyframe pairedKey = pairedTrack != null ? pairedTrack.FindKeyframeAt(currentTime, 0.02) : null;
+                                if (pairedTrack != null && pairedKey != null) keysToDelete[pairedKey] = pairedTrack;
                             }
                         }
-                        if (_timelineController != null) _timelineController.Seek(currentTime);
-                        RefreshTimelineUI();
-                        RefreshPropertyInspector();
+                        if (keysToDelete.Count > 0)
+                        {
+                            History.Execute(new DeleteKeyframesCommand(keysToDelete, () =>
+                            {
+                                if (_timelineController != null) _timelineController.Seek(currentTime);
+                                RefreshTimelineUI();
+                                RefreshPropertyInspector();
+                            }));
+                        }
                     }
                 }
                 else
@@ -24432,14 +26607,14 @@ namespace Kerf.UI
 
         private void AutoKeyPropertyLivePreview(LayerNode layer, PropKey property, double value)
         {
-            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
+            if (_currentStudioMode != StudioMode.Animate || layer == null || IsFixedFrameTransform(layer, property)) return;
             if (_sceneGraph != null) _sceneGraph.InvalidateSubtree(layer.Id);
             RefreshCanvas();
         }
 
         public void CommitKeyframeValueChange(LayerNode layer, PropKey property, double startVal, double finalVal)
         {
-            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
+            if (_currentStudioMode != StudioMode.Animate || layer == null || IsFixedFrameTransform(layer, property)) return;
             if (Math.Abs(finalVal - startVal) <= 1e-6) return;
             if (_timelineController == null) EnsureTimelineControllerInitialized();
             if (_timelineController == null) return;
@@ -24512,13 +26687,15 @@ namespace Kerf.UI
 
         private void AutoKeyProperty(LayerNode layer, PropKey property, double value)
         {
-            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
+            if (_currentStudioMode != StudioMode.Animate || layer == null || IsFixedFrameTransform(layer, property)) return;
             AddKeyframeForProperty(layer, property, value);
         }
 
         private void AddKeyframeForProperty(LayerNode layer, PropKey property, double value)
         {
-            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
+            if (_currentStudioMode != StudioMode.Animate || layer == null || IsFixedFrameTransform(layer, property)) return;
+            bool openedHistoryBatch = History != null && !History.IsBatching;
+            if (openedHistoryBatch) History.BeginBatch("Keyframe " + property);
             AddKeyframeForPropertyInternal(layer, property, value);
 
             if (layer != null && layer.LockAspectRatio)
@@ -24552,11 +26729,12 @@ namespace Kerf.UI
                     AddKeyframeForPropertyInternal(layer, PropKey.ScaleX, sx);
                 }
             }
+            if (openedHistoryBatch) History.EndBatch();
         }
 
         private void AddKeyframeForPropertyInternal(LayerNode layer, PropKey property, double value)
         {
-            if (_currentStudioMode != StudioMode.Animate || layer == null) return;
+            if (_currentStudioMode != StudioMode.Animate || layer == null || IsFixedFrameTransform(layer, property)) return;
             if (_timelineController == null) EnsureTimelineControllerInitialized();
             if (_timelineController == null) return;
             var clip = _timelineController.ActiveClip;
@@ -24572,12 +26750,13 @@ namespace Kerf.UI
             if (!Document.Animation.Clips.Contains(clip)) Document.Animation.Clips.Add(clip);
             Document.Animation.ActiveClipId = clip.Id;
             _timelineController.UseStateMachine = false;
-            History.MarkDirty();
             RefreshTimelineCanvas();
         }
 
         private void AddOrUpdateTrackKeyframe(Clip clip, uint nodeId, ushort propertyId, double time, double val)
         {
+            if (clip == null) return;
+            if (clip.Tracks == null) clip.Tracks = new List<AnimTrack>();
             AnimTrack track = null;
             for (int i = 0; i < clip.Tracks.Count; i++)
             {
@@ -24588,30 +26767,25 @@ namespace Kerf.UI
                 }
             }
 
+            var commands = new List<Kerf.Engine.ICommand>();
             if (track == null)
             {
                 track = new AnimTrack(nodeId, propertyId);
-                clip.Tracks.Add(track);
+                commands.Add(new AddTrackCommand(clip, track));
             }
 
-            Keyframe existing = null;
-            for (int i = 0; i < track.Keys.Count; i++)
-            {
-                if (Math.Abs(track.Keys[i].Time - time) < 0.02)
-                {
-                    existing = track.Keys[i];
-                    break;
-                }
-            }
-
+            Keyframe existing = track.FindKeyframeAt(time, 0.02);
             if (existing != null)
             {
-                existing.Value = val;
+                if (Math.Abs(existing.Value - val) > 1e-9)
+                    commands.Add(new ModifyKeyframeValueCommand(existing, existing.Value, val));
             }
             else
             {
-                track.AddKeyframe(new Keyframe(time, val, _defaultInterpolationMode, _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2));
+                commands.Add(new AddKeyframeCommand(track, new Keyframe(time, val, _defaultInterpolationMode,
+                    _defaultInterpolationX1, _defaultInterpolationY1, _defaultInterpolationX2, _defaultInterpolationY2)));
             }
+            ExecuteAnimationCommands("Keyframe Property", commands, null);
         }
 
         private string GetActiveStateNameForClip(Clip clip)
@@ -24747,6 +26921,7 @@ namespace Kerf.UI
 
         public void RefreshTimelineUI()
         {
+            UpdateTimelineWorkAreaFields();
             RefreshTimelineTracks();
             RefreshTimelineCanvas();
             RefreshInterpolationGraphPanels();
@@ -24928,6 +27103,8 @@ namespace Kerf.UI
                 case PropKey.StrokeTrimOffset: return "Trim Offset";
                 case PropKey.StrokeTaperStart: return "Taper Start";
                 case PropKey.StrokeTaperEnd: return "Taper End";
+                case PropKey.Path: return "Path Geometry";
+                case PropKey.PathNode: return "Path Node";
                 default: return ((PropKey)prop).ToString();
             }
         }
@@ -24935,6 +27112,31 @@ namespace Kerf.UI
         private string GetEvaluatedPropertyString(uint nodeId, ushort prop)
         {
             var layer = FindLayerByNumericId(nodeId);
+            if (prop == (ushort)PropKey.PathNode)
+            {
+                var nodeTrack = _timelineController != null && _timelineController.ActiveClip != null
+                    ? _timelineController.ActiveClip.Tracks.FirstOrDefault(track => track != null && track.NodeId == nodeId && track.Prop == prop)
+                    : null;
+                if (nodeTrack != null && nodeTrack.GeometryNodeIndex >= 0)
+                {
+                    BezierNode sampledNode = nodeTrack.SampleGeometryNode(_timelineController.CurrentTime);
+                    if (sampledNode == null && layer != null && layer.Geometry != null && layer.Geometry.Nodes != null && nodeTrack.GeometryNodeIndex < layer.Geometry.Nodes.Count)
+                        sampledNode = layer.Geometry.Nodes[nodeTrack.GeometryNodeIndex];
+                    if (sampledNode != null)
+                        return string.Format(CultureInfo.InvariantCulture, "X {0:F1} · Y {1:F1}", sampledNode.Anchor.X, sampledNode.Anchor.Y);
+                }
+                return "Path node";
+            }
+            if (prop == (ushort)PropKey.Path)
+            {
+                var pathTrack = _timelineController != null && _timelineController.ActiveClip != null
+                    ? _timelineController.ActiveClip.GetTrack(nodeId, prop)
+                    : null;
+                VectorGeometry sampled = pathTrack != null ? pathTrack.SampleGeometry(_timelineController.CurrentTime) : null;
+                VectorGeometry geometry = sampled ?? (layer != null ? layer.Geometry : null);
+                int nodeCount = geometry != null && geometry.Nodes != null ? geometry.Nodes.Count : 0;
+                return nodeCount > 0 ? string.Format("{0} nodes", nodeCount) : "SVG path";
+            }
             double val = 0.0;
             bool hasVal = false;
 
@@ -25448,7 +27650,7 @@ namespace Kerf.UI
                                 : ReferenceEquals(kf, _editingInterpolationKeyframe) ? KerfBrand.TealBrush : KerfBrand.AmberBrush,
                             Stroke = KerfBrand.ObsidianBrush,
                             StrokeThickness = 1,
-                            ToolTip = string.Format("{0} · {1:F2}s ({2}f) · {3:F1}", keyTrack.PropertyPath, kf.Time, kfFrame, kf.Value),
+                            ToolTip = string.Format("{0} · {1:F2}s ({2}f) · {3}", keyTrack.PropertyPath, kf.Time, kfFrame, GetTimelineKeyframeValueLabel(keyTrack, kf)),
                             Cursor = Cursors.SizeWE,
                             Tag = keyframe
                         };
@@ -25495,9 +27697,71 @@ namespace Kerf.UI
             double requiredHeight = Math.Max(230.0, lanes.Count > 0 ? (lanes.Last().Y + 30.0) : 230.0);
             _timelineCanvasHost.Width = Math.Max(totalWidth + 200, 1200);
             _timelineCanvasHost.Height = requiredHeight;
+            RefreshTimelineWorkAreaCanvas(duration, pps);
 
             _selectedTimelineKeyframes.RemoveWhere(keyframe => !_timelineKeyframeOwners.ContainsKey(keyframe));
             RefreshInterpolationGraphPanels();
+        }
+
+        private void RefreshTimelineWorkAreaCanvas(double duration, double pixelsPerSecond)
+        {
+            if (_timelineWorkAreaCanvas == null) return;
+            _timelineWorkAreaCanvas.Children.Clear();
+            _timelineWorkAreaCanvas.Width = Math.Max(duration * pixelsPerSecond + 200.0, 1200.0);
+            _timelineWorkAreaCanvas.Height = 22.0;
+
+            var baseline = new Line
+            {
+                X1 = 0,
+                X2 = _timelineWorkAreaCanvas.Width,
+                Y1 = 11,
+                Y2 = 11,
+                Stroke = new SolidColorBrush(Color.FromRgb(45, 53, 68)),
+                StrokeThickness = 1,
+                IsHitTestVisible = false
+            };
+            _timelineWorkAreaCanvas.Children.Add(baseline);
+
+            if (_timelineController == null || _timelineController.ActiveClip == null || _isStateMachineMode) return;
+
+            double startX = _timelineController.WorkAreaStart * pixelsPerSecond;
+            double endX = _timelineController.WorkAreaEnd * pixelsPerSecond;
+            var selection = new Rectangle
+            {
+                Width = Math.Max(1.0, endX - startX),
+                Height = 8,
+                RadiusX = 3,
+                RadiusY = 3,
+                Fill = new SolidColorBrush(Color.FromArgb(65, 70, 239, 177)),
+                Stroke = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
+                StrokeThickness = 1,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(selection, startX);
+            Canvas.SetTop(selection, 7);
+            _timelineWorkAreaCanvas.Children.Add(selection);
+
+            AddTimelineWorkAreaHandle(startX, "Drag to change work area start");
+            AddTimelineWorkAreaHandle(endX, "Drag to change work area end");
+        }
+
+        private void AddTimelineWorkAreaHandle(double x, string toolTip)
+        {
+            var handle = new Border
+            {
+                Width = 10,
+                Height = 18,
+                Background = new SolidColorBrush(Color.FromRgb(70, 239, 177)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(22, 96, 75)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(3),
+                Cursor = Cursors.SizeWE,
+                ToolTip = toolTip,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(handle, x - handle.Width / 2.0);
+            Canvas.SetTop(handle, 2.0);
+            _timelineWorkAreaCanvas.Children.Add(handle);
         }
 
         private void CopySelectedTimelineKeyframes()
@@ -25650,8 +27914,24 @@ namespace Kerf.UI
                 case PropKey.Height:
                 case PropKey.VisualHeight: return 9;
                 case PropKey.CornerRadius: return 10;
+                case PropKey.Path: return 11;
+                case PropKey.PathNode: return 12;
                 default: return (int)propKey;
             }
+        }
+
+        private static string GetTimelineKeyframeValueLabel(AnimTrack track, Keyframe keyframe)
+        {
+            if (track != null && track.Prop == (ushort)PropKey.Path)
+            {
+                int count = keyframe != null && keyframe.GeometryValue != null && keyframe.GeometryValue.Nodes != null
+                    ? keyframe.GeometryValue.Nodes.Count
+                    : 0;
+                return count > 0 ? string.Format("{0} nodes", count) : "SVG path";
+            }
+            if (track != null && track.Prop == (ushort)PropKey.PathNode && keyframe != null && keyframe.GeometryNodeValue != null)
+                return string.Format(CultureInfo.InvariantCulture, "X {0:F1} · Y {1:F1}", keyframe.GeometryNodeValue.Anchor.X, keyframe.GeometryNodeValue.Anchor.Y);
+            return keyframe != null ? keyframe.Value.ToString("F1", CultureInfo.InvariantCulture) : string.Empty;
         }
 
         #endregion

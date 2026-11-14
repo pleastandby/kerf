@@ -10,6 +10,7 @@
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "jsx": "react-jsx",
+    "rootDir": "./src",
 
     /* Declarations */
     "declaration": true,

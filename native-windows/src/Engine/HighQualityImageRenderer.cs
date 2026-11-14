@@ -13,7 +13,7 @@ using Kerf.Tools;
 namespace Kerf.Engine
 {
     /// <summary>
-    /// High-Quality, Production-Grade Image Rendering Engine for Kerf Studio.
+    /// High-Quality, Production-Grade Image Rendering Engine for Kerf.
     /// Processes complete layer hierarchies, Auto Layout, text metrics, multiple fills/strokes,
     /// and renders Photoshop-grade 32-bit ARGB PNGs and Studio JPEGs with subpixel antialiasing.
     /// </summary>
@@ -126,6 +126,7 @@ namespace Kerf.Engine
             TextOptions.SetTextHintingMode(visual, TextHintingMode.Auto);
 
             var gpu = new GpuRenderer();
+            gpu.CurrentPage = page;
 
             using (var dc = visual.RenderOpen())
             {
@@ -370,16 +371,59 @@ namespace Kerf.Engine
                 pushedTransform = true;
             }
 
-            // 3. Push Clip if Frame has ClipContent
+            // 3. Push Clip if Frame has ClipContent or Rive-style Clipping Targets
             bool pushedClip = false;
+            Geometry combinedClip = null;
             if (node.Type == ElementType.Frame && node.ClipContent)
             {
-                var clipGeo = gpu.BuildGeometry(node);
-                if (clipGeo != null)
+                combinedClip = gpu.BuildGeometry(node);
+            }
+
+            if (node.ClippingTargets != null && node.ClippingTargets.Count > 0 && GpuRenderer.ActivePage != null)
+            {
+                for (int c = 0; c < node.ClippingTargets.Count; c++)
                 {
-                    dc.PushClip(clipGeo);
-                    pushedClip = true;
+                    var clipTarget = node.ClippingTargets[c];
+                    if (clipTarget == null || !clipTarget.Enabled || string.IsNullOrEmpty(clipTarget.TargetLayerId)) continue;
+
+                    var targetNode = GpuRenderer.ActivePage.FindLayerById(clipTarget.TargetLayerId);
+                    if (targetNode == null) continue;
+
+                    var targetGeo = gpu.BuildClipSourceGeometry(targetNode, includeAncestorStaticTransforms: true);
+                    if (targetGeo != null)
+                    {
+                        Geometry effectiveTargetGeo = targetGeo;
+                        if (clipTarget.IsInverse)
+                        {
+                            var bigBounds = new RectangleGeometry(new Rect(-50000, -50000, 100000, 100000));
+                            var inv = new CombinedGeometry(GeometryCombineMode.Exclude, bigBounds, targetGeo);
+                            inv.Freeze();
+                            effectiveTargetGeo = inv;
+                        }
+
+                        // RenderNodeHierarchy has already pushed the owner's transform.
+                        // Convert the world-space mask into that local coordinate space.
+                        effectiveTargetGeo = TransformClipToOwnerSpace(effectiveTargetGeo, node, GpuRenderer.ActivePage);
+
+                        if (combinedClip == null)
+                        {
+                            combinedClip = effectiveTargetGeo;
+                        }
+                        else
+                        {
+                            var intersected = new CombinedGeometry(GeometryCombineMode.Intersect, combinedClip, effectiveTargetGeo);
+                            intersected.Freeze();
+                            combinedClip = intersected;
+                        }
+                    }
                 }
+            }
+
+            if (combinedClip != null)
+            {
+                combinedClip.Freeze();
+                dc.PushClip(combinedClip);
+                pushedClip = true;
             }
 
             // 4. Render Drop Shadow
@@ -410,6 +454,15 @@ namespace Kerf.Engine
             if (pushedClip) dc.Pop();
             if (pushedTransform) dc.Pop();
             if (pushedOpacity) dc.Pop();
+        }
+
+        private static Geometry TransformClipToOwnerSpace(Geometry geometry, LayerNode owner, Page page)
+        {
+            if (geometry == null || owner == null) return geometry;
+            Matrix ownerTransform = GpuRenderer.GetLayerWorldTransformMatrix(owner, page, includeAncestorStaticTransforms: true);
+            if (ownerTransform.IsIdentity || !ownerTransform.HasInverse) return geometry;
+            ownerTransform.Invert();
+            return GpuRenderer.ApplyGeometryTransform(geometry, ownerTransform);
         }
 
         private static void RenderLayerContent(LayerNode node, DrawingContext dc, double scale, GpuRenderer gpu)

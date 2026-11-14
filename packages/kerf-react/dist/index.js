@@ -1,795 +1,1452 @@
-var Mt = Object.defineProperty;
-var Nt = (i, t, e) => t in i ? Mt(i, t, { enumerable: !0, configurable: !0, writable: !0, value: e }) : i[t] = e;
-var T = (i, t, e) => Nt(i, typeof t != "symbol" ? t + "" : t, e);
-import { jsx as ht } from "react/jsx-runtime";
-import { forwardRef as Ft, useRef as j, useImperativeHandle as bt, useEffect as Z, useState as ut, useCallback as L } from "react";
-var M = Uint8Array, R = Uint16Array, Ht = Int32Array, vt = new M([
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  1,
-  1,
-  1,
-  1,
-  2,
-  2,
-  2,
-  2,
-  3,
-  3,
-  3,
-  3,
-  4,
-  4,
-  4,
-  4,
-  5,
-  5,
-  5,
-  5,
-  0,
-  /* unused */
-  0,
-  0,
-  /* impossible */
-  0
-]), gt = new M([
-  0,
-  0,
-  0,
-  0,
-  1,
-  1,
-  2,
-  2,
-  3,
-  3,
-  4,
-  4,
-  5,
-  5,
-  6,
-  6,
-  7,
-  7,
-  8,
-  8,
-  9,
-  9,
-  10,
-  10,
-  11,
-  11,
-  12,
-  12,
-  13,
-  13,
-  /* unused */
-  0,
-  0
-]), Vt = new M([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]), dt = function(i, t) {
-  for (var e = new R(31), r = 0; r < 31; ++r)
-    e[r] = t += 1 << i[r - 1];
-  for (var n = new Ht(e[30]), r = 1; r < 30; ++r)
-    for (var s = e[r]; s < e[r + 1]; ++s)
-      n[s] = s - e[r] << 5 | r;
-  return { b: e, r: n };
-}, yt = dt(vt, 2), mt = yt.b, At = yt.r;
-mt[28] = 258, At[258] = 28;
-var Wt = dt(gt, 0), Lt = Wt.b, _ = new R(32768);
-for (var m = 0; m < 32768; ++m) {
-  var W = (m & 43690) >> 1 | (m & 21845) << 1;
-  W = (W & 52428) >> 2 | (W & 13107) << 2, W = (W & 61680) >> 4 | (W & 3855) << 4, _[m] = ((W & 65280) >> 8 | (W & 255) << 8) >> 1;
+import { forwardRef as e, useCallback as t, useEffect as n, useImperativeHandle as r, useRef as i, useState as a } from "react";
+import { jsx as o } from "react/jsx-runtime";
+// node_modules/fflate/esm/browser.js
+var s = Uint8Array, c = Uint16Array, l = Int32Array, u = new s([
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	1,
+	1,
+	1,
+	1,
+	2,
+	2,
+	2,
+	2,
+	3,
+	3,
+	3,
+	3,
+	4,
+	4,
+	4,
+	4,
+	5,
+	5,
+	5,
+	5,
+	0,
+	0,
+	0,
+	0
+]), d = new s([
+	0,
+	0,
+	0,
+	0,
+	1,
+	1,
+	2,
+	2,
+	3,
+	3,
+	4,
+	4,
+	5,
+	5,
+	6,
+	6,
+	7,
+	7,
+	8,
+	8,
+	9,
+	9,
+	10,
+	10,
+	11,
+	11,
+	12,
+	12,
+	13,
+	13,
+	0,
+	0
+]), f = new s([
+	16,
+	17,
+	18,
+	0,
+	8,
+	7,
+	9,
+	6,
+	10,
+	5,
+	11,
+	4,
+	12,
+	3,
+	13,
+	2,
+	14,
+	1,
+	15
+]), p = function(e, t) {
+	for (var n = new c(31), r = 0; r < 31; ++r) n[r] = t += 1 << e[r - 1];
+	for (var i = new l(n[30]), r = 1; r < 30; ++r) for (var a = n[r]; a < n[r + 1]; ++a) i[a] = a - n[r] << 5 | r;
+	return {
+		b: n,
+		r: i
+	};
+}, m = p(u, 2), h = m.b, g = m.r;
+h[28] = 258, g[258] = 28;
+var _ = p(d, 0), v = _.b;
+_.r;
+for (var y = new c(32768), b = 0; b < 32768; ++b) {
+	var x = (b & 43690) >> 1 | (b & 21845) << 1;
+	x = (x & 52428) >> 2 | (x & 13107) << 2, x = (x & 61680) >> 4 | (x & 3855) << 4, y[b] = ((x & 65280) >> 8 | (x & 255) << 8) >> 1;
 }
-var E = function(i, t, e) {
-  for (var r = i.length, n = 0, s = new R(t); n < r; ++n)
-    i[n] && ++s[i[n] - 1];
-  var o = new R(t);
-  for (n = 1; n < t; ++n)
-    o[n] = o[n - 1] + s[n - 1] << 1;
-  var a;
-  if (e) {
-    a = new R(1 << t);
-    var l = 15 - t;
-    for (n = 0; n < r; ++n)
-      if (i[n])
-        for (var c = n << 4 | i[n], g = t - i[n], f = o[i[n] - 1]++ << g, h = f | (1 << g) - 1; f <= h; ++f)
-          a[_[f] >> l] = c;
-  } else
-    for (a = new R(r), n = 0; n < r; ++n)
-      i[n] && (a[n] = _[o[i[n] - 1]++] >> 15 - i[n]);
-  return a;
-}, O = new M(288);
-for (var m = 0; m < 144; ++m)
-  O[m] = 8;
-for (var m = 144; m < 256; ++m)
-  O[m] = 9;
-for (var m = 256; m < 280; ++m)
-  O[m] = 7;
-for (var m = 280; m < 288; ++m)
-  O[m] = 8;
-var pt = new M(32);
-for (var m = 0; m < 32; ++m)
-  pt[m] = 5;
-var Xt = /* @__PURE__ */ E(O, 9, 1), Yt = /* @__PURE__ */ E(pt, 5, 1), G = function(i) {
-  for (var t = i[0], e = 1; e < i.length; ++e)
-    i[e] > t && (t = i[e]);
-  return t;
-}, b = function(i, t, e) {
-  var r = t / 8 | 0;
-  return (i[r] | i[r + 1] << 8) >> (t & 7) & e;
-}, J = function(i, t) {
-  var e = t / 8 | 0;
-  return (i[e] | i[e + 1] << 8 | i[e + 2] << 16) >> (t & 7);
-}, Rt = function(i) {
-  return (i + 7) / 8 | 0;
-}, et = function(i, t, e) {
-  return (t == null || t < 0) && (t = 0), (e == null || e > i.length) && (e = i.length), new M(i.subarray(t, e));
-}, Bt = [
-  "unexpected EOF",
-  "invalid block type",
-  "invalid length/literal",
-  "invalid distance",
-  "stream finished",
-  "no stream handler",
-  ,
-  // determined by compression function
-  "no callback",
-  "invalid UTF-8 data",
-  "extra field too long",
-  "date not in range 1980-2099",
-  "filename too long",
-  "stream finishing",
-  "invalid zip data"
-  // determined by unknown compression method
-], x = function(i, t, e) {
-  var r = new Error(t || Bt[i]);
-  if (r.code = i, Error.captureStackTrace && Error.captureStackTrace(r, x), !e)
-    throw r;
-  return r;
-}, Kt = function(i, t, e, r) {
-  var n = i.length, s = r ? r.length : 0;
-  if (!n || t.f && !t.l)
-    return e || new M(0);
-  var o = !e, a = o || t.i != 2, l = t.i;
-  o && (e = new M(n * 3));
-  var c = function(ct) {
-    var lt = e.length;
-    if (ct > lt) {
-      var ft = new M(Math.max(lt * 2, ct));
-      ft.set(e), e = ft;
-    }
-  }, g = t.f || 0, f = t.p || 0, h = t.b || 0, u = t.l, v = t.d, d = t.m, y = t.n, C = n * 8;
-  do {
-    if (!u) {
-      g = b(i, f, 1);
-      var k = b(i, f + 1, 3);
-      if (f += 3, k)
-        if (k == 1)
-          u = Xt, v = Yt, d = 9, y = 5;
-        else if (k == 2) {
-          var V = b(i, f, 31) + 257, P = b(i, f + 10, 15) + 4, w = V + b(i, f + 5, 31) + 1;
-          f += 14;
-          for (var B = new M(w), z = new M(19), N = 0; N < P; ++N)
-            z[Vt[N]] = b(i, f + N * 3, 7);
-          f += P * 3;
-          for (var it = G(z), kt = (1 << it) - 1, wt = E(z, it, 1), N = 0; N < w; ) {
-            var rt = wt[b(i, f, kt)];
-            f += rt & 15;
-            var p = rt >> 4;
-            if (p < 16)
-              B[N++] = p;
-            else {
-              var X = 0, D = 0;
-              for (p == 16 ? (D = 3 + b(i, f, 3), f += 2, X = B[N - 1]) : p == 17 ? (D = 3 + b(i, f, 7), f += 3) : p == 18 && (D = 11 + b(i, f, 127), f += 7); D--; )
-                B[N++] = X;
-            }
-          }
-          var nt = B.subarray(0, V), A = B.subarray(V);
-          d = G(nt), y = G(A), u = E(nt, d, 1), v = E(A, y, 1);
-        } else
-          x(1);
-      else {
-        var p = Rt(f) + 4, S = i[p - 4] | i[p - 3] << 8, I = p + S;
-        if (I > n) {
-          l && x(0);
-          break;
-        }
-        a && c(h + S), e.set(i.subarray(p, I), h), t.b = h += S, t.p = f = I * 8, t.f = g;
-        continue;
-      }
-      if (f > C) {
-        l && x(0);
-        break;
-      }
-    }
-    a && c(h + 131072);
-    for (var Pt = (1 << d) - 1, It = (1 << y) - 1, U = f; ; U = f) {
-      var X = u[J(i, f) & Pt], Y = X >> 4;
-      if (f += X & 15, f > C) {
-        l && x(0);
-        break;
-      }
-      if (X || x(2), Y < 256)
-        e[h++] = Y;
-      else if (Y == 256) {
-        U = f, u = null;
-        break;
-      } else {
-        var at = Y - 254;
-        if (Y > 264) {
-          var N = Y - 257, K = vt[N];
-          at = b(i, f, (1 << K) - 1) + mt[N], f += K;
-        }
-        var $ = v[J(i, f) & It], q = $ >> 4;
-        $ || x(3), f += $ & 15;
-        var A = Lt[q];
-        if (q > 3) {
-          var K = gt[q];
-          A += J(i, f) & (1 << K) - 1, f += K;
-        }
-        if (f > C) {
-          l && x(0);
-          break;
-        }
-        a && c(h + 131072);
-        var st = h + at;
-        if (h < A) {
-          var ot = s - A, xt = Math.min(A, st);
-          for (ot + h < 0 && x(3); h < xt; ++h)
-            e[h] = r[ot + h];
-        }
-        for (; h < st; ++h)
-          e[h] = e[h - A];
-      }
-    }
-    t.l = u, t.p = U, t.b = h, t.f = g, u && (g = 1, t.m = d, t.d = v, t.n = y);
-  } while (!g);
-  return h != e.length && o ? et(e, 0, h) : e.subarray(0, h);
-}, Et = /* @__PURE__ */ new M(0), H = function(i, t) {
-  return i[t] | i[t + 1] << 8;
-}, F = function(i, t) {
-  return (i[t] | i[t + 1] << 8 | i[t + 2] << 16 | i[t + 3] << 24) >>> 0;
-}, Q = function(i, t) {
-  return F(i, t) + F(i, t + 4) * 4294967296;
+for (var S = (function(e, t, n) {
+	for (var r = e.length, i = 0, a = new c(t); i < r; ++i) e[i] && ++a[e[i] - 1];
+	var o = new c(t);
+	for (i = 1; i < t; ++i) o[i] = o[i - 1] + a[i - 1] << 1;
+	var s;
+	if (n) {
+		s = new c(1 << t);
+		var l = 15 - t;
+		for (i = 0; i < r; ++i) if (e[i]) for (var u = i << 4 | e[i], d = t - e[i], f = o[e[i] - 1]++ << d, p = f | (1 << d) - 1; f <= p; ++f) s[y[f] >> l] = u;
+	} else for (s = new c(r), i = 0; i < r; ++i) e[i] && (s[i] = y[o[e[i] - 1]++] >> 15 - e[i]);
+	return s;
+}), C = new s(288), b = 0; b < 144; ++b) C[b] = 8;
+for (var b = 144; b < 256; ++b) C[b] = 9;
+for (var b = 256; b < 280; ++b) C[b] = 7;
+for (var b = 280; b < 288; ++b) C[b] = 8;
+for (var w = new s(32), b = 0; b < 32; ++b) w[b] = 5;
+var ee = /*#__PURE__*/ S(C, 9, 1), te = /*#__PURE__*/ S(w, 5, 1), T = function(e) {
+	for (var t = e[0], n = 1; n < e.length; ++n) e[n] > t && (t = e[n]);
+	return t;
+}, E = function(e, t, n) {
+	var r = t / 8 | 0;
+	return (e[r] | e[r + 1] << 8) >> (t & 7) & n;
+}, D = function(e, t) {
+	var n = t / 8 | 0;
+	return (e[n] | e[n + 1] << 8 | e[n + 2] << 16) >> (t & 7);
+}, ne = function(e) {
+	return (e + 7) / 8 | 0;
+}, O = function(e, t, n) {
+	return (t == null || t < 0) && (t = 0), (n == null || n > e.length) && (n = e.length), new s(e.subarray(t, n));
+}, k = [
+	"unexpected EOF",
+	"invalid block type",
+	"invalid length/literal",
+	"invalid distance",
+	"stream finished",
+	"no stream handler",
+	,
+	"no callback",
+	"invalid UTF-8 data",
+	"extra field too long",
+	"date not in range 1980-2099",
+	"filename too long",
+	"stream finishing",
+	"invalid zip data"
+], A = function(e, t, n) {
+	var r = Error(t || k[e]);
+	if (r.code = e, Error.captureStackTrace && Error.captureStackTrace(r, A), !n) throw r;
+	return r;
+}, j = function(e, t, n, r) {
+	var i = e.length, a = r ? r.length : 0;
+	if (!i || t.f && !t.l) return n || new s(0);
+	var o = !n, c = o || t.i != 2, l = t.i;
+	o && (n = new s(i * 3));
+	var p = function(e) {
+		var t = n.length;
+		if (e > t) {
+			var r = new s(Math.max(t * 2, e));
+			r.set(n), n = r;
+		}
+	}, m = t.f || 0, g = t.p || 0, _ = t.b || 0, y = t.l, b = t.d, x = t.m, C = t.n, w = i * 8;
+	do {
+		if (!y) {
+			m = E(e, g, 1);
+			var k = E(e, g + 1, 3);
+			if (g += 3, !k) {
+				var j = ne(g) + 4, M = e[j - 4] | e[j - 3] << 8, N = j + M;
+				if (N > i) {
+					l && A(0);
+					break;
+				}
+				c && p(_ + M), n.set(e.subarray(j, N), _), t.b = _ += M, t.p = g = N * 8, t.f = m;
+				continue;
+			}
+			if (k == 1) y = ee, b = te, x = 9, C = 5;
+			else if (k == 2) {
+				var P = E(e, g, 31) + 257, F = E(e, g + 10, 15) + 4, I = P + E(e, g + 5, 31) + 1;
+				g += 14;
+				for (var L = new s(I), R = new s(19), z = 0; z < F; ++z) R[f[z]] = E(e, g + z * 3, 7);
+				g += F * 3;
+				for (var B = T(R), re = (1 << B) - 1, ie = S(R, B, 1), z = 0; z < I;) {
+					var V = ie[E(e, g, re)];
+					g += V & 15;
+					var j = V >> 4;
+					if (j < 16) L[z++] = j;
+					else {
+						var H = 0, U = 0;
+						for (j == 16 ? (U = 3 + E(e, g, 3), g += 2, H = L[z - 1]) : j == 17 ? (U = 3 + E(e, g, 7), g += 3) : j == 18 && (U = 11 + E(e, g, 127), g += 7); U--;) L[z++] = H;
+					}
+				}
+				var W = L.subarray(0, P), G = L.subarray(P);
+				x = T(W), C = T(G), y = S(W, x, 1), b = S(G, C, 1);
+			} else A(1);
+			if (g > w) {
+				l && A(0);
+				break;
+			}
+		}
+		c && p(_ + 131072);
+		for (var K = (1 << x) - 1, ae = (1 << C) - 1, q = g;; q = g) {
+			var H = y[D(e, g) & K], J = H >> 4;
+			if (g += H & 15, g > w) {
+				l && A(0);
+				break;
+			}
+			if (H || A(2), J < 256) n[_++] = J;
+			else if (J == 256) {
+				q = g, y = null;
+				break;
+			} else {
+				var Y = J - 254;
+				if (J > 264) {
+					var z = J - 257, X = u[z];
+					Y = E(e, g, (1 << X) - 1) + h[z], g += X;
+				}
+				var Z = b[D(e, g) & ae], Q = Z >> 4;
+				Z || A(3), g += Z & 15;
+				var G = v[Q];
+				if (Q > 3) {
+					var X = d[Q];
+					G += D(e, g) & (1 << X) - 1, g += X;
+				}
+				if (g > w) {
+					l && A(0);
+					break;
+				}
+				c && p(_ + 131072);
+				var $ = _ + Y;
+				if (_ < G) {
+					var oe = a - G, se = Math.min(G, $);
+					for (oe + _ < 0 && A(3); _ < se; ++_) n[_] = r[oe + _];
+				}
+				for (; _ < $; ++_) n[_] = n[_ - G];
+			}
+		}
+		t.l = y, t.p = q, t.b = _, t.f = m, y && (m = 1, t.m = x, t.d = b, t.n = C);
+	} while (!m);
+	return _ != n.length && o ? O(n, 0, _) : n.subarray(0, _);
+}, M = /*#__PURE__*/ new s(0), N = function(e, t) {
+	return e[t] | e[t + 1] << 8;
+}, P = function(e, t) {
+	return (e[t] | e[t + 1] << 8 | e[t + 2] << 16 | e[t + 3] << 24) >>> 0;
+}, F = function(e, t) {
+	return P(e, t) + P(e, t + 4) * 4294967296;
 };
-function Ot(i, t) {
-  return Kt(i, { i: 2 }, t && t.out, t && t.dictionary);
+function I(e, t) {
+	return j(e, { i: 2 }, t && t.out, t && t.dictionary);
 }
-var tt = typeof TextDecoder < "u" && /* @__PURE__ */ new TextDecoder(), Dt = 0;
+var L = typeof TextDecoder < "u" && /*#__PURE__*/ new TextDecoder();
 try {
-  tt.decode(Et, { stream: !0 }), Dt = 1;
-} catch {
-}
-var jt = function(i) {
-  for (var t = "", e = 0; ; ) {
-    var r = i[e++], n = (r > 127) + (r > 223) + (r > 239);
-    if (e + n > i.length)
-      return { s: t, r: et(i, e - 1) };
-    n ? n == 3 ? (r = ((r & 15) << 18 | (i[e++] & 63) << 12 | (i[e++] & 63) << 6 | i[e++] & 63) - 65536, t += String.fromCharCode(55296 | r >> 10, 56320 | r & 1023)) : n & 1 ? t += String.fromCharCode((r & 31) << 6 | i[e++] & 63) : t += String.fromCharCode((r & 15) << 12 | (i[e++] & 63) << 6 | i[e++] & 63) : t += String.fromCharCode(r);
-  }
+	L.decode(M, { stream: !0 });
+} catch {}
+var R = function(e) {
+	for (var t = "", n = 0;;) {
+		var r = e[n++], i = (r > 127) + (r > 223) + (r > 239);
+		if (n + i > e.length) return {
+			s: t,
+			r: O(e, n - 1)
+		};
+		i ? i == 3 ? (r = ((r & 15) << 18 | (e[n++] & 63) << 12 | (e[n++] & 63) << 6 | e[n++] & 63) - 65536, t += String.fromCharCode(55296 | r >> 10, 56320 | r & 1023)) : i & 1 ? t += String.fromCharCode((r & 31) << 6 | e[n++] & 63) : t += String.fromCharCode((r & 15) << 12 | (e[n++] & 63) << 6 | e[n++] & 63) : t += String.fromCharCode(r);
+	}
 };
-function zt(i, t) {
-  if (t) {
-    for (var e = "", r = 0; r < i.length; r += 16384)
-      e += String.fromCharCode.apply(null, i.subarray(r, r + 16384));
-    return e;
-  } else {
-    if (tt)
-      return tt.decode(i);
-    var n = jt(i), s = n.s, e = n.r;
-    return e.length && x(8), s;
-  }
+function z(e, t) {
+	if (t) {
+		for (var n = "", r = 0; r < e.length; r += 16384) n += String.fromCharCode.apply(null, e.subarray(r, r + 16384));
+		return n;
+	}
+	if (L) return L.decode(e);
+	var i = R(e), a = i.s, n = i.r;
+	return n.length && A(8), a;
 }
-var Ut = function(i, t) {
-  return t + 30 + H(i, t + 26) + H(i, t + 28);
-}, $t = function(i, t, e) {
-  var r = H(i, t + 28), n = H(i, t + 30), s = zt(i.subarray(t + 46, t + 46 + r), !(H(i, t + 8) & 2048)), o = t + 46 + r, a = qt(i, o, n, e, F(i, t + 20), F(i, t + 24), F(i, t + 42)), l = a[0], c = a[1], g = a[2];
-  return [H(i, t + 10), l, c, s, o + n + H(i, t + 32), g];
-}, qt = function(i, t, e, r, n, s, o) {
-  var a = n == 4294967295, l = s == 4294967295, c = o == 4294967295, g = t + e, f = a + l + c;
-  if (r && f) {
-    for (; t + 4 < g; t += 4 + H(i, t + 2))
-      if (H(i, t) == 1)
-        return [
-          a ? Q(i, t + 4 + 8 * l) : n,
-          l ? Q(i, t + 4) : s,
-          c ? Q(i, t + 4 + 8 * (l + a)) : o,
-          1
-        ];
-    r < 2 && x(13);
-  }
-  return [n, s, o, 0];
+var B = function(e, t) {
+	return t + 30 + N(e, t + 26) + N(e, t + 28);
+}, re = function(e, t, n) {
+	var r = N(e, t + 28), i = N(e, t + 30), a = z(e.subarray(t + 46, t + 46 + r), !(N(e, t + 8) & 2048)), o = t + 46 + r, s = ie(e, o, i, n, P(e, t + 20), P(e, t + 24), P(e, t + 42)), c = s[0], l = s[1], u = s[2];
+	return [
+		N(e, t + 10),
+		c,
+		l,
+		a,
+		o + i + N(e, t + 32),
+		u
+	];
+}, ie = function(e, t, n, r, i, a, o) {
+	var s = i == 4294967295, c = a == 4294967295, l = o == 4294967295, u = t + n, d = s + c + l;
+	if (r && d) {
+		for (; t + 4 < u; t += 4 + N(e, t + 2)) if (N(e, t) == 1) return [
+			s ? F(e, t + 4 + 8 * c) : i,
+			c ? F(e, t + 4) : a,
+			l ? F(e, t + 4 + 8 * (c + s)) : o,
+			1
+		];
+		r < 2 && A(13);
+	}
+	return [
+		i,
+		a,
+		o,
+		0
+	];
 };
-function Gt(i, t) {
-  for (var e = {}, r = i.length - 22; F(i, r) != 101010256; --r)
-    (!r || i.length - r > 65558) && x(13);
-  var n = H(i, r + 8);
-  if (!n)
-    return {};
-  var s = F(i, r + 16), o = F(i, r - 20) == 117853008;
-  if (o) {
-    var a = F(i, r - 12);
-    o = F(i, a) == 101075792, o && (n = F(i, a + 32), s = F(i, a + 48));
-  }
-  for (var l = 0; l < n; ++l) {
-    var c = $t(i, s, o), g = c[0], f = c[1], h = c[2], u = c[3], v = c[4], d = c[5], y = Ut(i, d);
-    s = v, g ? g == 8 ? e[u] = Ot(i.subarray(y, y + f), { out: new M(h) }) : x(14, "unknown compression type " + g) : e[u] = et(i, y, y + f);
-  }
-  return e;
+function V(e, t) {
+	for (var n = {}, r = e.length - 22; P(e, r) != 101010256; --r) (!r || e.length - r > 65558) && A(13);
+	var i = N(e, r + 8);
+	if (!i) return {};
+	var a = P(e, r + 16), o = P(e, r - 20) == 117853008;
+	if (o) {
+		var c = P(e, r - 12);
+		o = P(e, c) == 101075792, o && (i = P(e, c + 32), a = P(e, c + 48));
+	}
+	for (var l = t && t.filter, u = 0; u < i; ++u) {
+		var d = re(e, a, o), f = d[0], p = d[1], m = d[2], h = d[3], g = d[4], _ = d[5], v = B(e, _);
+		a = g, (!l || l({
+			name: h,
+			size: p,
+			originalSize: m,
+			compression: f
+		})) && (f ? f == 8 ? n[h] = I(e.subarray(v, v + p), { out: new s(m) }) : A(14, "unknown compression type " + f) : n[h] = O(e, v, v + p));
+	}
+	return n;
 }
-function St(i, t, e, r, n) {
-  if (i <= 0) return 0;
-  if (i >= 1) return 1;
-  let s = 0, o = 1, a = 0.5;
-  for (let l = 0; l < 16; l++) {
-    a = 0.5 * (s + o);
-    const c = 3 * (1 - a) * (1 - a) * a * t + 3 * (1 - a) * a * a * r + a * a * a;
-    if (Math.abs(c - i) < 1e-4) break;
-    c < i ? s = a : o = a;
-  }
-  return 3 * (1 - a) * (1 - a) * a * e + 3 * (1 - a) * a * a * n + a * a * a;
+// src/runtime.ts
+function H(e, t, n, r, i) {
+	if (e <= 0) return 0;
+	if (e >= 1) return 1;
+	let a = 0, o = 1, s = .5;
+	for (let n = 0; n < 16; n++) {
+		s = .5 * (a + o);
+		let n = 3 * (1 - s) * (1 - s) * s * t + 3 * (1 - s) * s * s * r + s * s * s;
+		if (Math.abs(n - e) < 1e-4) break;
+		n < e ? a = s : o = s;
+	}
+	return 3 * (1 - s) * (1 - s) * s * n + 3 * (1 - s) * s * s * i + s * s * s;
 }
-function Jt(i, t) {
-  if (!i || !i.Keys || i.Keys.length === 0) return 0;
-  const e = i.Keys;
-  if (t <= e[0].Time) return e[0].Value;
-  if (t >= e[e.length - 1].Time) return e[e.length - 1].Value;
-  for (let r = 0; r < e.length - 1; r++) {
-    const n = e[r], s = e[r + 1];
-    if (t >= n.Time && t <= s.Time) {
-      const o = (t - n.Time) / Math.max(1e-4, s.Time - n.Time);
-      if (n.Interp === 0) return n.Value;
-      if (n.Interp === 1) return n.Value + (s.Value - n.Value) * o;
-      const a = St(o, n.X1 ?? 0.25, n.Y1 ?? 0.1, n.X2 ?? 0.25, n.Y2 ?? 1);
-      return n.Value + (s.Value - n.Value) * a;
-    }
-  }
-  return e[0].Value;
+function U(e, t) {
+	if (!e || !e.Keys || e.Keys.length === 0) return 0;
+	let n = e.Keys;
+	if (t <= n[0].Time) return n[0].Value;
+	if (t >= n[n.length - 1].Time) return n[n.length - 1].Value;
+	for (let e = 0; e < n.length - 1; e++) {
+		let r = n[e], i = n[e + 1];
+		if (t >= r.Time && t <= i.Time) {
+			let e = (t - r.Time) / Math.max(1e-4, i.Time - r.Time);
+			if (r.Interp === 0) return r.Value;
+			if (r.Interp === 1) return r.Value + (i.Value - r.Value) * e;
+			if (r.Interp === 3) {
+				let e = W(t - r.Time, r.Mass ?? 1, r.Stiffness ?? 100, r.Damping ?? 10, r.InitialVelocity ?? 0);
+				return r.Value + (i.Value - r.Value) * (Number.isFinite(e) ? e : 1);
+			}
+			let n = H(e, r.X1 ?? .25, r.Y1 ?? .1, r.X2 ?? .25, r.Y2 ?? 1);
+			return r.Value + (i.Value - r.Value) * n;
+		}
+	}
+	return n[0].Value;
 }
-async function Ct(i) {
-  const t = await fetch(i);
-  if (!t.ok)
-    throw new Error(`Failed to load .kfx package from ${i}: HTTP ${t.status}`);
-  const e = await t.arrayBuffer();
-  return Qt(e);
+function W(e, t, n, r, i) {
+	if (e <= 0) return 0;
+	let a = Math.max(1e-4, t), o = Math.max(1e-4, n), s = Math.max(0, r), c = Math.sqrt(o / a), l = s / (2 * a), u = l * l - c * c;
+	if (Math.abs(u) < 1e-7) return 1 - Math.exp(-l * e) * (1 + (l - i) * e);
+	if (u < 0) {
+		let t = Math.sqrt(c * c - l * l), n = (l - i) / t;
+		return 1 - Math.exp(-l * e) * (Math.cos(t * e) + n * Math.sin(t * e));
+	}
+	let d = Math.sqrt(u), f = -l + d, p = -l - d, m = (i - l - d) / (2 * d), h = (-i + l - d) / (2 * d);
+	return 1 + m * Math.exp(f * e) + h * Math.exp(p * e);
 }
-function Qt(i) {
-  const t = new Uint8Array(i), e = Gt(t), r = (l, c = !0) => {
-    const g = e[l];
-    if (!g) {
-      if (c) throw new Error(`Missing expected file in .kfx container: ${l}`);
-      return null;
-    }
-    const f = new TextDecoder("utf-8").decode(g);
-    return JSON.parse(f);
-  }, n = r("manifest.json"), s = r("scene.json"), o = r("animations.json") ?? [], a = r("state-machines.json", !1);
-  return {
-    manifest: n,
-    scene: s,
-    animations: o,
-    stateMachine: a
-  };
+function G(e) {
+	return {
+		IsClosed: e.IsClosed,
+		SvgPathData: e.SvgPathData,
+		Nodes: e.Nodes?.map((e) => ({
+			Anchor: { ...e.Anchor },
+			InHandle: { ...e.InHandle },
+			OutHandle: { ...e.OutHandle },
+			Type: e.Type
+		}))
+	};
 }
-class Tt {
-  constructor(t) {
-    T(this, "pkg");
-    T(this, "isPlaying", !0);
-    T(this, "currentTime", 0);
-    T(this, "playbackSpeed", 1);
-    // State Machine State
-    T(this, "inputs", {});
-    T(this, "currentState", null);
-    T(this, "activeClip", null);
-    // State Machine Transition State
-    T(this, "isTransitioning", !1);
-    T(this, "transitionFromState", null);
-    T(this, "transitionToState", null);
-    T(this, "transitionTime", 0);
-    T(this, "transitionDuration", 0.25);
-    T(this, "transitionMix", 0);
-    T(this, "activeTransition", null);
-    // Listeners & Pointer Hover Tracking
-    T(this, "hoveredLayers", /* @__PURE__ */ new Set());
-    // Change Callback
-    T(this, "onStateChange");
-    T(this, "onInputChange");
-    this.pkg = t, this.init();
-  }
-  init() {
-    var t, e, r, n;
-    if ((t = this.pkg.stateMachine) != null && t.Inputs)
-      for (const s of this.pkg.stateMachine.Inputs)
-        this.inputs[s.Name] = s.InitialValue ?? s.Value ?? 0;
-    if ((n = (r = (e = this.pkg.stateMachine) == null ? void 0 : e.Layers) == null ? void 0 : r[0]) != null && n.States) {
-      const s = this.pkg.stateMachine.Layers[0].States, o = s.find((c) => c.Kind === 0 || c.Name.toLowerCase() === "entry") ?? s[0];
-      this.currentState = o;
-      const l = (this.pkg.stateMachine.Layers[0].Transitions ?? []).find((c) => c.FromState === o.Id);
-      if (l) {
-        const c = s.find((g) => g.Id === l.ToState);
-        c && (this.currentState = c);
-      }
-      this.updateActiveClip();
-    } else this.pkg.animations.length > 0 && (this.activeClip = this.pkg.animations[0]);
-  }
-  updateActiveClip() {
-    this.currentState && (this.currentState.ClipIndex >= 0 && this.currentState.ClipIndex < this.pkg.animations.length ? this.activeClip = this.pkg.animations[this.currentState.ClipIndex] : this.currentState.ClipName ? this.activeClip = this.pkg.animations.find((t) => {
-      var e;
-      return t.Name === ((e = this.currentState) == null ? void 0 : e.ClipName);
-    }) ?? null : this.pkg.animations.length > 0 && (this.activeClip = this.pkg.animations[0]));
-  }
-  // Input Control API
-  setBool(t, e) {
-    var n;
-    const r = e ? 1 : 0;
-    this.inputs[t] !== r && (this.inputs[t] = r, (n = this.onInputChange) == null || n.call(this, t, r), this.evaluateStateTransitions());
-  }
-  setNumber(t, e) {
-    var r;
-    this.inputs[t] !== e && (this.inputs[t] = e, (r = this.onInputChange) == null || r.call(this, t, e), this.evaluateStateTransitions());
-  }
-  fireTrigger(t) {
-    var e;
-    this.inputs[t] = 1, (e = this.onInputChange) == null || e.call(this, t, 1), this.evaluateStateTransitions(), setTimeout(() => {
-      var r;
-      this.inputs[t] = 0, (r = this.onInputChange) == null || r.call(this, t, 0);
-    }, 16);
-  }
-  // Pointer Interaction
-  handlePointerMove(t, e) {
-    var r;
-    if ((r = this.pkg.scene) != null && r.Layers)
-      for (const n of this.pkg.scene.Layers) {
-        const s = t >= n.X && t <= n.X + (n.Width || 100) && e >= n.Y && e <= n.Y + (n.Height || 100), o = n.Id, a = this.hoveredLayers.has(o);
-        s && !a ? (this.hoveredLayers.add(o), this.dispatchLayerEvent(
-          n,
-          3
-          /* PointerEnter */
-        )) : !s && a && (this.hoveredLayers.delete(o), this.dispatchLayerEvent(
-          n,
-          4
-          /* PointerExit */
-        ));
-      }
-  }
-  handlePointerLeave() {
-    var t, e;
-    for (const r of Array.from(this.hoveredLayers)) {
-      this.hoveredLayers.delete(r);
-      const n = (e = (t = this.pkg.scene) == null ? void 0 : t.Layers) == null ? void 0 : e.find((s) => s.Id === r);
-      n && this.dispatchLayerEvent(
-        n,
-        4
-        /* PointerExit */
-      );
-    }
-  }
-  dispatchLayerEvent(t, e) {
-    var n;
-    const r = ((n = this.pkg.stateMachine) == null ? void 0 : n.Listeners) ?? [];
-    for (const s of r)
-      if ((s.TargetLayerId === t.Id || t.NumericId && s.TargetNodeId === t.NumericId) && (s.Kind === e || e === 4 && s.Kind === 3)) {
-        for (const o of s.Actions)
-          if (o.PropertyName) {
-            const a = e === 4 ? 0 : o.Parameter ?? 1;
-            this.setNumber(o.PropertyName, a);
-          }
-      }
-  }
-  // State Transition Evaluation
-  evaluateStateTransitions() {
-    var n, s;
-    if (!((s = (n = this.pkg.stateMachine) == null ? void 0 : n.Layers) != null && s[0])) return;
-    const t = this.pkg.stateMachine.Layers[0], e = t.States, r = t.Transitions ?? [];
-    if (this.currentState)
-      for (const o of r) {
-        if (o.FromState !== this.currentState.Id && o.FromState !== 1)
-          continue;
-        let a = !0;
-        const l = o.ConditionGroups ?? [], c = o.Conditions ?? [];
-        if (l.length > 0)
-          for (const g of l) {
-            for (const f of g.Conditions)
-              if (!this.testCondition(f)) {
-                a = !1;
-                break;
-              }
-            if (!a) break;
-          }
-        else if (c.length > 0) {
-          for (const g of c)
-            if (!this.testCondition(g)) {
-              a = !1;
-              break;
-            }
-        }
-        if (a) {
-          const g = e.find((f) => f.Id === o.ToState);
-          if (g && g.Id !== this.currentState.Id) {
-            this.startTransition(o, g);
-            break;
-          }
-        }
-      }
-  }
-  testCondition(t) {
-    const e = this.inputs[t.PropertyName] ?? 0, r = t.Value;
-    switch (t.Op) {
-      case 0:
-        return e === r;
-      case 1:
-        return e !== r;
-      case 2:
-        return e < r;
-      case 3:
-        return e <= r;
-      case 4:
-        return e > r;
-      case 5:
-        return e >= r;
-      default:
-        return e === r;
-    }
-  }
-  startTransition(t, e) {
-    var r, n, s;
-    t.Duration <= 0 ? (this.currentState = e, this.updateActiveClip(), this.isTransitioning = !1, (r = this.onStateChange) == null || r.call(this, e.Name)) : (this.isTransitioning = !0, this.transitionFromState = this.currentState, this.transitionToState = e, this.activeTransition = t, this.transitionTime = 0, this.transitionDuration = t.Duration, this.transitionMix = 0, (s = this.onStateChange) == null || s.call(this, `${(n = this.transitionFromState) == null ? void 0 : n.Name} → ${e.Name}`));
-  }
-  // Animation Update Loop
-  advance(t) {
-    var n, s;
-    if (!this.isPlaying) return;
-    const e = t * this.playbackSpeed, r = ((n = this.activeClip) == null ? void 0 : n.Duration) ?? 2;
-    if (r > 0 && (this.currentTime = (this.currentTime + e) % r), this.isTransitioning && this.transitionToState) {
-      this.transitionTime += e;
-      const o = Math.min(1, this.transitionTime / Math.max(1e-3, this.transitionDuration)), a = this.activeTransition;
-      this.transitionMix = St(
-        o,
-        (a == null ? void 0 : a.X1) ?? 0.42,
-        (a == null ? void 0 : a.Y1) ?? 0,
-        (a == null ? void 0 : a.X2) ?? 0.58,
-        (a == null ? void 0 : a.Y2) ?? 1
-      ), o >= 1 && (this.currentState = this.transitionToState, this.updateActiveClip(), this.isTransitioning = !1, this.transitionFromState = null, this.transitionToState = null, this.activeTransition = null, this.transitionMix = 0, (s = this.onStateChange) == null || s.call(this, this.currentState.Name));
-    }
-  }
-  // Pose Computation & Blending
-  computePose() {
-    const t = {};
-    if (!this.activeClip) return t;
-    if (this.evaluateClipIntoPose(this.activeClip, this.currentTime, t), this.isTransitioning && this.transitionToState) {
-      const e = this.transitionToState.ClipIndex, r = e >= 0 && e < this.pkg.animations.length ? this.pkg.animations[e] : null;
-      if (r) {
-        const n = {};
-        this.evaluateClipIntoPose(r, this.currentTime % (r.Duration || 2), n);
-        const s = this.transitionMix;
-        for (const o of Object.keys(n)) {
-          t[o] || (t[o] = {});
-          const a = t[o], l = n[o];
-          l.Width !== void 0 && a.Width !== void 0 ? a.Width = a.Width * (1 - s) + l.Width * s : l.Width !== void 0 && (a.Width = l.Width), l.Height !== void 0 && a.Height !== void 0 ? a.Height = a.Height * (1 - s) + l.Height * s : l.Height !== void 0 && (a.Height = l.Height), l.VisualWidth !== void 0 && a.VisualWidth !== void 0 && (a.VisualWidth = a.VisualWidth * (1 - s) + l.VisualWidth * s), l.VisualHeight !== void 0 && a.VisualHeight !== void 0 && (a.VisualHeight = a.VisualHeight * (1 - s) + l.VisualHeight * s), l.ScaleX !== void 0 && a.ScaleX !== void 0 && (a.ScaleX = a.ScaleX * (1 - s) + l.ScaleX * s), l.ScaleY !== void 0 && a.ScaleY !== void 0 && (a.ScaleY = a.ScaleY * (1 - s) + l.ScaleY * s), l.Rotation !== void 0 && a.Rotation !== void 0 && (a.Rotation = a.Rotation * (1 - s) + l.Rotation * s), l.Opacity !== void 0 && a.Opacity !== void 0 && (a.Opacity = a.Opacity * (1 - s) + l.Opacity * s);
-        }
-      }
-    }
-    return t;
-  }
-  evaluateClipIntoPose(t, e, r) {
-    if (t != null && t.Tracks)
-      for (const n of t.Tracks) {
-        if (n.IsActive === !1) continue;
-        const s = n.TargetNodeId ?? String(n.NodeId);
-        r[s] || (r[s] = {});
-        const o = Jt(n, e), a = (n.PropertyPath || "").toLowerCase();
-        a === "scalex" || n.Prop === 12 ? r[s].ScaleX = o : a === "scaley" || n.Prop === 13 ? r[s].ScaleY = o : a === "width" || n.Prop === 3 ? r[s].Width = o : a === "height" || n.Prop === 4 ? r[s].Height = o : a === "visualwidth" || n.Prop === 16 ? r[s].VisualWidth = o : a === "visualheight" || n.Prop === 17 ? r[s].VisualHeight = o : a === "rotation" || n.Prop === 5 ? r[s].Rotation = o : a === "opacity" || n.Prop === 7 ? r[s].Opacity = o : a === "x" || a === "translationx" || n.Prop === 1 ? r[s].X = o : (a === "y" || a === "translationy" || n.Prop === 2) && (r[s].Y = o);
-      }
-  }
-  // Canvas Render Execution
-  renderToCanvas(t) {
-    const e = t.getContext("2d");
-    if (!e) return;
-    const r = this.pkg.scene, n = r.Width || 1920, s = r.Height || 1080, o = typeof window < "u" && window.devicePixelRatio || 1, a = t.clientWidth || 800, l = t.clientHeight || 500;
-    (t.width !== a * o || t.height !== l * o) && (t.width = a * o, t.height = l * o), e.save(), e.scale(o, o), e.fillStyle = r.BackgroundColor || "#1E1E22", e.fillRect(0, 0, a, l);
-    const c = Math.min(a / n, l / s), g = (a - n * c) * 0.5, f = (l - s * c) * 0.5;
-    e.translate(g, f), e.scale(c, c);
-    const h = this.computePose();
-    for (const u of r.Layers) {
-      if (u.IsVisible === !1) continue;
-      e.save();
-      const v = h[u.Id] ?? (u.NumericId ? h[String(u.NumericId)] : null) ?? {}, d = v.VisualWidth ?? v.Width ?? u.Width ?? 100, y = v.VisualHeight ?? v.Height ?? u.Height ?? 100, C = v.ScaleX ?? u.ScaleX ?? 1, k = v.ScaleY ?? u.ScaleY ?? 1, S = (v.Rotation ?? u.Rotation ?? 0) * Math.PI / 180, I = Math.max(0, Math.min(1, v.Opacity ?? u.Opacity ?? 1));
-      e.globalAlpha = I;
-      const V = u.X + d * 0.5, P = u.Y + y * 0.5;
-      e.translate(V, P), e.rotate(S), e.scale(C, k), e.translate(-V, -P), u.Fills && u.Fills.length > 0 && u.Fills[0].ColorHex ? e.fillStyle = u.Fills[0].ColorHex : e.fillStyle = "#203BFF";
-      const w = u.CornerRadius ?? 0;
-      w > 0 && typeof e.roundRect == "function" ? (e.beginPath(), e.roundRect(u.X, u.Y, d, y, w), e.fill()) : e.fillRect(u.X, u.Y, d, y), e.restore();
-    }
-    e.restore();
-  }
-  getArtboardCoords(t, e, r) {
-    const n = t.getBoundingClientRect(), s = n.width, o = n.height, a = this.pkg.scene.Width || 1920, l = this.pkg.scene.Height || 1080, c = Math.min(s / a, o / l), g = (s - a * c) * 0.5, f = (o - l * c) * 0.5, h = e - n.left, u = r - n.top, v = (h - g) / c, d = (u - f) / c;
-    return { x: v, y: d };
-  }
+function K(e) {
+	return {
+		Anchor: { ...e.Anchor },
+		InHandle: { ...e.InHandle },
+		OutHandle: { ...e.OutHandle },
+		Type: e.Type
+	};
 }
-const Zt = Ft(({
-  src: i,
-  autoplay: t = !0,
-  inputs: e,
-  style: r,
-  className: n,
-  onLoad: s,
-  onStateChange: o
-}, a) => {
-  const l = j(null), c = j(null);
-  bt(a, () => ({
-    setBool: (h, u) => {
-      var v;
-      return (v = c.current) == null ? void 0 : v.setBool(h, u);
-    },
-    setNumber: (h, u) => {
-      var v;
-      return (v = c.current) == null ? void 0 : v.setNumber(h, u);
-    },
-    fireTrigger: (h) => {
-      var u;
-      return (u = c.current) == null ? void 0 : u.fireTrigger(h);
-    },
-    play: () => {
-      c.current && (c.current.isPlaying = !0);
-    },
-    pause: () => {
-      c.current && (c.current.isPlaying = !1);
-    },
-    reset: () => {
-      c.current && (c.current.currentTime = 0);
-    },
-    getPlayer: () => c.current
-  })), Z(() => {
-    if (!(!c.current || !e))
-      for (const [h, u] of Object.entries(e))
-        typeof u == "boolean" ? c.current.setBool(h, u) : typeof u == "number" && c.current.setNumber(h, u);
-  }, [e]), Z(() => {
-    let h = !1, u, v = performance.now();
-    async function d() {
-      try {
-        const y = await Ct(i);
-        if (h) return;
-        const C = new Tt(y);
-        if (C.isPlaying = t, o && (C.onStateChange = o), e)
-          for (const [p, S] of Object.entries(e))
-            typeof S == "boolean" ? C.setBool(p, S) : typeof S == "number" && C.setNumber(p, S);
-        c.current = C, s == null || s(y);
-        const k = (p) => {
-          const S = (p - v) / 1e3;
-          v = p, c.current && l.current && (c.current.advance(S), c.current.renderToCanvas(l.current)), u = requestAnimationFrame(k);
-        };
-        u = requestAnimationFrame(k);
-      } catch (y) {
-        console.error(`[Kerf] Error loading "${i}":`, y);
-      }
-    }
-    return d(), () => {
-      h = !0, cancelAnimationFrame(u), c.current = null;
-    };
-  }, [i, t, o, s]);
-  const g = (h) => {
-    const u = c.current, v = l.current;
-    if (u && v) {
-      const d = u.getArtboardCoords(v, h.clientX, h.clientY);
-      u.handlePointerMove(d.x, d.y);
-    }
-  }, f = () => {
-    var h;
-    (h = c.current) == null || h.handlePointerLeave();
-  };
-  return /* @__PURE__ */ ht(
-    "canvas",
-    {
-      ref: l,
-      className: n,
-      style: {
-        width: "100%",
-        height: "100%",
-        display: "block",
-        ...r
-      },
-      onPointerMove: g,
-      onPointerLeave: f
-    }
-  );
+function ae(e, t, n) {
+	let r = Number.isFinite(n) ? n : 0, i = (e, t) => e + (t - e) * r;
+	return {
+		Anchor: {
+			X: i(e.Anchor.X, t.Anchor.X),
+			Y: i(e.Anchor.Y, t.Anchor.Y)
+		},
+		InHandle: {
+			X: i(e.InHandle.X, t.InHandle.X),
+			Y: i(e.InHandle.Y, t.InHandle.Y)
+		},
+		OutHandle: {
+			X: i(e.OutHandle.X, t.OutHandle.X),
+			Y: i(e.OutHandle.Y, t.OutHandle.Y)
+		},
+		Type: r < .5 ? e.Type : t.Type
+	};
+}
+function q(e, t, n) {
+	let r = Math.max(0, Math.min(1, n));
+	if (r <= 0) return G(e);
+	if (r >= 1) return G(t);
+	let i = e.Nodes ?? [], a = t.Nodes ?? [];
+	if (!(i.length > 0 && i.length === a.length && !e.SvgPathData && !t.SvgPathData)) return G(e);
+	let o = (e, t) => e + (t - e) * r;
+	return {
+		IsClosed: r < .5 ? e.IsClosed : t.IsClosed,
+		Nodes: i.map((e, t) => {
+			let n = a[t];
+			return {
+				Anchor: {
+					X: o(e.Anchor.X, n.Anchor.X),
+					Y: o(e.Anchor.Y, n.Anchor.Y)
+				},
+				InHandle: {
+					X: o(e.InHandle.X, n.InHandle.X),
+					Y: o(e.InHandle.Y, n.InHandle.Y)
+				},
+				OutHandle: {
+					X: o(e.OutHandle.X, n.OutHandle.X),
+					Y: o(e.OutHandle.Y, n.OutHandle.Y)
+				},
+				Type: r < .5 ? e.Type : n.Type
+			};
+		})
+	};
+}
+function J(e, t) {
+	let n = (e?.Keys ?? []).filter((e) => e?.GeometryValue != null);
+	if (n.length === 0) return null;
+	if (t <= n[0].Time) return G(n[0].GeometryValue);
+	if (t >= n[n.length - 1].Time) return G(n[n.length - 1].GeometryValue);
+	for (let r = 0; r < n.length - 1; r++) {
+		let i = n[r], a = n[r + 1];
+		if (t < i.Time || t > a.Time) continue;
+		let o = U({
+			...e,
+			Keys: [{
+				...i,
+				Value: 0
+			}, {
+				...a,
+				Value: 1
+			}]
+		}, t);
+		return q(i.GeometryValue, a.GeometryValue, o);
+	}
+	return G(n[n.length - 1].GeometryValue);
+}
+function Y(e, t) {
+	let n = (e?.Keys ?? []).filter((e) => e?.GeometryNodeValue != null);
+	if (n.length === 0) return null;
+	if (t <= n[0].Time) return K(n[0].GeometryNodeValue);
+	if (t >= n[n.length - 1].Time) return K(n[n.length - 1].GeometryNodeValue);
+	for (let r = 0; r < n.length - 1; r++) {
+		let i = n[r], a = n[r + 1];
+		if (t < i.Time || t > a.Time) continue;
+		let o = {
+			...e,
+			Keys: [{
+				...i,
+				Value: 0
+			}, {
+				...a,
+				Value: 1
+			}]
+		};
+		return ae(i.GeometryNodeValue, a.GeometryNodeValue, U(o, t));
+	}
+	return K(n[n.length - 1].GeometryNodeValue);
+}
+async function X(e) {
+	let t = await fetch(e);
+	if (!t.ok) throw Error(`Failed to load .kfx package from ${e}: HTTP ${t.status}`);
+	return Z(await t.arrayBuffer());
+}
+function Z(e) {
+	let t = V(new Uint8Array(e)), n = (e, n = !0) => {
+		let r = t[e];
+		if (!r) {
+			if (n) throw Error(`Missing expected file in .kfx container: ${e}`);
+			return null;
+		}
+		let i = new TextDecoder("utf-8").decode(r);
+		return JSON.parse(i);
+	};
+	return {
+		manifest: n("manifest.json"),
+		scene: n("scene.json"),
+		animations: n("animations.json") ?? [],
+		stateMachine: n("state-machines.json", !1)
+	};
+}
+var Q = class {
+	pkg;
+	isPlaying = !0;
+	currentTime = 0;
+	playbackSpeed = 1;
+	loop = null;
+	inputs = {};
+	textInputs = {};
+	currentState = null;
+	activeClip = null;
+	isTransitioning = !1;
+	transitionFromState = null;
+	transitionToState = null;
+	transitionTime = 0;
+	transitionDuration = .25;
+	transitionMix = 0;
+	activeTransition = null;
+	hoveredLayers = /* @__PURE__ */ new Set();
+	pressedLayers = /* @__PURE__ */ new Set();
+	alignedLayers = /* @__PURE__ */ new Map();
+	firedTriggers = /* @__PURE__ */ new Set();
+	triggerTimeouts = /* @__PURE__ */ new Map();
+	pointerPosition = null;
+	isPointerDown = !1;
+	playbackDirection = 1;
+	focusedNodeId = 0;
+	onStateChange;
+	onInputChange;
+	onTextInputChange;
+	onEvent;
+	reportedEvents = [];
+	constructor(e) {
+		this.pkg = e, this.init();
+	}
+	init() {
+		if (this.pkg.stateMachine?.Inputs) for (let e of this.pkg.stateMachine.Inputs) this.inputs[e.Name] = e.InitialValue ?? e.Value ?? 0;
+		for (let e of this.pkg.stateMachine?.ViewModelProperties ?? []) e.Kind === 3 ? this.textInputs[e.Name] = e.InitialText ?? "" : e.Kind === 0 && this.inputs[e.Name] === void 0 ? this.inputs[e.Name] = +!!e.InitialBoolean : e.Kind === 1 && this.inputs[e.Name] === void 0 && (this.inputs[e.Name] = e.InitialNumber ?? 0);
+		if (this.pkg.stateMachine?.Layers?.[0]?.States) {
+			let e = this.pkg.stateMachine.Layers[0].States, t = e.find((e) => e.Kind === 0 || e.Name.toLowerCase() === "entry") ?? e[0];
+			this.currentState = t, this.updateActiveClip(), this.currentTime = this.activeClip?.WorkAreaStart ?? 0, this.evaluateStateTransitions();
+		} else if (this.pkg.animations.length > 0) {
+			let e = this.pkg.manifest?.EntryPoints?.defaultClipId;
+			this.activeClip = this.pkg.animations.find((t) => t.Id === e) ?? this.pkg.animations[0];
+		}
+	}
+	updateActiveClip() {
+		this.currentState && (this.activeClip = this.getClipForState(this.currentState), !this.activeClip && this.pkg.animations.length > 0 && (this.activeClip = this.pkg.animations[0]));
+	}
+	getClipForState(e) {
+		if (e.ClipId !== void 0) {
+			let t = this.pkg.animations.find((t) => t.Id === e.ClipId);
+			if (t) return t;
+		}
+		let t = (e.Kind === 4 ? e.Blend1DItems?.[0]?.ClipIndex : void 0) ?? e.ClipIndex;
+		return t >= 0 && t < this.pkg.animations.length ? this.pkg.animations[t] ?? null : e.ClipName ? this.pkg.animations.find((t) => t.Name === e.ClipName) ?? null : null;
+	}
+	getSceneLayers() {
+		let e = [], t = (n) => {
+			if (n) for (let r of n) e.push(r), t(r.Children);
+		};
+		return t(this.pkg.scene?.Layers), e;
+	}
+	findInput(e, t) {
+		let n = this.pkg.stateMachine?.Inputs ?? [];
+		if (t !== void 0 && t >= 0 && t < n.length) return n[t];
+		if (!e) return;
+		let r = e.toLowerCase();
+		return n.find((e) => e.Name?.toLowerCase() === r || e.InputId?.toLowerCase() === r);
+	}
+	inputKey(e) {
+		return e.InputId || e.Name;
+	}
+	getInputValue(e) {
+		return this.inputs[e.Name] ?? e.InitialValue ?? e.Value ?? 0;
+	}
+	getNumericLayerId(e) {
+		if (e.NumericId !== void 0 && e.NumericId !== 0) return e.NumericId;
+		let t = 2166136261;
+		for (let n = 0; n < e.Id.length; n++) t ^= e.Id.charCodeAt(n), t = Math.imul(t, 16777619);
+		return t >>> 0 || 1;
+	}
+	setBool(e, t) {
+		let n = this.findInput(e);
+		if (n && (n.Kind === 2 || n.Kind === 3)) return;
+		let r = n?.Name ?? e, i = +!!t;
+		this.inputs[r] !== i && (this.inputs[r] = i, this.onInputChange?.(r, i), this.evaluateStateTransitions());
+	}
+	setNumber(e, t) {
+		if (!Number.isFinite(t)) return;
+		let n = this.findInput(e);
+		if (n && (n.Kind === 2 || n.Kind === 3)) return;
+		let r = n?.Name ?? e;
+		this.inputs[r] !== t && (this.inputs[r] = t, this.onInputChange?.(r, t), this.evaluateStateTransitions());
+	}
+	fireTrigger(e) {
+		let t = this.findInput(e);
+		if (t && t.Kind !== 2) return;
+		let n = t?.Name ?? e, r = t ? this.inputKey(t) : n;
+		this.inputs[n] = 1, this.firedTriggers.add(r), this.onInputChange?.(n, 1), this.evaluateStateTransitions();
+		let i = this.triggerTimeouts.get(r);
+		i && clearTimeout(i);
+		let a = setTimeout(() => {
+			this.inputs[n] = 0, this.firedTriggers.delete(r), this.triggerTimeouts.delete(r), this.onInputChange?.(n, 0);
+		}, 16);
+		this.triggerTimeouts.set(r, a);
+	}
+	handlePointerMove(e, t) {
+		this.pointerPosition = {
+			x: e,
+			y: t
+		};
+		let n = this.getSceneLayers(), r = new Set(n.filter((n) => this.containsPoint(n, e, t)).map((e) => e.Id));
+		for (let e of this.hoveredLayers) if (!r.has(e)) {
+			let t = n.find((t) => t.Id === e);
+			t && this.dispatchLayerEvent(t, 4);
+		}
+		for (let e of n) {
+			let t = this.hoveredLayers.has(e.Id), n = r.has(e.Id);
+			n && !t && this.dispatchLayerEvent(e, 3), n && (this.dispatchLayerEvent(e, 2), this.isPointerDown && this.dispatchLayerEvent(e, 8));
+		}
+		this.hoveredLayers = r, this.dispatchListenerTarget(0, 2, null), this.isPointerDown && this.dispatchListenerTarget(0, 8, null);
+	}
+	handlePointerLeave() {
+		for (let e of Array.from(this.hoveredLayers)) {
+			let t = this.getSceneLayers().find((t) => t.Id === e);
+			t && this.dispatchLayerEvent(t, 4);
+		}
+		this.hoveredLayers.clear(), this.dispatchListenerTarget(0, 4, null), this.isPointerDown || (this.pressedLayers.clear(), this.pointerPosition = null);
+	}
+	handlePointerDown() {
+		this.isPointerDown = !0, this.pressedLayers = new Set(this.hoveredLayers);
+		let e = Array.from(this.hoveredLayers), t = e.length > 0 ? e[e.length - 1] : null, n = t ? this.getSceneLayers().find((e) => e.Id === t) : void 0;
+		n && this.focusTarget(n);
+		for (let e of this.hoveredLayers) {
+			let t = this.getSceneLayers().find((t) => t.Id === e);
+			t && (this.dispatchLayerEvent(t, 0), this.dispatchLayerEvent(t, 7));
+		}
+		this.dispatchListenerTarget(0, 0, null), this.dispatchListenerTarget(0, 7, null);
+	}
+	handlePointerUp() {
+		let e = /* @__PURE__ */ new Set([...this.hoveredLayers, ...this.pressedLayers]);
+		for (let t of e) {
+			let e = this.getSceneLayers().find((e) => e.Id === t);
+			e && (this.dispatchLayerEvent(e, 1), this.pressedLayers.has(t) && this.dispatchLayerEvent(e, 9));
+		}
+		this.dispatchListenerTarget(0, 1, null), this.pressedLayers.size > 0 && this.dispatchListenerTarget(0, 9, null), this.isPointerDown = !1;
+	}
+	handlePointerCancel() {
+		let e = /* @__PURE__ */ new Set([...this.hoveredLayers, ...this.pressedLayers]);
+		for (let t of e) {
+			let e = this.getSceneLayers().find((e) => e.Id === t);
+			e && this.pressedLayers.has(t) && this.dispatchLayerEvent(e, 9);
+		}
+		this.pressedLayers.size > 0 && this.dispatchListenerTarget(0, 9, null), this.isPointerDown = !1, this.pressedLayers.clear(), this.pointerPosition = null;
+	}
+	handlePointerClick() {
+		for (let e of this.pressedLayers) {
+			if (!this.hoveredLayers.has(e)) continue;
+			let t = this.getSceneLayers().find((t) => t.Id === e);
+			t && (this.dispatchLayerEvent(t, 5), this.dispatchLayerEvent(t, 6));
+		}
+		this.dispatchListenerTarget(0, 5, null), this.dispatchListenerTarget(0, 6, null), this.pressedLayers.clear();
+	}
+	handleKeyDown(e) {
+		let t = this.getSceneLayers().find((e) => this.getNumericLayerId(e) === this.focusedNodeId);
+		t && this.dispatchLayerEvent(t, 12, e), this.dispatchListenerTarget(0, 12, null, e);
+	}
+	handleTextInput(e) {
+		let t = this.getSceneLayers().find((e) => this.getNumericLayerId(e) === this.focusedNodeId);
+		t && this.dispatchLayerEvent(t, 14, e), this.dispatchListenerTarget(0, 14, null, e);
+	}
+	containsPoint(e, t, n) {
+		if (e.IsVisible === !1) return !1;
+		let r = this.computePose(), i = r[e.Id] ?? r[String(this.getNumericLayerId(e))] ?? {}, a = i.X ?? e.X, o = i.Y ?? e.Y, s = i.VisualWidth ?? i.Width ?? e.Width ?? 100, c = i.VisualHeight ?? i.Height ?? e.Height ?? 100, l = a + s * .5, u = o + c * .5, d = -((i.Rotation ?? e.Rotation ?? 0) * Math.PI / 180), f = t - l, p = n - u, m = (f * Math.cos(d) - p * Math.sin(d)) / (i.ScaleX ?? e.ScaleX ?? 1) + l, h = (f * Math.sin(d) + p * Math.cos(d)) / (i.ScaleY ?? e.ScaleY ?? 1) + u;
+		return m >= a && m <= a + s && h >= o && h <= o + c;
+	}
+	dispatchLayerEvent(e, t, n) {
+		this.dispatchListenerTarget(this.getNumericLayerId(e), t, e, n);
+	}
+	focusTarget(e) {
+		if (!e) return;
+		let t = this.getNumericLayerId(e);
+		if (this.focusedNodeId === t) return;
+		let n = this.getSceneLayers().find((e) => this.getNumericLayerId(e) === this.focusedNodeId);
+		n && this.dispatchLayerEvent(n, 11), this.focusedNodeId = t, this.dispatchLayerEvent(e, 10);
+	}
+	dispatchListenerTarget(e, t, n, r) {
+		let i = this.pkg.stateMachine?.Listeners ?? [];
+		for (let a of i) if (a.Enabled !== !1 && a.IsActive !== !1 && a.Kind === t && (e === 0 ? !a.TargetNodeId && !a.TargetLayerId : a.TargetLayerId && a.TargetLayerId === n?.Id || e && a.TargetNodeId === e)) for (let e of a.Actions ?? []) {
+			if (r) {
+				let t = a.Filter ?? "";
+				if (!t && e.InputId && e.PropertyName) {
+					let n = this.findInput(e.InputId);
+					n && n.Name !== e.PropertyName && (t = e.PropertyName);
+				}
+				if (t && t.toLowerCase() !== "any" && t.toLowerCase() !== r.toLowerCase()) continue;
+			}
+			this.executeListenerAction(a, e, n, t);
+		}
+		if (t === 4 && n) {
+			for (let e of i) if (!(e.TargetLayerId !== n.Id && e.TargetNodeId !== this.getNumericLayerId(n) || e.Kind !== 3 || e.Enabled === !1 || e.IsActive === !1)) {
+				for (let t of e.Actions ?? []) if (!(t.Kind !== 0 || (t.Parameter ?? 1) <= .5) && !i.some((e) => e.Kind === 4 && e.Enabled !== !1 && e.IsActive !== !1 && (e.TargetLayerId === n.Id || e.TargetNodeId === this.getNumericLayerId(n)) && (e.Actions ?? []).some((e) => t.InputId && e.InputId === t.InputId || t.InputIndex !== void 0 && e.InputIndex === t.InputIndex || t.PropertyName && e.PropertyName === t.PropertyName))) {
+					let e = this.findInput(t.InputId, t.InputIndex) ?? this.findInput(t.PropertyName);
+					e && this.setBool(e.Name, !1);
+				}
+			}
+		}
+		if (t === 4) {
+			for (let e of i) if (!(!(n ? e.TargetLayerId === n.Id || e.TargetNodeId === this.getNumericLayerId(n) : !e.TargetLayerId && !e.TargetNodeId) || e.Kind !== 2 && e.Kind !== 8)) for (let t of e.Actions ?? []) {
+				if (t.Kind !== 13) continue;
+				let r = this.findLayerByTarget(t.TargetLayerId, t.TargetNodeId) ?? (n ? this.findLayerByTarget(e.TargetLayerId, e.TargetNodeId) ?? n : void 0);
+				r && this.alignedLayers.delete(r.Id);
+			}
+		}
+	}
+	findLayerByTarget(e, t) {
+		return this.getSceneLayers().find((n) => !!e && n.Id === e || !!t && this.getNumericLayerId(n) === t);
+	}
+	executeListenerAction(e, t, n, r) {
+		let i = this.findInput(t.InputId, t.InputIndex) ?? this.findInput(t.PropertyName), a = i?.Name ?? t.PropertyName, o = this.pointerPosition, s = t.Parameter ?? 1;
+		switch (t.Kind) {
+			case 0:
+				a && this.setBool(a, s > .5);
+				break;
+			case 1:
+				a && this.setNumber(a, s);
+				break;
+			case 2:
+				i?.Kind === 2 ? this.fireTrigger(i.Name) : a && this.fireTrigger(a);
+				break;
+			case 3:
+				t.PropertyName && this.setBool(t.PropertyName, s > .5);
+				break;
+			case 4:
+				t.PropertyName && this.setNumber(t.PropertyName, s);
+				break;
+			case 5:
+				t.PropertyName && this.fireTrigger(t.PropertyName);
+				break;
+			case 6:
+				t.PropertyName && (this.textInputs[t.PropertyName] = t.TextValue ?? "", this.onTextInputChange?.(t.PropertyName, this.textInputs[t.PropertyName]));
+				break;
+			case 7:
+				i?.Kind === 0 && this.setBool(i.Name, this.getInputValue(i) <= .5);
+				break;
+			case 8:
+				i && (this.inputs[i.Name] = i.InitialValue ?? 0, this.firedTriggers.delete(this.inputKey(i)), this.onInputChange?.(i.Name, this.inputs[i.Name]), this.evaluateStateTransitions());
+				break;
+			case 9:
+			case 10:
+			case 11:
+			case 12:
+				if (a && o) {
+					let e = o.x - (n?.X ?? 0), r = o.y - (n?.Y ?? 0), i = n?.Width ?? this.pkg.scene.Width ?? 0, s = n?.Height ?? this.pkg.scene.Height ?? 0, c = t.Kind === 9 ? e : t.Kind === 10 ? r : t.Kind === 11 ? i > 0 ? Math.max(0, Math.min(100, e / i * 100)) : 50 : s > 0 ? Math.max(0, Math.min(100, r / s * 100)) : 50;
+					this.setNumber(a, c);
+				}
+				break;
+			case 13: {
+				if (!o) break;
+				let n = this.findLayerByTarget(t.TargetLayerId, t.TargetNodeId) ?? this.findLayerByTarget(e.TargetLayerId, e.TargetNodeId);
+				n && this.alignedLayers.set(n.Id, {
+					x: o.x,
+					y: o.y
+				});
+				break;
+			}
+			case 14: {
+				let e = t.TextValue?.trim();
+				e && (this.reportedEvents.push(e), this.reportedEvents.length > 512 && this.reportedEvents.shift(), this.onEvent?.(e));
+				break;
+			}
+			case 15: break;
+			case 16: {
+				let e = this.findLayerByTarget(t.TargetLayerId, t.TargetNodeId) ?? n ?? void 0;
+				this.focusTarget(e);
+				break;
+			}
+		}
+	}
+	evaluateStateTransitions(e = !1) {
+		if (!this.pkg.stateMachine?.Layers?.[0]) return;
+		let t = this.pkg.stateMachine.Layers[0], n = t.States, r = t.Transitions ?? [];
+		if (!this.currentState) return;
+		let i = n.find((e) => e.Kind === 2), a = r.filter((e) => e.FromState === this.currentState?.Id || e.FromStateId === this.currentState?.NodeId), o = r.filter((e) => e.FromState === i?.Id || e.FromStateId === i?.NodeId || !i && e.FromState === 1);
+		for (let t of [...a, ...o]) {
+			if (this.isTransitioning && t.Interrupt !== !0) continue;
+			if (t.ExitTime !== void 0 && t.ExitTime !== null) {
+				let n = this.activeClip?.Duration ?? 0, r = Math.max(0, Math.min(n, this.activeClip?.WorkAreaStart ?? 0)), i = Math.max(r + .001, Math.min(n, this.activeClip?.WorkAreaEnd ?? n));
+				if ((e ? 1 : n > 0 ? Math.max(0, Math.min(1, (this.currentTime - r) / (i - r))) : 1) < t.ExitTime) continue;
+			}
+			let r = !0, i = t.ConditionGroups ?? [], a = t.Conditions ?? [];
+			if (i.length > 0 ? r = i.some((e) => (e.Conditions ?? []).every((e) => this.testCondition(e))) : a.length > 0 && (r = a.every((e) => this.testCondition(e))), r) {
+				let e = n.find((e) => e.Id === t.ToState || e.NodeId === t.ToStateId);
+				if (e && e.Id !== this.currentState.Id) {
+					this.startTransition(t, e);
+					break;
+				}
+			}
+		}
+	}
+	testCondition(e) {
+		let t = this.findInput(e.InputId) ?? this.findInput(e.PropertyName) ?? this.findInput(void 0, e.InputIndex);
+		if (t?.Kind === 3) return !1;
+		if (t?.Kind === 2) return this.firedTriggers.has(this.inputKey(t));
+		let n = t ? this.getInputValue(t) : this.inputs[e.PropertyName ?? ""] ?? 0, r = e.Value, i = 1e-5;
+		switch (e.Op) {
+			case 0: return Math.abs(n - r) <= i;
+			case 1: return Math.abs(n - r) > i;
+			case 2: return n < r;
+			case 3: return n <= r;
+			case 4: return n > r;
+			case 5: return n >= r;
+			default: return n === r;
+		}
+	}
+	startTransition(e, t) {
+		let n = e.Duration > 0 ? e.Duration : Math.max(0, (e.DurationMs ?? 0) / 1e3);
+		n <= 0 ? (this.currentState = t, this.updateActiveClip(), this.currentTime = this.activeClip?.WorkAreaStart ?? 0, this.playbackDirection = 1, this.isTransitioning = !1, this.onStateChange?.(t.Name)) : (this.isTransitioning = !0, this.transitionFromState = this.currentState, this.transitionToState = t, this.activeTransition = e, this.transitionTime = 0, this.transitionDuration = n, this.transitionMix = 0, this.onStateChange?.(`${this.transitionFromState?.Name} → ${t.Name}`));
+	}
+	getPlaybackLoopMode() {
+		let e = this.currentState;
+		return e ? e.Loop === !1 ? 0 : e.LoopMode === 2 ? 2 : e.Loop === !0 || e.LoopMode === 1 ? 1 : e.LoopMode === 0 ? 0 : this.loop === null ? this.activeClip?.LoopMode ?? 1 : +!!this.loop : this.loop === null ? this.activeClip?.LoopMode ?? 1 : +!!this.loop;
+	}
+	advance(e) {
+		if (!this.isPlaying) return;
+		let t = Number.isFinite(e) && e > 0 ? e * (Number.isFinite(this.playbackSpeed) ? this.playbackSpeed : 1) : 0, n = this.activeClip?.Duration ?? 2, r = Math.max(0, Math.min(n, this.activeClip?.WorkAreaStart ?? 0)), i = Math.max(r + .001, Math.min(n, this.activeClip?.WorkAreaEnd ?? n)), a = i - r, o = !1;
+		if (a > 0) {
+			(this.currentTime < r || this.currentTime > i) && (this.currentTime = r);
+			let e = this.getPlaybackLoopMode();
+			if (e === 2) {
+				let e = this.playbackDirection, n = this.currentTime - r + t * e;
+				o = e >= 0 && n >= a;
+				let i = (n % (a * 2) + a * 2) % (a * 2);
+				this.currentTime = r + (i <= a ? i : a * 2 - i), this.playbackDirection = i <= a ? 1 : -1;
+			} else if (e === 0) this.currentTime = Math.min(i, this.currentTime + t), this.currentTime >= i && (this.isPlaying = !1);
+			else {
+				let e = this.currentTime - r + t;
+				o = e >= a || e < 0, this.currentTime = r + (e % a + a) % a;
+			}
+		}
+		if (this.isTransitioning && this.transitionToState) {
+			this.transitionTime += t;
+			let e = Math.min(1, this.transitionTime / Math.max(.001, this.transitionDuration)), n = this.activeTransition;
+			if (this.transitionMix = H(e, n?.X1 ?? .42, n?.Y1 ?? 0, n?.X2 ?? .58, n?.Y2 ?? 1), e >= 1) {
+				let e = this.transitionToState, t = this.getClipForState(e), n = this.transitionTime;
+				if (this.currentState = this.transitionToState, this.updateActiveClip(), this.playbackDirection = 1, t?.Duration) {
+					let e = Math.max(0, Math.min(t.Duration, t.WorkAreaStart ?? 0)), r = Math.max(e + .001, Math.min(t.Duration, t.WorkAreaEnd ?? t.Duration)), i = Math.max(.001, r - e);
+					this.currentTime = e + n % i;
+				} else this.currentTime = 0;
+				this.isTransitioning = !1, this.transitionFromState = null, this.transitionToState = null, this.activeTransition = null, this.transitionMix = 0, this.onStateChange?.(this.currentState.Name);
+			}
+		}
+		this.evaluateStateTransitions(o), this.isTransitioning && (this.isPlaying = !0);
+	}
+	computePose() {
+		let e = {};
+		if (this.currentState && (this.currentState.Kind === 4 || this.currentState.Kind === 5 || this.currentState.StateType === 1)) this.evaluateStateIntoPose(this.currentState, this.currentTime, e);
+		else if (this.activeClip && (this.evaluateClipIntoPose(this.activeClip, this.currentTime, e), this.isTransitioning && this.transitionToState && this.getClipForState(this.transitionToState))) {
+			let t = {};
+			this.evaluateStateIntoPose(this.transitionToState, this.currentTime, t);
+			let n = this.transitionMix;
+			for (let r of Object.keys(t)) {
+				e[r] || (e[r] = {});
+				let i = e[r], a = t[r];
+				a.Width !== void 0 && i.Width !== void 0 ? i.Width = i.Width * (1 - n) + a.Width * n : a.Width !== void 0 && (i.Width = a.Width), a.Height !== void 0 && i.Height !== void 0 ? i.Height = i.Height * (1 - n) + a.Height * n : a.Height !== void 0 && (i.Height = a.Height), a.VisualWidth !== void 0 && i.VisualWidth !== void 0 ? i.VisualWidth = i.VisualWidth * (1 - n) + a.VisualWidth * n : a.VisualWidth !== void 0 && (i.VisualWidth = a.VisualWidth), a.VisualHeight !== void 0 && i.VisualHeight !== void 0 ? i.VisualHeight = i.VisualHeight * (1 - n) + a.VisualHeight * n : a.VisualHeight !== void 0 && (i.VisualHeight = a.VisualHeight), a.ScaleX !== void 0 && i.ScaleX !== void 0 ? i.ScaleX = i.ScaleX * (1 - n) + a.ScaleX * n : a.ScaleX !== void 0 && (i.ScaleX = a.ScaleX), a.ScaleY !== void 0 && i.ScaleY !== void 0 ? i.ScaleY = i.ScaleY * (1 - n) + a.ScaleY * n : a.ScaleY !== void 0 && (i.ScaleY = a.ScaleY), a.X !== void 0 && i.X !== void 0 ? i.X = i.X * (1 - n) + a.X * n : a.X !== void 0 && (i.X = a.X), a.Y !== void 0 && i.Y !== void 0 ? i.Y = i.Y * (1 - n) + a.Y * n : a.Y !== void 0 && (i.Y = a.Y), a.Rotation !== void 0 && i.Rotation !== void 0 ? i.Rotation = i.Rotation * (1 - n) + a.Rotation * n : a.Rotation !== void 0 && (i.Rotation = a.Rotation), a.Opacity !== void 0 && i.Opacity !== void 0 ? i.Opacity = i.Opacity * (1 - n) + a.Opacity * n : a.Opacity !== void 0 && (i.Opacity = a.Opacity), a.PathGeometry && i.PathGeometry ? i.PathGeometry = q(i.PathGeometry, a.PathGeometry, n) : a.PathGeometry && (i.PathGeometry = G(a.PathGeometry));
+			}
+		}
+		return this.applyPointerAlignment(e), this.solveConstraints(e), e;
+	}
+	evaluateStateIntoPose(e, t, n) {
+		let r = (e) => {
+			let n = {}, r = this.pkg.animations[e];
+			if (!r) return n;
+			let i = Math.max(0, Math.min(r.Duration, r.WorkAreaStart ?? 0)), a = Math.max(i + .001, Math.min(r.Duration, r.WorkAreaEnd ?? r.Duration)), o = Math.max(.001, a - i), s = i + ((t - i) % o + o) % o;
+			return this.evaluateClipIntoPose(r, s, n), n;
+		};
+		if ((e.Kind === 4 || e.StateType === 1) && e.Blend1DItems?.length) {
+			let t = [...e.Blend1DItems].filter((e) => e && e.ClipIndex >= 0 && e.ClipIndex < this.pkg.animations.length).sort((e, t) => e.Threshold - t.Threshold);
+			if (t.length === 0) return;
+			let i = this.findInput(void 0, e.BlendInputIndex ?? -1), a = i ? this.getInputValue(i) : 0;
+			if (t.length === 1 || a <= t[0].Threshold) {
+				Object.assign(n, r(t[0].ClipIndex));
+				return;
+			}
+			let o = t[t.length - 1];
+			if (a >= o.Threshold) {
+				Object.assign(n, r(o.ClipIndex));
+				return;
+			}
+			for (let e = 0; e < t.length - 1; e++) {
+				let i = t[e], o = t[e + 1];
+				if (a < i.Threshold || a > o.Threshold) continue;
+				let s = o.Threshold - i.Threshold, c = s > 1e-5 ? Math.max(0, Math.min(1, (a - i.Threshold) / s)) : 0;
+				Object.assign(n, this.blendPoses(r(i.ClipIndex), r(o.ClipIndex), c));
+				return;
+			}
+			Object.assign(n, r(o.ClipIndex));
+			return;
+		}
+		if (e.Kind === 5 && e.BlendDirectItems?.length) {
+			let t = e.BlendDirectItems.filter((e) => e && e.ClipIndex >= 0 && e.ClipIndex < this.pkg.animations.length), i = [];
+			for (let e of t) {
+				let t = this.findInput(void 0, e.WeightInputIndex), n = Math.max(0, t ? this.getInputValue(t) : 0);
+				n > 0 && i.push({
+					pose: r(e.ClipIndex),
+					weight: n
+				});
+			}
+			if (i.reduce((e, t) => e + t.weight, 0) > 0) {
+				let e = {}, t = {}, r = {}, a = {};
+				for (let n of i) for (let [i, o] of Object.entries(n.pose)) {
+					e[i] ??= {}, t[i] ??= {};
+					for (let [r, a] of Object.entries(o)) typeof a == "number" && (e[i][r] = (e[i][r] ?? 0) + a * n.weight, t[i][r] = (t[i][r] ?? 0) + n.weight);
+					if (o.PathGeometry) {
+						let e = (a[i] ?? 0) + n.weight;
+						r[i] = r[i] ? q(r[i], o.PathGeometry, n.weight / e) : G(o.PathGeometry), a[i] = e;
+					}
+				}
+				for (let i of Object.keys(e)) {
+					let a = {};
+					for (let n of Object.keys(e[i])) {
+						let r = t[i][n];
+						a[n] = r > 0 ? e[i][n] / r : 0;
+					}
+					r[i] && (a.PathGeometry = r[i]), n[i] = a;
+				}
+			}
+			return;
+		}
+		let i = this.getClipForState(e);
+		i && this.evaluateClipIntoPose(i, t, n);
+	}
+	blendPoses(e, t, n) {
+		let r = {}, i = Math.max(0, Math.min(1, n)), a = /* @__PURE__ */ new Set([...Object.keys(e), ...Object.keys(t)]);
+		for (let n of a) {
+			let a = e[n] ?? {}, o = t[n] ?? {}, s = { ...a }, c = /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(o)]);
+			for (let e of c) {
+				let t = a[e], n = o[e];
+				e === "PathGeometry" ? a.PathGeometry && o.PathGeometry ? s.PathGeometry = q(a.PathGeometry, o.PathGeometry, i) : o.PathGeometry && (s.PathGeometry = G(o.PathGeometry)) : typeof t == "number" && typeof n == "number" ? s[e] = t * (1 - i) + n * i : typeof n == "number" && (s[e] = n);
+			}
+			r[n] = s;
+		}
+		return r;
+	}
+	getLayerPose(e, t) {
+		let n = e[t.Id];
+		if (n) return n;
+		let r = String(this.getNumericLayerId(t));
+		return e[r] ? e[r] : (e[t.Id] = {}, e[t.Id]);
+	}
+	applyPointerAlignment(e) {
+		for (let [t, n] of this.alignedLayers) {
+			let r = this.findLayerByTarget(t);
+			if (!r) continue;
+			let i = this.getLayerPose(e, r), a = i.VisualWidth ?? i.Width ?? r.Width ?? 100, o = i.VisualHeight ?? i.Height ?? r.Height ?? 100;
+			i.X = n.x - a * .5, i.Y = n.y - o * .5;
+		}
+	}
+	solveConstraints(e) {
+		let t = this.getSceneLayers(), n = (e, t) => t.X ?? e.X, r = (e, t) => t.Y ?? e.Y, i = (e, t) => (e.ScaleX ?? 1) * (t.ScaleX ?? 1), a = (e, t) => (e.ScaleY ?? 1) * (t.ScaleY ?? 1), o = (e, t) => t.Rotation ?? e.Rotation ?? 0, s = (e, t, n) => Math.max(t, Math.min(n, e)), c = (e, t) => {
+			let n = (t - e) % 360;
+			return n > 180 && (n -= 360), n < -180 && (n += 360), n;
+		}, l = (e, t, i, a, o, s) => {
+			let c = o.ConstrainX !== !1, l = o.ConstrainY !== !1, u = n(e, t), d = r(e, t), f = n(i, a) + (o.OffsetX ?? 0), p = r(i, a) + (o.OffsetY ?? 0);
+			o.MinLimitEnabled && (f = Math.max(o.MinLimit ?? f, f), p = Math.max(o.MinLimit ?? p, p)), o.MaxLimitEnabled && (f = Math.min(o.MaxLimit ?? f, f), p = Math.min(o.MaxLimit ?? p, p)), c && (t.X = u + (f - u) * s), l && (t.Y = d + (p - d) * s);
+		}, u = (e, t, n, r, o, s) => {
+			let c = e.ScaleX ?? 1, l = e.ScaleY ?? 1, u = i(n, r), d = a(n, r);
+			if (o.MinLimitEnabled && (u = Math.max(o.MinLimit ?? u, u), d = Math.max(o.MinLimit ?? d, d)), o.MaxLimitEnabled && (u = Math.min(o.MaxLimit ?? u, u), d = Math.min(o.MaxLimit ?? d, d)), o.ConstrainX !== !1) {
+				let n = i(e, t);
+				t.ScaleX = (n + (u - n) * s) / (Math.abs(c) < 1e-4 ? 1 : c);
+			}
+			if (o.ConstrainY !== !1) {
+				let n = a(e, t);
+				t.ScaleY = (n + (d - n) * s) / (Math.abs(l) < 1e-4 ? 1 : l);
+			}
+		}, d = (e, t, n, r, i, a) => {
+			let s = o(e, t), l = o(n, r) + (i.OffsetRotation ?? 0);
+			i.MinLimitEnabled && (l = Math.max(i.MinLimit ?? l, l)), i.MaxLimitEnabled && (l = Math.min(i.MaxLimit ?? l, l)), t.Rotation = s + c(s, l) * a;
+		}, f = (e, t, i, a, o, s) => {
+			let c = t.VisualWidth ?? t.Width ?? e.Width ?? 100, l = t.VisualHeight ?? t.Height ?? e.Height ?? 100, u = a.VisualWidth ?? a.Width ?? i.Width ?? 100, d = a.VisualHeight ?? a.Height ?? i.Height ?? 100, f = n(e, t), p = r(e, t), m = n(i, a), h = r(i, a), g = f + c * .5 - (m + u * .5), _ = p + l * .5 - (h + d * .5), v = Math.sqrt(g * g + _ * _), y = Math.max(0, o.Distance ?? 0);
+			v < 1e-4 && (v = 1);
+			let b = o.DistanceMode ?? 1;
+			if (!(b === 0 || b === 1 && v > y || b === 2 && v < y)) return;
+			let x = Math.abs(g) + Math.abs(_) < 1e-4 ? 1 : g / v, S = Math.abs(g) + Math.abs(_) < 1e-4 ? 0 : _ / v, C = m + u * .5 + x * y - c * .5, w = h + d * .5 + S * y - l * .5;
+			t.X = f + (C - f) * s, t.Y = p + (w - p) * s;
+		}, p = (e, t, i, a, l, u) => {
+			let d = n(e, t), f = r(e, t), p = n(i, a) + (i.Width ?? 100) * .5, m = r(i, a) + (i.Height ?? 100) * .5, h = p - d, g = m - f, _ = Math.sqrt(h * h + g * g);
+			if (_ < 1e-4) return;
+			let v = l.BoneLength1 && l.BoneLength1 > 0 ? l.BoneLength1 : Math.max(20, (e.Height ?? 100) * .5), y = l.BoneLength2 && l.BoneLength2 > 0 ? l.BoneLength2 : Math.max(20, (e.Height ?? 100) * .5);
+			_ = s(_, Math.abs(v - y) + .001, v + y - .001);
+			let b = s((v * v + _ * _ - y * y) / (2 * v * _), -1, 1), x = Math.acos(b) * 180 / Math.PI, S = Math.atan2(g, h) * 180 / Math.PI + (l.InvertBend ? -x : x), C = o(e, t);
+			t.Rotation = C + c(C, S) * u;
+		};
+		for (let i of t) for (let t of i.Constraints ?? []) {
+			if (t.Enabled === !1 || !t.TargetLayerId && !t.TargetNodeId) continue;
+			let a = this.findLayerByTarget(t.TargetLayerId, t.TargetNodeId);
+			if (!a || a === i) continue;
+			let o = s(t.Strength ?? 1, 0, 1);
+			if (o <= 0) continue;
+			let m = this.getLayerPose(e, i), h = this.getLayerPose(e, a);
+			switch (t.Type) {
+				case 0:
+					l(i, m, a, h, t, o), u(i, m, a, h, t, o), d(i, m, a, h, t, o);
+					break;
+				case 1:
+					f(i, m, a, h, t, o);
+					break;
+				case 2:
+					l(i, m, a, h, t, o);
+					break;
+				case 3:
+					u(i, m, a, h, t, o);
+					break;
+				case 4:
+					d(i, m, a, h, t, o);
+					break;
+				case 5:
+					p(i, m, a, h, t, o);
+					break;
+				case 6:
+					this.constrainFollowPath(i, m, a, h, t, o, c);
+					break;
+				case 7: {
+					let e = s(t.ScrollOffset ?? 0, t.MinScrollOffset ?? -1e3, t.MaxScrollOffset ?? 1e3), c = t.ScrollDirection ?? 0;
+					if (c === 0 || c === 2) {
+						let t = r(i, m);
+						m.Y = t + (r(a, h) + e - t) * o;
+					}
+					if (c === 1 || c === 2) {
+						let t = n(i, m);
+						m.X = t + (n(a, h) + e - t) * o;
+					}
+					break;
+				}
+			}
+		}
+	}
+	constrainFollowPath(e, t, n, r, i, a, o) {
+		let s = this.getFollowPathPosition(n, i);
+		if (!s) return;
+		let c = r.X ?? n.X, l = r.Y ?? n.Y, u = r.VisualWidth ?? r.Width ?? n.Width ?? 100, d = r.VisualHeight ?? r.Height ?? n.Height ?? 100, f = c + u * .5, p = l + d * .5, m = (n.ScaleX ?? 1) * (r.ScaleX ?? 1), h = (n.ScaleY ?? 1) * (r.ScaleY ?? 1), g = (r.Rotation ?? n.Rotation ?? 0) * Math.PI / 180, _ = (s.x - f) * m, v = (s.y - p) * h, y = f + _ * Math.cos(g) - v * Math.sin(g), b = p + _ * Math.sin(g) + v * Math.cos(g), x = t.VisualWidth ?? t.Width ?? e.Width ?? 100, S = t.VisualHeight ?? t.Height ?? e.Height ?? 100, C = t.X ?? e.X, w = t.Y ?? e.Y, ee = y - x * .5, te = b - S * .5;
+		if (t.X = C + (ee - C) * a, t.Y = w + (te - w) * a, i.OrientToPath !== !1) {
+			let n = s.tangentX * m, r = s.tangentY * h, i = Math.atan2(n * Math.sin(g) + r * Math.cos(g), n * Math.cos(g) - r * Math.sin(g)) * 180 / Math.PI, c = t.Rotation ?? e.Rotation ?? 0;
+			t.Rotation = c + o(c, i) * a;
+		}
+	}
+	getFollowPathPosition(e, t) {
+		let n = e.Geometry;
+		if (!n) return null;
+		let r = [];
+		if (n.Nodes && n.Nodes.length > 0) {
+			let e = n.Nodes;
+			r.push({
+				x: e[0].Anchor.X,
+				y: e[0].Anchor.Y
+			});
+			for (let t = 1; t < e.length; t++) {
+				let n = e[t - 1], i = e[t];
+				if (n.OutHandle.X !== n.Anchor.X || n.OutHandle.Y !== n.Anchor.Y || i.InHandle.X !== i.Anchor.X || i.InHandle.Y !== i.Anchor.Y) {
+					let e = n.Anchor, t = n.OutHandle, a = i.InHandle, o = i.Anchor;
+					for (let n = 1; n <= 24; n++) {
+						let i = n / 24, s = 1 - i;
+						r.push({
+							x: s * s * s * e.X + 3 * s * s * i * t.X + 3 * s * i * i * a.X + i * i * i * o.X,
+							y: s * s * s * e.Y + 3 * s * s * i * t.Y + 3 * s * i * i * a.Y + i * i * i * o.Y
+						});
+					}
+				} else r.push({
+					x: i.Anchor.X,
+					y: i.Anchor.Y
+				});
+			}
+			n.IsClosed && e.length > 2 && r.push({
+				x: e[0].Anchor.X,
+				y: e[0].Anchor.Y
+			});
+		} else if (n.SvgPathData && typeof document < "u") try {
+			let e = document.createElementNS("http://www.w3.org/2000/svg", "path");
+			e.setAttribute("d", n.SvgPathData);
+			let r = e.getTotalLength();
+			if (r > 0) {
+				let i = ((t.PathDistance ?? 0) + (t.PathOffset ?? 0)) * r / 100;
+				n.IsClosed && (i = (i % r + r) % r);
+				let a = Math.max(0, Math.min(r, i)), o = e.getPointAtLength(a), s = e.getPointAtLength(Math.max(0, a - .5)), c = e.getPointAtLength(Math.min(r, a + .5)), l = o.x, u = o.y, d = c.x - s.x, f = c.y - s.y;
+				if (!n.IsClosed && i < 0) {
+					let t = e.getPointAtLength(0), n = e.getPointAtLength(Math.min(r, 1));
+					d = n.x - t.x, f = n.y - t.y;
+					let a = Math.sqrt(d * d + f * f) || 1;
+					l = t.x + d / a * i, u = t.y + f / a * i;
+				} else if (!n.IsClosed && i > r) {
+					let t = e.getPointAtLength(r), n = e.getPointAtLength(Math.max(0, r - 1));
+					d = t.x - n.x, f = t.y - n.y;
+					let a = Math.sqrt(d * d + f * f) || 1;
+					l = t.x + d / a * (i - r), u = t.y + f / a * (i - r);
+				}
+				return {
+					x: l,
+					y: u,
+					tangentX: d,
+					tangentY: f
+				};
+			}
+		} catch {
+			return null;
+		}
+		if (r.length < 2) return null;
+		let i = [0];
+		for (let e = 1; e < r.length; e++) {
+			let t = r[e].x - r[e - 1].x, n = r[e].y - r[e - 1].y;
+			i.push(i[e - 1] + Math.sqrt(t * t + n * n));
+		}
+		let a = i[i.length - 1];
+		if (a <= 1e-4) return null;
+		let o = !!n.IsClosed, s = ((t.PathDistance ?? 0) + (t.PathOffset ?? 0)) * a / 100;
+		if (o && (s = (s % a + a) % a), s < 0 || s > a) {
+			let e = s < 0, t = e ? 0 : r.length - 2, n = e ? 1 : r.length - 1, i = r[n].x - r[t].x, o = r[n].y - r[t].y, c = Math.sqrt(i * i + o * o) || 1;
+			i /= c, o /= c;
+			let l = e ? s : s - a, u = e ? r[0] : r[r.length - 1];
+			return {
+				x: u.x + i * l,
+				y: u.y + o * l,
+				tangentX: i,
+				tangentY: o
+			};
+		}
+		for (let e = 1; e < r.length; e++) {
+			if (s > i[e]) continue;
+			let t = i[e] - i[e - 1], n = t > 1e-4 ? (s - i[e - 1]) / t : 0, a = r[e].x - r[e - 1].x, o = r[e].y - r[e - 1].y;
+			return {
+				x: r[e - 1].x + a * n,
+				y: r[e - 1].y + o * n,
+				tangentX: a,
+				tangentY: o
+			};
+		}
+		return null;
+	}
+	evaluateClipIntoPose(e, t, n) {
+		if (e?.Tracks) {
+			for (let r of e.Tracks) {
+				if (r.IsActive === !1) continue;
+				let e = r.TargetNodeId ?? String(r.NodeId);
+				n[e] || (n[e] = {});
+				let i = (r.PropertyPath || "").toLowerCase();
+				if (i.startsWith("path.nodes[") || r.Prop === 25) continue;
+				if (i === "path" || i === "pathgeometry" || i === "geometry" || r.Prop === 24) {
+					let i = J(r, t);
+					i && (n[e].PathGeometry = i);
+					continue;
+				}
+				let a = U(r, t);
+				i === "scalex" || r.Prop === 12 ? n[e].ScaleX = a : i === "scaley" || r.Prop === 13 ? n[e].ScaleY = a : i === "width" || r.Prop === 3 ? n[e].Width = a : i === "height" || r.Prop === 4 ? n[e].Height = a : i === "visualwidth" || r.Prop === 16 ? n[e].VisualWidth = a : i === "visualheight" || r.Prop === 17 ? n[e].VisualHeight = a : i === "rotation" || r.Prop === 5 ? n[e].Rotation = a : i === "opacity" || r.Prop === 7 ? n[e].Opacity = a : i === "x" || i === "translationx" || r.Prop === 1 ? n[e].X = a : (i === "y" || i === "translationy" || r.Prop === 2) && (n[e].Y = a);
+			}
+			for (let r of e.Tracks) {
+				if (!r || r.IsActive === !1 || !(r.PropertyPath || "").toLowerCase().startsWith("path.nodes[") && r.Prop !== 25) continue;
+				let e = r.GeometryNodeIndex, i = n[r.TargetNodeId ?? String(r.NodeId)]?.PathGeometry;
+				if (e == null || e < 0 || !i?.Nodes || e >= i.Nodes.length) continue;
+				let a = Y(r, t);
+				a && (i.Nodes[e] = a);
+			}
+		}
+	}
+	renderToCanvas(e) {
+		let t = e.getContext("2d");
+		if (!t) return;
+		let n = this.pkg.scene, r = n.Width || 1920, i = n.Height || 1080, a = typeof window < "u" && window.devicePixelRatio || 1, o = e.clientWidth || 800, s = e.clientHeight || 500;
+		(e.width !== o * a || e.height !== s * a) && (e.width = o * a, e.height = s * a), t.save(), t.scale(a, a), t.fillStyle = n.BackgroundColor || "#1E1E22", t.fillRect(0, 0, o, s);
+		let c = Math.min(o / r, s / i), l = (o - r * c) * .5, u = (s - i * c) * .5;
+		t.translate(l, u), t.scale(c, c);
+		let d = this.computePose();
+		for (let e of n.Layers) this.renderLayer(e, d, t, r, i);
+		t.restore();
+	}
+	renderLayer(e, t, n, r, i) {
+		if (e.IsVisible === !1) return;
+		n.save();
+		let a = t[e.Id] ?? t[String(this.getNumericLayerId(e))] ?? {}, o = a.VisualWidth ?? a.Width ?? e.Width ?? 100, s = a.VisualHeight ?? a.Height ?? e.Height ?? 100, c = a.X ?? e.X, l = a.Y ?? e.Y, u = a.ScaleX ?? e.ScaleX ?? 1, d = a.ScaleY ?? e.ScaleY ?? 1, f = (a.Rotation ?? e.Rotation ?? 0) * Math.PI / 180, p = Math.max(0, Math.min(1, a.Opacity ?? e.Opacity ?? 1));
+		n.globalAlpha *= p;
+		let m = c + o * .5, h = l + s * .5;
+		if (n.translate(m, h), n.rotate(f), n.scale(u, d), n.translate(-m, -h), e.Type === 0 && e.ClipContent) {
+			let r = this.makeLayerPath(e, c, l, o, s, t);
+			r && n.clip(r);
+		}
+		for (let a of e.ClippingTargets ?? []) {
+			if (a.Enabled === !1) continue;
+			let e = this.findLayerByTarget(a.TargetLayerId, a.TargetNodeId);
+			if (!e) continue;
+			let o = this.makeClipSourcePath(e, t);
+			if (o) {
+				if (a.IsInverse && typeof Path2D < "u") {
+					let e = new Path2D();
+					e.rect(0, 0, r, i), e.addPath(o), n.clip(e, "evenodd");
+				} else n.clip(o);
+			}
+		}
+		if (e.Type !== 1 && e.Type !== 12) {
+			let r = e.Fills?.find((e) => e.Enabled !== !1 && e.ColorHex);
+			n.fillStyle = r?.ColorHex ?? "#203BFF";
+			let i = n.globalAlpha;
+			n.globalAlpha *= Math.max(0, Math.min(1, r?.Opacity ?? 1)), this.fillLayerPath(n, e, c, l, o, s, t), n.globalAlpha = i;
+		}
+		for (let a of e.Children ?? []) this.renderLayer(a, t, n, r, i);
+		n.restore();
+	}
+	makeLayerPath(e, t, n, r, i, a) {
+		if (typeof Path2D > "u") return null;
+		let o = a ? this.getLayerPose(a, e).PathGeometry ?? e.Geometry : e.Geometry;
+		if (e.Type === 8 && o?.Nodes?.length) {
+			let e = o.Nodes, t = new Path2D();
+			t.moveTo(e[0].Anchor.X, e[0].Anchor.Y);
+			for (let n = 1; n < e.length; n++) {
+				let r = e[n - 1], i = e[n];
+				r.OutHandle.X !== r.Anchor.X || r.OutHandle.Y !== r.Anchor.Y || i.InHandle.X !== i.Anchor.X || i.InHandle.Y !== i.Anchor.Y ? t.bezierCurveTo(r.OutHandle.X, r.OutHandle.Y, i.InHandle.X, i.InHandle.Y, i.Anchor.X, i.Anchor.Y) : t.lineTo(i.Anchor.X, i.Anchor.Y);
+			}
+			if (o.IsClosed && e.length > 2) {
+				let n = e[e.length - 1], r = e[0];
+				(n.OutHandle.X !== n.Anchor.X || n.OutHandle.Y !== n.Anchor.Y || r.InHandle.X !== r.Anchor.X || r.InHandle.Y !== r.Anchor.Y) && t.bezierCurveTo(n.OutHandle.X, n.OutHandle.Y, r.InHandle.X, r.InHandle.Y, r.Anchor.X, r.Anchor.Y), t.closePath();
+			}
+			return t;
+		}
+		if (e.Type === 8 && o?.SvgPathData) try {
+			return new Path2D(o.SvgPathData);
+		} catch {}
+		let s = new Path2D();
+		return e.Type === 3 ? s.ellipse(t + r * .5, n + i * .5, r * .5, i * .5, 0, 0, Math.PI * 2) : s.rect(t, n, r, i), s;
+	}
+	getLayerTransformMatrix(e, t) {
+		let n = t[e.Id] ?? t[String(this.getNumericLayerId(e))] ?? {}, r = n.VisualWidth ?? n.Width ?? e.Width ?? 100, i = n.VisualHeight ?? n.Height ?? e.Height ?? 100, a = n.X ?? e.X, o = n.Y ?? e.Y, s = n.Rotation ?? e.Rotation ?? 0, c = n.ScaleX ?? e.ScaleX ?? 1, l = n.ScaleY ?? e.ScaleY ?? 1, u = new DOMMatrix();
+		return u.translateSelf(a + r * .5, o + i * .5), u.rotateSelf(s), u.scaleSelf(c, l), u.translateSelf(-(a + r * .5), -(o + i * .5)), u;
+	}
+	makeClipSourcePath(e, t) {
+		if (typeof Path2D > "u") return null;
+		if (e.Type === 1) {
+			let n = new Path2D();
+			for (let r of e.Children ?? []) {
+				if (r.IsVisible === !1) continue;
+				let e = this.makeClipSourcePath(r, t);
+				e && n.addPath(e);
+			}
+			let r = new Path2D();
+			return r.addPath(n, this.getLayerTransformMatrix(e, t)), r;
+		}
+		let n = t[e.Id] ?? t[String(this.getNumericLayerId(e))] ?? {}, r = n.VisualWidth ?? n.Width ?? e.Width ?? 100, i = n.VisualHeight ?? n.Height ?? e.Height ?? 100, a = n.X ?? e.X, o = n.Y ?? e.Y, s = this.makeLayerPath(e, a, o, r, i, t);
+		if (!s) return null;
+		let c = new Path2D();
+		return c.addPath(s, this.getLayerTransformMatrix(e, t)), c;
+	}
+	fillLayerPath(e, t, n, r, i, a, o) {
+		if ((t.CornerRadius ?? 0) > 0 && typeof e.roundRect == "function" && t.Type !== 3) {
+			e.beginPath(), e.roundRect(n, r, i, a, t.CornerRadius ?? 0), e.fill();
+			return;
+		}
+		let s = this.makeLayerPath(t, n, r, i, a, o);
+		s ? e.fill(s) : e.fillRect(n, r, i, a);
+	}
+	getArtboardCoords(e, t, n) {
+		let r = e.getBoundingClientRect(), i = r.width, a = r.height, o = this.pkg.scene.Width || 1920, s = this.pkg.scene.Height || 1080, c = Math.min(i / o, a / s), l = (i - o * c) * .5, u = (a - s * c) * .5, d = t - r.left, f = n - r.top;
+		return {
+			x: (d - l) / c,
+			y: (f - u) / c
+		};
+	}
+}, $ = e(({ src: e, autoplay: t = !0, loop: a, inputs: s, style: c, className: l, onLoad: u, onStateChange: d, onEvent: f, onTextInputChange: p }, m) => {
+	let h = i(null), g = i(null);
+	r(m, () => ({
+		setBool: (e, t) => g.current?.setBool(e, t),
+		setNumber: (e, t) => g.current?.setNumber(e, t),
+		fireTrigger: (e) => g.current?.fireTrigger(e),
+		play: () => {
+			g.current && (g.current.isPlaying = !0);
+		},
+		pause: () => {
+			g.current && (g.current.isPlaying = !1);
+		},
+		reset: () => {
+			g.current && (g.current.currentTime = 0);
+		},
+		getPlayer: () => g.current
+	})), n(() => {
+		if (g.current && s) for (let [e, t] of Object.entries(s)) typeof t == "boolean" ? g.current.setBool(e, t) : typeof t == "number" && g.current.setNumber(e, t);
+	}, [s]), n(() => {
+		let n = !1, r, i = performance.now();
+		async function o() {
+			try {
+				let o = await X(e);
+				if (n) return;
+				let c = new Q(o);
+				if (c.isPlaying = t, c.loop = a ?? null, d && (c.onStateChange = d), f && (c.onEvent = f), p && (c.onTextInputChange = p), s) for (let [e, t] of Object.entries(s)) typeof t == "boolean" ? c.setBool(e, t) : typeof t == "number" && c.setNumber(e, t);
+				g.current = c, u?.(o);
+				let l = (e) => {
+					let t = (e - i) / 1e3;
+					i = e, g.current && h.current && (g.current.advance(t), g.current.renderToCanvas(h.current)), r = requestAnimationFrame(l);
+				};
+				r = requestAnimationFrame(l);
+			} catch (t) {
+				console.error(`[Kerf] Error loading "${e}":`, t);
+			}
+		}
+		return o(), () => {
+			n = !0, cancelAnimationFrame(r), g.current = null;
+		};
+	}, [
+		e,
+		t,
+		a,
+		d,
+		u,
+		f,
+		p
+	]);
+	let _ = (e) => {
+		let t = g.current, n = h.current;
+		if (t && n) {
+			let r = t.getArtboardCoords(n, e.clientX, e.clientY);
+			t.handlePointerMove(r.x, r.y);
+		}
+	}, v = (e) => {
+		let t = g.current, n = h.current;
+		if (t && n) {
+			let r = t.getArtboardCoords(n, e.clientX, e.clientY);
+			t.handlePointerMove(r.x, r.y), t.handlePointerDown(), e.currentTarget.setPointerCapture(e.pointerId);
+		}
+	}, y = (e) => {
+		let t = g.current, n = h.current;
+		if (t && n) {
+			let r = t.getArtboardCoords(n, e.clientX, e.clientY);
+			t.handlePointerMove(r.x, r.y), t.handlePointerUp(), e.currentTarget.hasPointerCapture(e.pointerId) && e.currentTarget.releasePointerCapture(e.pointerId);
+		}
+	}, b = (e) => {
+		g.current?.handlePointerCancel(), e.currentTarget.hasPointerCapture(e.pointerId) && e.currentTarget.releasePointerCapture(e.pointerId);
+	}, x = () => {
+		g.current?.handlePointerLeave();
+	}, S = (e) => {
+		g.current?.handleKeyDown(e.key);
+	};
+	return /* @__PURE__ */ o("canvas", {
+		ref: h,
+		tabIndex: 0,
+		className: l,
+		style: {
+			width: "100%",
+			height: "100%",
+			display: "block",
+			...c
+		},
+		onPointerMove: _,
+		onPointerDown: v,
+		onPointerUp: y,
+		onPointerLeave: x,
+		onPointerCancel: b,
+		onKeyDown: S,
+		onClick: () => g.current?.handlePointerClick()
+	});
 });
-Zt.displayName = "Kerf";
-function ie(i) {
-  const t = j(null), e = j(null), [r, n] = ut(!1), [s, o] = ut(""), a = L((v, d) => {
-    var y;
-    (y = e.current) == null || y.setBool(v, d);
-  }, []), l = L((v, d) => {
-    var y;
-    (y = e.current) == null || y.setNumber(v, d);
-  }, []), c = L((v) => {
-    var d;
-    (d = e.current) == null || d.fireTrigger(v);
-  }, []), g = L(() => {
-    e.current && (e.current.isPlaying = !0);
-  }, []), f = L(() => {
-    e.current && (e.current.isPlaying = !1);
-  }, []), h = L(() => {
-    e.current && (e.current.currentTime = 0);
-  }, []);
-  return Z(() => {
-    let v = !1, d, y = performance.now();
-    async function C() {
-      var k, p;
-      try {
-        const S = await Ct(i.src);
-        if (v) return;
-        const I = new Tt(S);
-        if (I.isPlaying = i.autoplay ?? !0, I.onStateChange = (P) => {
-          var w;
-          o(P), (w = i.onStateChange) == null || w.call(i, P);
-        }, i.inputs)
-          for (const [P, w] of Object.entries(i.inputs))
-            typeof w == "boolean" ? I.setBool(P, w) : typeof w == "number" && I.setNumber(P, w);
-        e.current = I, n(!0), (k = I.currentState) != null && k.Name && o(I.currentState.Name), (p = i.onLoad) == null || p.call(i, S);
-        const V = (P) => {
-          const w = (P - y) / 1e3;
-          y = P, e.current && t.current && (e.current.advance(w), e.current.renderToCanvas(t.current)), d = requestAnimationFrame(V);
-        };
-        d = requestAnimationFrame(V);
-      } catch (S) {
-        console.error("[useKerf] Error loading:", S);
-      }
-    }
-    return C(), () => {
-      v = !0, cancelAnimationFrame(d), e.current = null;
-    };
-  }, [i.src, i.autoplay]), {
-    KerfComponent: L((v) => {
-      const d = (C) => {
-        const k = e.current, p = t.current;
-        if (k && p) {
-          const S = k.getArtboardCoords(p, C.clientX, C.clientY);
-          k.handlePointerMove(S.x, S.y);
-        }
-      }, y = () => {
-        var C;
-        (C = e.current) == null || C.handlePointerLeave();
-      };
-      return /* @__PURE__ */ ht(
-        "canvas",
-        {
-          ref: t,
-          className: v == null ? void 0 : v.className,
-          style: {
-            width: "100%",
-            height: "100%",
-            display: "block",
-            ...v == null ? void 0 : v.style
-          },
-          onPointerMove: d,
-          onPointerLeave: y
-        }
-      );
-    }, []),
-    canvasRef: t,
-    player: e.current,
-    isLoaded: r,
-    activeState: s,
-    setBool: a,
-    setNumber: l,
-    fireTrigger: c,
-    play: g,
-    pause: f,
-    reset: h
-  };
+$.displayName = "Kerf";
+// src/useKerf.tsx
+function oe(e) {
+	let r = i(null), s = i(null), [c, l] = a(!1), [u, d] = a(""), f = t((e, t) => {
+		s.current?.setBool(e, t);
+	}, []), p = t((e, t) => {
+		s.current?.setNumber(e, t);
+	}, []), m = t((e) => {
+		s.current?.fireTrigger(e);
+	}, []), h = t(() => {
+		s.current && (s.current.isPlaying = !0);
+	}, []), g = t(() => {
+		s.current && (s.current.isPlaying = !1);
+	}, []), _ = t(() => {
+		s.current && (s.current.currentTime = 0);
+	}, []);
+	return n(() => {
+		let t = !1, n, i = performance.now();
+		async function a() {
+			try {
+				let a = await X(e.src);
+				if (t) return;
+				let o = new Q(a);
+				if (o.isPlaying = e.autoplay ?? !0, o.loop = e.loop ?? null, o.onStateChange = (t) => {
+					d(t), e.onStateChange?.(t);
+				}, o.onEvent = (t) => e.onEvent?.(t), o.onTextInputChange = (t, n) => e.onTextInputChange?.(t, n), e.inputs) for (let [t, n] of Object.entries(e.inputs)) typeof n == "boolean" ? o.setBool(t, n) : typeof n == "number" && o.setNumber(t, n);
+				s.current = o, l(!0), o.currentState?.Name && d(o.currentState.Name), e.onLoad?.(a);
+				let c = (e) => {
+					let t = (e - i) / 1e3;
+					i = e, s.current && r.current && (s.current.advance(t), s.current.renderToCanvas(r.current)), n = requestAnimationFrame(c);
+				};
+				n = requestAnimationFrame(c);
+			} catch (e) {
+				console.error("[useKerf] Error loading:", e);
+			}
+		}
+		return a(), () => {
+			t = !0, cancelAnimationFrame(n), s.current = null;
+		};
+	}, [
+		e.src,
+		e.autoplay,
+		e.loop
+	]), {
+		KerfComponent: t((e) => {
+			let t = (e) => {
+				let t = s.current, n = r.current;
+				if (t && n) {
+					let r = t.getArtboardCoords(n, e.clientX, e.clientY);
+					t.handlePointerMove(r.x, r.y);
+				}
+			}, n = () => {
+				s.current?.handlePointerLeave();
+			}, i = (e) => {
+				let t = s.current, n = r.current;
+				if (!t || !n) return;
+				let i = t.getArtboardCoords(n, e.clientX, e.clientY);
+				t.handlePointerMove(i.x, i.y), t.handlePointerDown(), e.currentTarget.setPointerCapture(e.pointerId);
+			}, a = (e) => {
+				let t = s.current, n = r.current;
+				if (!t || !n) return;
+				let i = t.getArtboardCoords(n, e.clientX, e.clientY);
+				t.handlePointerMove(i.x, i.y), t.handlePointerUp(), e.currentTarget.hasPointerCapture(e.pointerId) && e.currentTarget.releasePointerCapture(e.pointerId);
+			}, c = (e) => {
+				s.current?.handlePointerCancel(), e.currentTarget.hasPointerCapture(e.pointerId) && e.currentTarget.releasePointerCapture(e.pointerId);
+			};
+			return /* @__PURE__ */ o("canvas", {
+				ref: r,
+				className: e?.className,
+				style: {
+					width: "100%",
+					height: "100%",
+					display: "block",
+					...e?.style
+				},
+				onPointerMove: t,
+				onPointerDown: i,
+				onPointerUp: a,
+				onPointerLeave: n,
+				onPointerCancel: c,
+				onClick: () => s.current?.handlePointerClick()
+			});
+		}, []),
+		canvasRef: r,
+		player: s.current,
+		isLoaded: c,
+		activeState: u,
+		setBool: f,
+		setNumber: p,
+		fireTrigger: m,
+		play: h,
+		pause: g,
+		reset: _
+	};
 }
-export {
-  Zt as Kerf,
-  Tt as KerfRuntimePlayer,
-  St as cubicBezier,
-  Jt as evaluateTrack,
-  Qt as loadKfxFromArrayBuffer,
-  Ct as loadKfxFromUrl,
-  ie as useKerf
-};
+export { $ as Kerf, Q as KerfRuntimePlayer, H as cubicBezier, Y as evaluateGeometryNodeTrack, J as evaluateGeometryTrack, U as evaluateTrack, Z as loadKfxFromArrayBuffer, X as loadKfxFromUrl, oe as useKerf };

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows;
+using Kerf.Engine;
 using Kerf.Engine.Animation;
 using Kerf.IO;
 using Kerf.Model;
@@ -14,6 +16,7 @@ namespace Kerf.Runtime
         private StateMachineRuntime _stateMachineRuntime;
         private Clip _activeClip;
         private ClipInstance _clipInstance;
+        private readonly Dictionary<uint, VectorGeometry> _restGeometryById = new Dictionary<uint, VectorGeometry>();
         private double _currentTime;
         private int _lastReportedState = -1;
 
@@ -69,6 +72,17 @@ namespace Kerf.Runtime
             _document = doc;
             _currentTime = 0.0;
             _lastReportedState = -1;
+            _restGeometryById.Clear();
+
+            Page documentPage = _document.GetActivePage();
+            if (documentPage != null)
+            {
+                foreach (LayerNode layer in documentPage.GetAllLayersFlat())
+                {
+                    if (layer == null || layer.Type != ElementType.Path) continue;
+                    _restGeometryById[PropertyBinder.GetNumericNodeId(layer.Id)] = layer.Geometry != null ? layer.Geometry.Clone() : null;
+                }
+            }
 
             if (_document.Animation != null)
             {
@@ -144,6 +158,7 @@ namespace Kerf.Runtime
             outPose.Timestamp = _currentTime;
 
             var poseMap = new Dictionary<uint, Dictionary<ushort, double>>();
+            var geometryPose = new Dictionary<uint, VectorGeometry>();
 
             // 1. Evaluate StateMachine if configured
             if (_stateMachineRuntime != null &&
@@ -151,7 +166,16 @@ namespace Kerf.Runtime
                 _stateMachineRuntime.Definition.Layers != null &&
                 _stateMachineRuntime.Definition.Layers.Count > 0)
             {
-                _stateMachineRuntime.Update(dt, poseMap);
+                _stateMachineRuntime.Update(dt, poseMap, geometryPose);
+
+                // Keep the manifest-selected default clip visible while a state machine is
+                // in an entry/empty state. Some exported packages use pointer listeners as
+                // their only interaction and do not assign a clip to the initial state.
+                if (poseMap.Count == 0 && geometryPose.Count == 0 && _activeClip != null && _clipInstance != null)
+                {
+                    _clipInstance.Advance(dt, _activeClip.Duration, _activeClip.LoopMode);
+                    _activeClip.SampleToPose(_clipInstance.Time, poseMap, geometryPose);
+                }
 
                 // Check for state changes to fire StateChanged event
                 if (_stateMachineRuntime.LayerRuntimes != null && _stateMachineRuntime.LayerRuntimes.Count > 0)
@@ -176,16 +200,57 @@ namespace Kerf.Runtime
             else if (_activeClip != null && _clipInstance != null)
             {
                 _clipInstance.Advance(dt, _activeClip.Duration, _activeClip.LoopMode);
-                _activeClip.SampleToPose(_clipInstance.Time, poseMap);
+                _activeClip.SampleToPose(_clipInstance.Time, poseMap, geometryPose);
             }
 
-            // 3. Apply evaluated poseMap to layers
-            if (_document != null && poseMap.Count > 0)
+            // Restore path baselines before applying this frame so switching clips, leaving
+            // a state with no path track, or seeking before its first key cannot retain a
+            // geometry value from the previously evaluated frame.
+            if (_document != null)
             {
                 var page = _document.GetActivePage();
                 if (page != null && page.Layers != null)
                 {
-                    PropertyBinder.ApplyPoseToLayers(page.GetAllLayersFlat(), poseMap);
+                    var layers = page.GetAllLayersFlat();
+                    foreach (var layer in layers)
+                    {
+                        if (layer == null || layer.Type != ElementType.Path) continue;
+                        VectorGeometry restGeometry;
+                        if (_restGeometryById.TryGetValue(PropertyBinder.GetNumericNodeId(layer.Id), out restGeometry) && restGeometry != null)
+                            layer.Geometry = restGeometry.Clone();
+
+                        VectorGeometry geometry;
+                        if (geometryPose.TryGetValue(PropertyBinder.GetNumericNodeId(layer.Id), out geometry) && geometry != null)
+                            layer.Geometry = geometry.Clone();
+                    }
+                    if (poseMap.Count > 0) PropertyBinder.ApplyPoseToLayers(layers, poseMap);
+                }
+            }
+
+            // Apply pointer-aligned state-machine targets to the same model that the
+            // native renderer consumes, so runtime previews match the Studio playback.
+            if (_document != null && _stateMachineRuntime != null &&
+                _stateMachineRuntime.PointerAlignmentTargets != null &&
+                _stateMachineRuntime.PointerAlignmentTargets.Count > 0)
+            {
+                var page = _document.GetActivePage();
+                if (page != null)
+                {
+                    var layersById = new Dictionary<uint, LayerNode>();
+                    foreach (var candidate in page.GetAllLayersFlat())
+                    {
+                        if (candidate != null)
+                            layersById[PropertyBinder.GetNumericNodeId(candidate.Id)] = candidate;
+                    }
+                    foreach (var target in _stateMachineRuntime.PointerAlignmentTargets)
+                    {
+                        LayerNode layer;
+                        if (!layersById.TryGetValue(target.Key, out layer) || layer == null || layer.Type == ElementType.Frame) continue;
+                        if (layer.RenderTransform == null) layer.RenderTransform = new RenderTransform();
+                        System.Windows.Point center = ConstraintsEngine.ClampPointerCenter(page, layer, target.Value);
+                        layer.RenderTransform.TranslationX = center.X - layer.X - layer.Width * 0.5;
+                        layer.RenderTransform.TranslationY = center.Y - layer.Y - layer.Height * 0.5;
+                    }
                 }
             }
 
@@ -222,6 +287,8 @@ namespace Kerf.Runtime
             {
                 outPose.LocalTransforms[layerId] = layer.RenderTransform.Clone();
             }
+            if (layer.Geometry != null)
+                outPose.LayerGeometries[layerId] = layer.Geometry.Clone();
 
             if (layer.Children != null && layer.Children.Count > 0)
             {

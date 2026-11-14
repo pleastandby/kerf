@@ -14,13 +14,13 @@ using IOPath = System.IO.Path;
 namespace Kerf.UI
 {
     /// <summary>
-    /// Kerf Studio official launch & loading modal.
+    /// Kerf official launch & loading modal.
     /// Perfectly matches the official brand loading mockup (rebrand/Loading screen Mockup.png):
     /// - Outer rounded card (CornerRadius 22, #17181F background, deep ambient shadow)
     /// - Inner image card bordered in glowing #46EFB1 (Electric Mint)
     /// - Background cinematic artwork (Kerf-loading-image.png)
     /// - Glowing #46EFB1 Kerf Icon mark at top right
-    /// - "Kerf Studio v3.0" with "IMAGINE / DESIGN / CREATE" subtitle at bottom left
+    /// - "Kerf 3.1 Beta" with "IMAGINE / DESIGN / CREATE" subtitle at bottom left
     /// - "Loading Workspace ....." status label
     /// - Clean Electric Mint progress bar with percentage readout and copyright footer.
     /// </summary>
@@ -47,7 +47,7 @@ namespace Kerf.UI
 
         private void InitializeSplashWindow()
         {
-            Title = "Kerf Studio - Starting";
+            Title = ProductInfo.DisplayName;
             Width = 840;
             Height = 570;
             WindowStyle = WindowStyle.None;
@@ -93,7 +93,22 @@ namespace Kerf.UI
                 }
                 catch { }
             }
-            return null;
+
+            try
+            {
+                using (var stream = typeof(SplashScreenWindow).Assembly.GetManifestResourceStream("Kerf.LoadingImage"))
+                {
+                    if (stream == null) return null;
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.StreamSource = stream;
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    return bmp;
+                }
+            }
+            catch { return null; }
         }
 
         private void BuildUi()
@@ -172,7 +187,7 @@ namespace Kerf.UI
             iconMark.Margin = new Thickness(0, 24, 28, 0);
             artworkGrid.Children.Add(iconMark);
 
-            // Bottom-Left: "Kerf Studio v3.0" and subtitle
+            // Bottom-Left: "Kerf 3.1 Beta" and subtitle
             var titleStack = new StackPanel
             {
                 HorizontalAlignment = HorizontalAlignment.Left,
@@ -182,7 +197,7 @@ namespace Kerf.UI
 
             var titleText = new TextBlock
             {
-                Text = "Kerf Studio v3.0",
+                Text = ProductInfo.DisplayName,
                 FontSize = 32,
                 FontWeight = FontWeights.Bold,
                 Foreground = Brushes.White,
@@ -285,7 +300,7 @@ namespace Kerf.UI
             // Copyright footer
             var copyrightText = new TextBlock
             {
-                Text = "Kerf Studio © All rights reserved",
+                Text = "Kerf © All rights reserved",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Color.FromRgb(85, 95, 115)),
                 Margin = new Thickness(0, 0, 0, 0)
@@ -348,7 +363,7 @@ namespace Kerf.UI
             }
             else
             {
-                _statusText.Text = "Launching Kerf Studio .....";
+                _statusText.Text = "Launching Kerf .....";
             }
 
             if (_progress >= 100.0)

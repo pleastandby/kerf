@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Kerf.Model;
 
 namespace Kerf.Engine.Animation
 {
@@ -7,6 +8,7 @@ namespace Kerf.Engine.Animation
     {
         public uint SourceNodeId { get; set; }
         public ushort PropKey { get; set; }
+        public int GeometryNodeIndex { get; set; }
         public double RelativeTime { get; set; }
         public double Value { get; set; }
         public InterpMode Interp { get; set; }
@@ -14,6 +16,8 @@ namespace Kerf.Engine.Animation
         public double Y1 { get; set; }
         public double X2 { get; set; }
         public double Y2 { get; set; }
+        public VectorGeometry GeometryValue { get; set; }
+        public BezierNode GeometryNodeValue { get; set; }
 
         public ClipboardKeyframeItem()
         {
@@ -72,13 +76,16 @@ namespace Kerf.Engine.Animation
                 {
                     SourceNodeId = tr.NodeId,
                     PropKey = tr.Prop,
+                    GeometryNodeIndex = tr.GeometryNodeIndex,
                     RelativeTime = Math.Max(0.0, kf.Time - minTime),
                     Value = kf.Value,
                     Interp = kf.Interp,
                     X1 = kf.X1,
                     Y1 = kf.Y1,
                     X2 = kf.X2,
-                    Y2 = kf.Y2
+                    Y2 = kf.Y2,
+                    GeometryValue = kf.GeometryValue != null ? kf.GeometryValue.Clone() : null,
+                    GeometryNodeValue = kf.GeometryNodeValue != null ? kf.GeometryNodeValue.Clone() : null
                 });
             }
         }
@@ -93,10 +100,26 @@ namespace Kerf.Engine.Animation
             foreach (var item in _buffer)
             {
                 uint nodeId = (targetNodeId != 0) ? targetNodeId : item.SourceNodeId;
-                var track = targetClip.GetOrCreateTrack(nodeId, item.PropKey);
+                Track track;
+                if (item.PropKey == (ushort)PropKey.PathNode)
+                {
+                    track = targetClip.GetGeometryNodeTrack(nodeId, item.GeometryNodeIndex);
+                    if (track == null)
+                    {
+                        track = new Track(nodeId, item.PropKey, null,
+                            "Node " + (item.GeometryNodeIndex + 1).ToString(), item.GeometryNodeIndex);
+                        targetClip.AddTrack(track);
+                    }
+                }
+                else
+                {
+                    track = targetClip.GetOrCreateTrack(nodeId, item.PropKey);
+                }
                 double kfTime = baseTime + item.RelativeTime;
 
                 var newKf = new Keyframe(kfTime, item.Value, item.Interp, item.X1, item.Y1, item.X2, item.Y2);
+                newKf.GeometryValue = item.GeometryValue != null ? item.GeometryValue.Clone() : null;
+                newKf.GeometryNodeValue = item.GeometryNodeValue != null ? item.GeometryNodeValue.Clone() : null;
                 track.AddKeyframe(newKf);
                 pastedKeys.Add(newKf);
             }
@@ -118,6 +141,8 @@ namespace Kerf.Engine.Animation
                     double newTime = origKf.Time + Math.Max(0.001, timeOffset);
 
                     var newKf = new Keyframe(newTime, origKf.Value, origKf.Interp, origKf.X1, origKf.Y1, origKf.X2, origKf.Y2);
+                    newKf.GeometryValue = origKf.GeometryValue != null ? origKf.GeometryValue.Clone() : null;
+                    newKf.GeometryNodeValue = origKf.GeometryNodeValue != null ? origKf.GeometryNodeValue.Clone() : null;
                     track.AddKeyframe(newKf);
                     duplicatedKeys.Add(newKf);
                 }

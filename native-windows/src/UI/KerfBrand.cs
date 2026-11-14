@@ -10,7 +10,7 @@ using System.Windows.Media.Effects;
 namespace Kerf.UI
 {
     /// <summary>
-    /// Official Kerf Studio Brand Identity & Color System.
+    /// Official Kerf Brand Identity & Color System.
     /// Strictly constrained to the official brand palette:
     /// Primary:
     ///   - #46EFB1: Electric Mint / Neon Teal (Hero accent, selection, primary buttons, active badges)
@@ -182,7 +182,9 @@ namespace Kerf.UI
 
                 var scrollViewer = new FrameworkElementFactory(typeof(ScrollViewer), "PART_ContentHost");
                 scrollViewer.SetValue(ScrollViewer.MarginProperty, new Thickness(0));
-                scrollViewer.SetValue(ScrollViewer.VerticalAlignmentProperty, VerticalAlignment.Center);
+                // Allow the content host to fill the padded text area. Centering the
+                // ScrollViewer itself clips glyphs in short inspector and dialog fields.
+                scrollViewer.SetValue(ScrollViewer.VerticalAlignmentProperty, VerticalAlignment.Stretch);
                 border.AppendChild(scrollViewer);
 
                 template.VisualTree = border;
@@ -211,9 +213,10 @@ namespace Kerf.UI
             textBox.CaretBrush = Brushes.White;
             textBox.BorderBrush = new SolidColorBrush(Color.FromRgb(56, 66, 92));
             textBox.BorderThickness = new Thickness(1);
-            textBox.Padding = new Thickness(8, 4, 8, 4);
+            textBox.Padding = new Thickness(9, 2, 9, 2);
             textBox.VerticalContentAlignment = VerticalAlignment.Center;
             textBox.FontSize = fontSize;
+            textBox.MinHeight = 30;
         }
 
         public static TextBox CreateDarkRoundedTextBox(string text = "", double width = double.NaN, double height = 28, double cornerRadius = 6)
@@ -237,8 +240,9 @@ namespace Kerf.UI
             style.Setters.Add(new Setter(TextBox.CaretBrushProperty, Brushes.White));
             style.Setters.Add(new Setter(Control.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(56, 66, 92))));
             style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
-            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 4, 8, 4)));
+            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(9, 2, 9, 2)));
             style.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+            style.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, 30.0));
             return style;
         }
 

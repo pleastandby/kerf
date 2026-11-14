@@ -42,6 +42,12 @@ export function HeroBanner() {
 
 ---
 
+## ✏️ Path Geometry Keyframes
+
+In Kerf Studio's **Animate** mode, select a vector path and use **Keyframe Path** in the path inspector to record its geometry at the current playhead time. Record another key after editing the path to animate its shape. The React runtime and `.kfx` exports interpolate paths when both keys have the same Bézier node layout. Paths with different node layouts or SVG-only geometry hold the earlier shape until the next key.
+
+---
+
 ## 🎮 Interactive State Machines
 
 Kerf state machines support interactive transitions driven by pointer events and code inputs (Booleans, Numbers, and Triggers).
@@ -126,7 +132,7 @@ export function Gauge({ value }: { value: number }) {
 | :--- | :--- | :--- | :--- |
 | `src` | `string` | **(Required)** | Path or URL to the `.kfx` package |
 | `autoplay` | `boolean` | `true` | Starts animation automatically on load |
-| `loop` | `boolean` | `true` | Loops playback continuously |
+| `loop` | `boolean` | package setting | Override the loop mode authored in the `.kfx` file |
 | `inputs` | `Record<string, boolean \| number>` | `{}` | Map of initial state machine input values |
 | `onLoad` | `(pkg: KfxPackage) => void` | `undefined` | Callback fired when `.kfx` is parsed and ready |
 | `onStateChange` | `(stateName: string) => void` | `undefined` | Callback fired on state machine transitions |

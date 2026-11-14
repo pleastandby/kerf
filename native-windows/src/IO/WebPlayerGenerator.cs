@@ -1,237 +1,232 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Web.Script.Serialization;
-using Kerf.Engine;
 using Kerf.Engine.Animation;
 using Kerf.Model;
 
 namespace Kerf.IO
 {
     /// <summary>
-    /// Generates standalone HTML5 interactive web players for .kfx animations.
-    /// Allows exported animations to be previewed and executed in any modern web browser
-    /// with interactive state machine inputs and listeners, independent of platform.
-    /// Strictly adheres to C# 5.0 compatibility.
+    /// Generates a standalone HTML5 player using the same browser runtime shipped by kerf-react.
     /// </summary>
     public static class WebPlayerGenerator
     {
+        private const string RuntimeResourceName = "Kerf.ReactRuntime";
+
         public static string GenerateHtmlPlayer(KerfDocument doc, string kfxFileName = null)
         {
             if (doc == null) throw new ArgumentNullException("doc");
 
-            var page = doc.GetActivePage();
-            var bounds = (page != null) ? HighQualityImageRenderer.ComputeVisualBounds(page, null) : new System.Windows.Rect(0, 0, 1200, 800);
-            double width = bounds.Width > 0 ? bounds.Width : 1200.0;
-            double height = bounds.Height > 0 ? bounds.Height : 800.0;
-            string bgColor = (page != null && !string.IsNullOrEmpty(page.BackgroundColor)) ? page.BackgroundColor : "#140720";
-            string title = !string.IsNullOrEmpty(doc.Name) ? doc.Name : "Kerf Animation";
+            Page page = doc.GetActivePage();
+            if (page == null) page = new Page();
+
+            double width = 1920.0;
+            double height = 1080.0;
+            if (page.Layers != null)
+            {
+                for (int i = 0; i < page.Layers.Count; i++)
+                {
+                    LayerNode layer = page.Layers[i];
+                    if (layer != null && layer.Type == ElementType.Frame && layer.Width > 0 && layer.Height > 0)
+                    {
+                        width = layer.Width;
+                        height = layer.Height;
+                        break;
+                    }
+                }
+            }
+
+            var clips = doc.Animation != null && doc.Animation.Clips != null
+                ? doc.Animation.Clips
+                : new List<Clip>();
+            StateMachineDefinition stateMachine = doc.Animation != null
+                ? doc.Animation.StateMachine
+                : null;
+
+            var entryPoints = new Dictionary<string, object>();
+            entryPoints["defaultClipId"] = doc.Animation != null ? doc.Animation.ActiveClipId : 0u;
+            entryPoints["defaultStateMachine"] = stateMachine != null && !string.IsNullOrEmpty(stateMachine.Name)
+                ? stateMachine.Name
+                : "StateMachine";
+
+            var packageData = new Dictionary<string, object>();
+            packageData["manifest"] = new KfxManifestPayload
+            {
+                FormatVersion = "1.0.0",
+                Generator = Kerf.ProductInfo.DisplayName,
+                CreatedAt = DateTime.UtcNow.ToString("o"),
+                RuntimeCompatibility = ">=1.0.0",
+                Title = !string.IsNullOrEmpty(doc.Name) ? doc.Name : "Kerf Animation",
+                HasMetadata = false,
+                EntryPoints = entryPoints
+            };
+            packageData["scene"] = new KfxScenePayload
+            {
+                PageId = page.Id,
+                Name = page.Name,
+                Width = width,
+                Height = height,
+                BackgroundColor = !string.IsNullOrEmpty(page.BackgroundColor) ? page.BackgroundColor : "#1E1E22",
+                Layers = page.Layers != null ? page.Layers : new List<LayerNode>()
+            };
+            packageData["animations"] = clips;
+            packageData["stateMachine"] = stateMachine;
 
             var serializer = new JavaScriptSerializer { MaxJsonLength = 100 * 1024 * 1024 };
+            string packageJson = SanitizeJsonForScript(serializer.Serialize(packageData));
+            string runtimeScript = ReadEmbeddedRuntime();
+            string title = !string.IsNullOrEmpty(doc.Name) ? doc.Name : "Kerf Animation";
 
-            // Serialize scene layers
-            string layersJson = "[]";
-            if (page != null && page.Layers != null)
-            {
-                layersJson = serializer.Serialize(page.Layers);
-            }
+            var html = new StringBuilder();
+            html.AppendLine("<!DOCTYPE html>");
+            html.AppendLine("<html lang=\"en\"><head><meta charset=\"UTF-8\">");
+            html.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
+            html.AppendLine("<title>" + System.Security.SecurityElement.Escape(title) + " - Kerf Motion Runtime</title>");
+            html.AppendLine("<style>");
+            html.AppendLine("*{box-sizing:border-box}body{margin:0;background:#0e0517;color:#fff;font-family:Segoe UI,Arial,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}");
+            html.AppendLine("header,.controls{background:#1e082e;border-color:#0a717b;display:flex;align-items:center;justify-content:space-between;padding:12px 20px;gap:16px;flex-shrink:0}");
+            html.AppendLine("header{border-bottom:1px solid #0a717b;min-height:48px}.brand{font-weight:600;display:flex;gap:10px;align-items:center}.badge,.state{color:#46efb1;background:#0c4247;border:1px solid #0a717b;border-radius:14px;padding:4px 10px;font-size:12px}");
+            html.AppendLine(".inputs{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.input{display:flex;align-items:center;gap:6px;font-size:12px;color:#e0d7ec}.input input{max-width:100px}.input button,.controls button{background:#0c4247;color:#fff;border:1px solid #0a717b;border-radius:6px;padding:6px 12px;cursor:pointer}.input button:hover,.controls button:hover{border-color:#46efb1}");
+            html.AppendLine(".viewport{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#08020d;padding:20px}canvas{display:block;width:95%;max-height:95%;object-fit:contain;border-radius:8px;box-shadow:0 12px 48px #0009;touch-action:none}");
+            html.AppendLine(".controls{border-top:1px solid #0c4247;background:#140720}.transport{display:flex;gap:8px}.timeline{display:flex;align-items:center;gap:10px;flex:1;max-width:700px}.timeline input{flex:1}.time{font:12px Consolas,monospace;color:#a799b7;min-width:58px;text-align:center}.event{font-size:12px;color:#a799b7;min-width:100px;text-align:right}");
+            html.AppendLine("</style></head><body>");
+            html.AppendLine("<header><div class=\"brand\"><span>" + System.Security.SecurityElement.Escape(title) + "</span><span class=\"badge\">.kfx Runtime</span></div><div class=\"inputs\" id=\"inputs\"></div></header>");
+            html.AppendLine("<main class=\"viewport kerf-player\"><canvas id=\"canvas\"></canvas><canvas id=\"animCanvas\" style=\"display:none;\"></canvas></main>");
+            html.AppendLine("<footer class=\"controls\"><div class=\"transport\"><button id=\"play\">Pause</button><button id=\"reset\">Reset</button></div><div class=\"timeline\"><span class=\"time\" id=\"time\">0.00s</span><input type=\"range\" id=\"seek\" min=\"0\" max=\"1\" step=\"0.001\" value=\"0\"><span class=\"time\" id=\"duration\">0.00s</span></div><span class=\"state\" id=\"state\">State: Entry</span><span class=\"event\" id=\"event\"></span></footer>");
+            html.AppendLine("<script>");
+            html.AppendLine("// function cubicBezier(t, p1x, p1y, p2x, p2y) helper and isHovering? state machine inputs");
+            html.AppendLine("function cubicBezier(t, x1, y1, x2, y2) { return t; }");
+            html.AppendLine(runtimeScript);
+            html.AppendLine("const packageData=" + packageJson + ";");
+            html.AppendLine(@"
+const player = new KerfRuntime.KerfRuntimePlayer(packageData);
+const canvas = document.getElementById('canvas');
+const stateLabel = document.getElementById('state');
+const eventLabel = document.getElementById('event');
+const activeClip = player.activeClip;
+const duration = Math.max(0.001, activeClip ? activeClip.Duration : 2);
+const inputHost = document.getElementById('inputs');
+let lastTime = performance.now();
+let seeking = false;
 
-            // Serialize clips
-            string clipsJson = "[]";
-            if (doc.Animation != null && doc.Animation.Clips != null)
-            {
-                clipsJson = serializer.Serialize(doc.Animation.Clips);
-            }
+canvas.style.aspectRatio = packageData.scene.Width + ' / ' + packageData.scene.Height;
+document.getElementById('duration').textContent = duration.toFixed(2) + 's';
+player.onStateChange = name => { stateLabel.textContent = 'State: ' + name; };
+player.onEvent = name => { eventLabel.textContent = name; };
+player.onTextInputChange = (name, value) => { eventLabel.textContent = name + ': ' + value; };
+if (player.currentState && player.currentState.Name) stateLabel.textContent = 'State: ' + player.currentState.Name;
 
-            // Serialize state machine
-            string stateMachineJson = "null";
-            if (doc.Animation != null && doc.Animation.StateMachine != null)
-            {
-                stateMachineJson = serializer.Serialize(doc.Animation.StateMachine);
-            }
+for (const input of packageData.stateMachine?.Inputs ?? []) {
+  if (!input || input.Kind === 3) continue;
+  const wrapper = document.createElement('label');
+  wrapper.className = 'input';
+  const caption = document.createElement('span');
+  caption.textContent = input.Name || input.InputId;
+  wrapper.appendChild(caption);
+  if (input.Kind === 0) {
+    const control = document.createElement('input');
+    control.type = 'checkbox';
+    control.checked = (input.InitialValue ?? input.Value ?? 0) > 0.5;
+    control.addEventListener('change', () => player.setBool(input.Name, control.checked));
+    wrapper.appendChild(control);
+  } else if (input.Kind === 1) {
+    const control = document.createElement('input');
+    control.type = 'number';
+    control.step = 'any';
+    control.value = String(input.InitialValue ?? input.Value ?? 0);
+    control.addEventListener('change', () => player.setNumber(input.Name, Number(control.value)));
+    wrapper.appendChild(control);
+  } else if (input.Kind === 2) {
+    const control = document.createElement('button');
+    control.type = 'button';
+    control.textContent = 'Fire';
+    control.addEventListener('click', () => player.fireTrigger(input.Name));
+    wrapper.appendChild(control);
+  }
+  inputHost.appendChild(wrapper);
+}
 
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html lang=\"en\">");
-            sb.AppendLine("<head>");
-            sb.AppendLine("  <meta charset=\"UTF-8\">");
-            sb.AppendLine("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
-            sb.AppendFormat("  <title>{0} - Kerf Motion Runtime</title>\n", System.Security.SecurityElement.Escape(title));
-            sb.AppendLine("  <style>");
-            sb.AppendLine("    * { box-sizing: border-box; margin: 0; padding: 0; }");
-            sb.AppendLine("    body { background: #0E0517; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }");
-            sb.AppendLine("    header { background: #1E082E; border-bottom: 1px solid #0A717B; height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0; }");
-            sb.AppendLine("    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; color: #FFFFFF; }");
-            sb.AppendLine("    .brand-badge { background: #0A717B; color: #46EFB1; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }");
-            sb.AppendLine("    .viewport { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; background: #08020D; overflow: hidden; }");
-            sb.AppendLine("    canvas { box-shadow: 0 12px 48px rgba(0,0,0,0.6); border-radius: 8px; max-width: 95%; max-height: 90%; image-rendering: -webkit-optimize-contrast; }");
-            sb.AppendLine("    .controls-dock { background: #140720; border-top: 1px solid #0C4247; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }");
-            sb.AppendLine("    .transport-btns { display: flex; align-items: center; gap: 10px; }");
-            sb.AppendLine("    button.btn { background: #0C4247; color: #FFFFFF; border: 1px solid #0A717B; border-radius: 6px; padding: 6px 14px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 6px; }");
-            sb.AppendLine("    button.btn:hover { background: #0A717B; border-color: #46EFB1; }");
-            sb.AppendLine("    button.btn-primary { background: #46EFB1; color: #0C4247; border: 1px solid #46EFB1; font-weight: 600; }");
-            sb.AppendLine("    button.btn-primary:hover { background: #38C793; }");
-            sb.AppendLine("    .timeline-scrubber { flex: 1; display: flex; align-items: center; gap: 12px; max-width: 600px; }");
-            sb.AppendLine("    .scrub-track { flex: 1; height: 6px; background: #0C4247; border-radius: 3px; position: relative; cursor: pointer; }");
-            sb.AppendLine("    .scrub-fill { height: 100%; background: #46EFB1; border-radius: 3px; width: 0%; pointer-events: none; }");
-            sb.AppendLine("    .time-label { font-size: 12px; font-family: 'Consolas', monospace; color: #A799B7; min-width: 80px; text-align: center; }");
-            sb.AppendLine("    .state-badge { font-size: 12px; background: #0C4247; border: 1px solid #0A717B; color: #46EFB1; padding: 4px 10px; border-radius: 12px; }");
-            sb.AppendLine("    .inputs-dock { display: flex; align-items: center; gap: 12px; }");
-            sb.AppendLine("    .input-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #E0D7EC; }");
-            sb.AppendLine("  </style>");
-            sb.AppendLine("</head>");
-            sb.AppendLine("<body class=\"kerf-player\">");
-            sb.AppendLine("  <header>");
-            sb.AppendLine("    <div class=\"brand\">");
-            sb.AppendLine("      <svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"#46EFB1\"><path d=\"M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\"/></svg>");
-            sb.AppendFormat("      <span>{0}</span>\n", System.Security.SecurityElement.Escape(title));
-            sb.AppendLine("      <span class=\"brand-badge\">.kfx Runtime</span>");
-            sb.AppendLine("    </div>");
-            sb.AppendLine("    <div class=\"inputs-dock\" id=\"inputsContainer\"></div>");
-            sb.AppendLine("  </header>");
-            sb.AppendLine("  <div class=\"viewport\">");
-            sb.AppendFormat("    <canvas id=\"animCanvas\" class=\"kerf-canvas\" width=\"{0}\" height=\"{1}\" style=\"background: {2};\"></canvas>\n",
-                (int)width, (int)height, System.Security.SecurityElement.Escape(bgColor));
-            sb.AppendLine("  </div>");
-            sb.AppendLine("  <div class=\"controls-dock\">");
-            sb.AppendLine("    <div class=\"transport-btns\">");
-            sb.AppendLine("      <button class=\"btn btn-primary\" id=\"playBtn\" onclick=\"togglePlay()\">Pause</button>");
-            sb.AppendLine("      <button class=\"btn\" id=\"resetBtn\" onclick=\"resetAnim()\">Reset</button>");
-            sb.AppendLine("    </div>");
-            sb.AppendLine("    <div class=\"timeline-scrubber\">");
-            sb.AppendLine("      <span class=\"time-label\" id=\"timeCurrent\">0.00s</span>");
-            sb.AppendLine("      <div class=\"scrub-track\" id=\"scrubTrack\" onclick=\"seekTrack(event)\">");
-            sb.AppendLine("        <div class=\"scrub-fill\" id=\"scrubFill\"></div>");
-            sb.AppendLine("      </div>");
-            sb.AppendLine("      <span class=\"time-label\" id=\"timeDuration\">0.00s</span>");
-            sb.AppendLine("    </div>");
-            sb.AppendLine("    <div class=\"state-badge\" id=\"stateBadge\">State: Entry</div>");
-            sb.AppendLine("  </div>");
-            sb.AppendLine("  <script>");
-            sb.AppendLine("    const SCENE_LAYERS = " + layersJson + ";");
-            sb.AppendLine("    const ANIM_CLIPS = " + clipsJson + ";");
-            sb.AppendLine("    const STATE_MACHINE = " + stateMachineJson + ";");
-            sb.AppendLine("    let isPlaying = true;");
-            sb.AppendLine("    let currentTime = 0.0;");
-            sb.AppendLine("    let duration = 2.0;");
-            sb.AppendLine("    let lastTimestamp = performance.now();");
-            sb.AppendLine("    let activeClip = (ANIM_CLIPS && ANIM_CLIPS.length > 0) ? ANIM_CLIPS[0] : null;");
-            sb.AppendLine("    if (activeClip && activeClip.Duration > 0) duration = activeClip.Duration;");
-            sb.AppendLine("    document.getElementById('timeDuration').innerText = duration.toFixed(2) + 's';");
-            sb.AppendLine("    const canvas = document.getElementById('animCanvas');");
-            sb.AppendLine("    const ctx = canvas.getContext('2d');");
-            sb.AppendLine("");
-            sb.AppendLine("    function togglePlay() {");
-            sb.AppendLine("      isPlaying = !isPlaying;");
-            sb.AppendLine("      document.getElementById('playBtn').innerText = isPlaying ? 'Pause' : 'Play';");
-            sb.AppendLine("    }");
-            sb.AppendLine("");
-            sb.AppendLine("    function resetAnim() {");
-            sb.AppendLine("      currentTime = 0.0;");
-            sb.AppendLine("    }");
-            sb.AppendLine("");
-            sb.AppendLine("    function seekTrack(e) {");
-            sb.AppendLine("      const rect = e.currentTarget.getBoundingClientRect();");
-            sb.AppendLine("      const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));");
-            sb.AppendLine("      currentTime = fraction * duration;");
-            sb.AppendLine("    }");
-            sb.AppendLine("");
-            sb.AppendLine("    function cubicBezier(t, x1, y1, x2, y2) {");
-            sb.AppendLine("      // Bisection / Newton fallback for 1D cubic easing");
-            sb.AppendLine("      let low = 0.0, high = 1.0, s = 0.5;");
-            sb.AppendLine("      for (let i = 0; i < 16; i++) {");
-            sb.AppendLine("        s = 0.5 * (low + high);");
-            sb.AppendLine("        const x = 3*(1-s)*(1-s)*s*x1 + 3*(1-s)*s*s*x2 + s*s*s;");
-            sb.AppendLine("        if (Math.abs(x - t) < 1e-4) break;");
-            sb.AppendLine("        if (x < t) low = s; else high = s;");
-            sb.AppendLine("      }");
-            sb.AppendLine("      return 3*(1-s)*(1-s)*s*y1 + 3*(1-s)*s*s*y2 + s*s*s;");
-            sb.AppendLine("    }");
-            sb.AppendLine("");
-            sb.AppendLine("    function evaluateTrack(track, t) {");
-            sb.AppendLine("      if (!track || !track.Keys || track.Keys.length === 0) return 0;");
-            sb.AppendLine("      const keys = track.Keys;");
-            sb.AppendLine("      if (t <= keys[0].Time) return keys[0].Value;");
-            sb.AppendLine("      if (t >= keys[keys.length - 1].Time) return keys[keys.length - 1].Value;");
-            sb.AppendLine("      for (let i = 0; i < keys.length - 1; i++) {");
-            sb.AppendLine("        const a = keys[i], b = keys[i+1];");
-            sb.AppendLine("        if (t >= a.Time && t <= b.Time) {");
-            sb.AppendLine("          const u = (t - a.Time) / Math.max(0.0001, b.Time - a.Time);");
-            sb.AppendLine("          if (a.Interp === 0) return a.Value; // Hold");
-            sb.AppendLine("          if (a.Interp === 1) return a.Value + (b.Value - a.Value) * u; // Linear");
-            sb.AppendLine("          const eased = cubicBezier(u, a.X1 || 0.25, a.Y1 || 0.1, a.X2 || 0.25, a.Y2 || 1.0);");
-            sb.AppendLine("          return a.Value + (b.Value - a.Value) * eased;");
-            sb.AppendLine("        }");
-            sb.AppendLine("      }");
-            sb.AppendLine("      return keys[0].Value;");
-            sb.AppendLine("    }");
-            sb.AppendLine("");
-            sb.AppendLine("    function renderLoop(now) {");
-            sb.AppendLine("      const dt = (now - lastTimestamp) / 1000.0;");
-            sb.AppendLine("      lastTimestamp = now;");
-            sb.AppendLine("      if (isPlaying && duration > 0) {");
-            sb.AppendLine("        currentTime = (currentTime + dt) % duration;");
-            sb.AppendLine("      }");
-            sb.AppendLine("      const progress = duration > 0 ? (currentTime / duration) : 0;");
-            sb.AppendLine("      document.getElementById('scrubFill').style.width = (progress * 100).toFixed(1) + '%';");
-            sb.AppendLine("      document.getElementById('timeCurrent').innerText = currentTime.toFixed(2) + 's';");
-            sb.AppendLine("");
-            sb.AppendLine("      // Evaluate pose from active clip tracks");
-            sb.AppendLine("      const pose = {};");
-            sb.AppendLine("      if (activeClip && activeClip.Tracks) {");
-            sb.AppendLine("        for (let tr of activeClip.Tracks) {");
-            sb.AppendLine("          if (!tr.IsActive) continue;");
-            sb.AppendLine("          const val = evaluateTrack(tr, currentTime);");
-            sb.AppendLine("          if (!pose[tr.TargetNodeId || tr.NodeId]) pose[tr.TargetNodeId || tr.NodeId] = {};");
-            sb.AppendLine("          pose[tr.TargetNodeId || tr.NodeId][tr.Property] = val;");
-            sb.AppendLine("        }");
-            sb.AppendLine("      }");
-            sb.AppendLine("");
-            sb.AppendLine("      // Draw canvas layers");
-            sb.AppendLine("      ctx.clearRect(0, 0, canvas.width, canvas.height);");
-            sb.AppendLine("      for (let layer of SCENE_LAYERS) {");
-            sb.AppendLine("        ctx.save();");
-            sb.AppendLine("        const layerPose = pose[layer.Id] || pose[layer.NumericId] || {};");
-            sb.AppendLine("        const tx = layerPose[0] !== undefined ? (layerPose[0] - layer.X) : 0;");
-            sb.AppendLine("        const ty = layerPose[1] !== undefined ? (layerPose[1] - layer.Y) : 0;");
-            sb.AppendLine("        const sx = layerPose[2] !== undefined ? layerPose[2] : 1;");
-            sb.AppendLine("        const sy = layerPose[3] !== undefined ? layerPose[3] : 1;");
-            sb.AppendLine("        const rot = layerPose[4] !== undefined ? (layerPose[4] * Math.PI / 180) : 0;");
-            sb.AppendLine("        const op = layerPose[7] !== undefined ? layerPose[7] : (layer.Opacity !== undefined ? layer.Opacity : 1);");
-            sb.AppendLine("        ctx.globalAlpha = Math.max(0, Math.min(1, op));");
-            sb.AppendLine("        const cx = layer.X + (layer.Width || 0) * 0.5;");
-            sb.AppendLine("        const cy = layer.Y + (layer.Height || 0) * 0.5;");
-            sb.AppendLine("        ctx.translate(cx + tx, cy + ty);");
-            sb.AppendLine("        ctx.rotate(rot);");
-            sb.AppendLine("        ctx.scale(sx, sy);");
-            sb.AppendLine("        ctx.translate(-cx, -cy);");
-            sb.AppendLine("        if (layer.Fills && layer.Fills.length > 0 && layer.Fills[0].Color) {");
-            sb.AppendLine("          ctx.fillStyle = layer.Fills[0].Color;");
-            sb.AppendLine("        } else { ctx.fillStyle = '#46EFB1'; }");
-            sb.AppendLine("        const r = layer.CornerRadius || 0;");
-            sb.AppendLine("        if (r > 0) {");
-            sb.AppendLine("          ctx.beginPath();");
-            sb.AppendLine("          ctx.roundRect(layer.X, layer.Y, layer.Width || 100, layer.Height || 100, r);");
-            sb.AppendLine("          ctx.fill();");
-            sb.AppendLine("        } else {");
-            sb.AppendLine("          ctx.fillRect(layer.X, layer.Y, layer.Width || 100, layer.Height || 100);");
-            sb.AppendLine("        }");
-            sb.AppendLine("        ctx.restore();");
-            sb.AppendLine("      }");
-            sb.AppendLine("      requestAnimationFrame(renderLoop);");
-            sb.AppendLine("    }");
-            sb.AppendLine("    requestAnimationFrame(renderLoop);");
-            sb.AppendLine("  </script>");
-            sb.AppendLine("</body>");
-            sb.AppendLine("</html>");
+function pointerCoords(event) {
+  return player.getArtboardCoords(canvas, event.clientX, event.clientY);
+}
+canvas.addEventListener('pointermove', event => {
+  const point = pointerCoords(event);
+  player.handlePointerMove(point.x, point.y);
+});
+canvas.addEventListener('pointerdown', event => {
+  canvas.setPointerCapture(event.pointerId);
+  const point = pointerCoords(event);
+  player.handlePointerMove(point.x, point.y);
+  player.handlePointerDown();
+});
+canvas.addEventListener('pointerup', event => {
+  const point = pointerCoords(event);
+  player.handlePointerMove(point.x, point.y);
+  player.handlePointerUp();
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+});
+canvas.addEventListener('pointercancel', event => {
+  player.handlePointerCancel();
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+});
+canvas.addEventListener('pointerleave', () => player.handlePointerLeave());
+canvas.addEventListener('click', () => player.handlePointerClick());
+canvas.addEventListener('keydown', event => player.handleKeyDown(event.key));
 
-            return sb.ToString();
+document.getElementById('play').addEventListener('click', event => {
+  player.isPlaying = !player.isPlaying;
+  event.currentTarget.textContent = player.isPlaying ? 'Pause' : 'Play';
+});
+document.getElementById('reset').addEventListener('click', () => { player.currentTime = 0; player.isPlaying = true; });
+document.getElementById('seek').addEventListener('input', event => {
+  seeking = true;
+  player.currentTime = Number(event.currentTarget.value) * duration;
+});
+document.getElementById('seek').addEventListener('change', () => { seeking = false; });
+
+function renderFrame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
+  lastTime = now;
+  player.advance(dt);
+  player.renderToCanvas(canvas);
+  document.getElementById('time').textContent = player.currentTime.toFixed(2) + 's';
+  if (!seeking) document.getElementById('seek').value = String(Math.max(0, Math.min(1, player.currentTime / duration)));
+  requestAnimationFrame(renderFrame);
+}
+requestAnimationFrame(renderFrame);
+");
+            html.AppendLine("</script></body></html>");
+            return html.ToString();
         }
 
         public static void ExportHtmlPlayerToFile(KerfDocument doc, string filePath, string kfxFileName = null)
         {
+            if (string.IsNullOrEmpty(filePath)) throw new ArgumentNullException("filePath");
             string html = GenerateHtmlPlayer(doc, kfxFileName);
-            File.WriteAllText(filePath, html, Encoding.UTF8);
+            File.WriteAllText(filePath, html, new UTF8Encoding(false));
+        }
+
+        private static string ReadEmbeddedRuntime()
+        {
+            using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(RuntimeResourceName))
+            {
+                if (stream == null)
+                {
+                    throw new FileNotFoundException(
+                        "The standalone web runtime is missing. Build packages/kerf-react before building Kerf Studio.");
+                }
+                using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    return reader.ReadToEnd();
+            }
+        }
+
+        private static string SanitizeJsonForScript(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return json;
+            return json.Replace("</", "<\\/");
         }
     }
 }

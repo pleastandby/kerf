@@ -36,19 +36,58 @@ namespace Kerf.Engine
             // Apply direct GPU pixel shader effects
             ApplyGpuEffects(node, visual);
 
-            // Hardware clip visual and all child layers to the frame's exact shape & corner radius
+            // Hardware clip visual and all child layers (Frame ClipContent and Rive-style Clipping Targets)
+            Geometry combinedClip = null;
             if (node.Type == ElementType.Frame && node.ClipContent)
             {
-                var clipGeo = BuildGeometry(node);
-                if (clipGeo != null)
+                combinedClip = BuildGeometry(node);
+            }
+
+            if (node.ClippingTargets != null && node.ClippingTargets.Count > 0 && ActivePage != null)
+            {
+                for (int c = 0; c < node.ClippingTargets.Count; c++)
                 {
-                    clipGeo.Freeze();
-                    visual.Clip = clipGeo;
+                    var clipTarget = node.ClippingTargets[c];
+                    if (clipTarget == null || !clipTarget.Enabled || string.IsNullOrEmpty(clipTarget.TargetLayerId)) continue;
+
+                    var targetNode = ActivePage.FindLayerById(clipTarget.TargetLayerId);
+                    if (targetNode == null) continue;
+
+                    var targetGeo = BuildClipSourceGeometry(targetNode);
+                    if (targetGeo != null)
+                    {
+                        Geometry effectiveTargetGeo = targetGeo;
+                        if (clipTarget.IsInverse)
+                        {
+                            var bigBounds = new RectangleGeometry(new Rect(-50000, -50000, 100000, 100000));
+                            var inv = new CombinedGeometry(GeometryCombineMode.Exclude, bigBounds, targetGeo);
+                            inv.Freeze();
+                            effectiveTargetGeo = inv;
+                        }
+
+                        // The clip is attached to this visual, so its own and ancestor
+                        // animation transforms will be applied to the clip as well. Convert
+                        // the mask from document space back into the owner's local space first.
+                        effectiveTargetGeo = TransformClipToOwnerSpace(effectiveTargetGeo, node);
+
+                        if (combinedClip == null)
+                        {
+                            combinedClip = effectiveTargetGeo;
+                        }
+                        else
+                        {
+                            var intersected = new CombinedGeometry(GeometryCombineMode.Intersect, combinedClip, effectiveTargetGeo);
+                            intersected.Freeze();
+                            combinedClip = intersected;
+                        }
+                    }
                 }
-                else
-                {
-                    visual.Clip = null;
-                }
+            }
+
+            if (combinedClip != null)
+            {
+                combinedClip.Freeze();
+                visual.Clip = combinedClip;
             }
             else
             {
@@ -104,8 +143,11 @@ namespace Kerf.Engine
                     }
                 }
 
-                // Draw Drop Shadow (CPU fallback pass if shader effect not supported)
-                if (!_isHardwareTier)
+                // Draw Drop Shadow in software when the visual effect is unavailable, and also
+                // before layer blur so a layer can show both effects in the same pass.
+                bool hasLayerBlur = node.Effects != null && node.Effects.Any(e => e != null && e.Enabled &&
+                    (e.Type == EffectType.LayerBlur || e.Type == EffectType.Feather));
+                if (!_isHardwareTier || hasLayerBlur)
                 {
                     RenderSoftwareShadowPass(node, dc);
                 }
@@ -137,9 +179,21 @@ namespace Kerf.Engine
                 return;
             }
 
-            // Find first active effect
+            // Blur the rendered layer in either hardware or software WPF tiers. If a drop shadow
+            // is also enabled, RenderSoftwareShadowPass draws it into the layer before blurring.
             var dropShadow = node.Effects.FirstOrDefault(e => e.Enabled && e.Type == EffectType.DropShadow);
             var blur = node.Effects.FirstOrDefault(e => e.Enabled && (e.Type == EffectType.LayerBlur || e.Type == EffectType.Feather));
+
+            if (blur != null)
+            {
+                visual.Effect = new BlurEffect
+                {
+                    Radius = Math.Max(1.0, blur.Blur),
+                    KernelType = KernelType.Gaussian,
+                    RenderingBias = RenderingBias.Performance
+                };
+                return;
+            }
 
             if (dropShadow != null && _isHardwareTier)
             {
@@ -169,16 +223,6 @@ namespace Kerf.Engine
                     RenderingBias = RenderingBias.Performance
                 };
                 visual.Effect = dse;
-            }
-            else if (blur != null && _isHardwareTier)
-            {
-                var be = new BlurEffect
-                {
-                    Radius = Math.Max(1.0, blur.Blur),
-                    KernelType = KernelType.Gaussian,
-                    RenderingBias = RenderingBias.Performance
-                };
-                visual.Effect = be;
             }
             else
             {
@@ -1180,19 +1224,19 @@ namespace Kerf.Engine
                     return new EllipseGeometry(new Rect(x, y, w, h));
 
                 case ElementType.Star:
-                    return BuildStarGeometry(x, y, w, h, 5, 0.45);
+                    return ApplyCornerRadius(BuildStarGeometry(x, y, w, h, 5, 0.45), node.CornerRadius);
 
                 case ElementType.Polygon:
-                    return BuildPolygonGeometry(x, y, w, h, 6);
+                    return ApplyCornerRadius(BuildPolygonGeometry(x, y, w, h, 6), node.CornerRadius);
 
                 case ElementType.Line:
                     return new LineGeometry(new Point(x, y), new Point(x + w, y + h));
 
                 case ElementType.Arrow:
-                    return BuildArrowGeometry(x, y, w, h);
+                    return ApplyCornerRadius(BuildArrowGeometry(x, y, w, h), node.CornerRadius);
 
                 case ElementType.Path:
-                    return BuildBezierPathGeometry(node);
+                    return ApplyCornerRadius(BuildBezierPathGeometry(node), node.CornerRadius);
 
                 case ElementType.Text:
                     return new RectangleGeometry(new Rect(x, y, w, h));
@@ -1200,6 +1244,101 @@ namespace Kerf.Engine
                 default:
                     return new RectangleGeometry(new Rect(x, y, w, h));
             }
+        }
+
+        public Geometry BuildClipSourceGeometry(LayerNode node, bool includeAncestorStaticTransforms = false)
+        {
+            if (node == null) return null;
+            if (node.Type != ElementType.Group)
+            {
+                Geometry shape = BuildGeometry(node);
+                if (shape == null) return null;
+                Matrix transform = GetLayerWorldTransformMatrix(node, ActivePage, includeAncestorStaticTransforms);
+                if (transform.IsIdentity) return shape;
+                return ApplyGeometryTransform(shape, transform);
+            }
+
+            var combined = new GeometryGroup { FillRule = FillRule.Nonzero };
+            if (node.Children != null)
+            {
+                for (int i = 0; i < node.Children.Count; i++)
+                {
+                    LayerNode child = node.Children[i];
+                    if (child == null || !child.IsVisible || child.Type == ElementType.Frame || child.Type == ElementType.Slice) continue;
+                    Geometry childGeo = BuildClipSourceGeometry(child, includeAncestorStaticTransforms);
+                    if (childGeo != null) combined.Children.Add(childGeo);
+                }
+            }
+
+            // Descendant source geometries already include this group's transform chain.
+            return combined;
+        }
+
+        public static Matrix GetLayerWorldRenderTransformMatrix(LayerNode layer, Page page)
+        {
+            if (layer == null) return Matrix.Identity;
+            Matrix transform = layer.GetRenderTransformMatrix();
+            var ancestors = GetLayerAncestorChain(page, layer);
+            for (int i = ancestors.Count - 1; i >= 0; i--)
+                transform.Append(ancestors[i].GetRenderTransformMatrix());
+            return transform;
+        }
+
+        public static Matrix GetLayerWorldTransformMatrix(LayerNode layer, Page page, bool includeAncestorStaticTransforms)
+        {
+            if (layer == null) return Matrix.Identity;
+            Matrix transform = layer.GetTransformMatrix();
+            var ancestors = GetLayerAncestorChain(page, layer);
+            for (int i = ancestors.Count - 1; i >= 0; i--)
+                transform.Append(includeAncestorStaticTransforms
+                    ? ancestors[i].GetTransformMatrix()
+                    : ancestors[i].GetRenderTransformMatrix());
+            return transform;
+        }
+
+        private static List<LayerNode> GetLayerAncestorChain(Page page, LayerNode target)
+        {
+            var path = new List<LayerNode>();
+            if (page == null || target == null) return path;
+            var visited = new HashSet<LayerNode>();
+            if (!TryFindLayerPath(page.Layers, target, path, visited)) return new List<LayerNode>();
+            path.RemoveAt(path.Count - 1);
+            return path;
+        }
+
+        private static bool TryFindLayerPath(IEnumerable<LayerNode> layers, LayerNode target, List<LayerNode> path, HashSet<LayerNode> visited)
+        {
+            if (layers == null) return false;
+            foreach (var layer in layers)
+            {
+                if (layer == null || !visited.Add(layer)) continue;
+                path.Add(layer);
+                if (ReferenceEquals(layer, target)) return true;
+                if (TryFindLayerPath(layer.Children, target, path, visited)) return true;
+                path.RemoveAt(path.Count - 1);
+            }
+            return false;
+        }
+
+        private static Geometry TransformClipToOwnerSpace(Geometry geometry, LayerNode owner)
+        {
+            if (geometry == null || owner == null) return geometry;
+            Matrix ownerTransform = GetLayerWorldRenderTransformMatrix(owner, ActivePage);
+            if (ownerTransform.IsIdentity || !ownerTransform.HasInverse) return geometry;
+            ownerTransform.Invert();
+            return ApplyGeometryTransform(geometry, ownerTransform);
+        }
+
+        public static Geometry ApplyGeometryTransform(Geometry geometry, Matrix transform)
+        {
+            if (geometry == null || transform.IsIdentity) return geometry;
+            Geometry result = geometry.Clone();
+            Matrix combined = result.Transform != null ? result.Transform.Value : Matrix.Identity;
+            if (combined.IsIdentity) combined = transform;
+            else combined.Append(transform);
+            result.Transform = new MatrixTransform(combined);
+            result.Freeze();
+            return result;
         }
 
         private Geometry BuildRoundedRectGeometry(double x, double y, double w, double h,
@@ -1313,6 +1452,182 @@ namespace Kerf.Engine
             return geo;
         }
 
+        private Geometry ApplyCornerRadius(Geometry geometry, double radius)
+        {
+            if (geometry == null || radius <= 0.01) return geometry;
+
+            PathGeometry flattened;
+            try
+            {
+                flattened = geometry.GetFlattenedPathGeometry(0.25, ToleranceType.Absolute);
+            }
+            catch
+            {
+                return geometry;
+            }
+
+            if (flattened == null || flattened.Figures == null || flattened.Figures.Count == 0)
+                return geometry;
+
+            var roundedGeometry = new StreamGeometry { FillRule = flattened.FillRule };
+            bool changed = false;
+
+            using (var ctx = roundedGeometry.Open())
+            {
+                foreach (PathFigure figure in flattened.Figures)
+                {
+                    var points = GetFlattenedPoints(figure);
+                    if (figure.IsClosed && points.Count > 2 && DistanceSquared(points[0], points[points.Count - 1]) < 0.0001)
+                        points.RemoveAt(points.Count - 1);
+
+                    int minPoints = figure.IsClosed ? 3 : 2;
+                    if (points.Count < minPoints)
+                    {
+                        if (points.Count > 0)
+                        {
+                            ctx.BeginFigure(points[0], figure.IsFilled, figure.IsClosed);
+                            for (int i = 1; i < points.Count; i++) ctx.LineTo(points[i], true, false);
+                        }
+                        continue;
+                    }
+
+                    var incoming = new Point[points.Count];
+                    var outgoing = new Point[points.Count];
+                    var isRounded = new bool[points.Count];
+                    for (int i = 0; i < points.Count; i++)
+                    {
+                        Point inPoint;
+                        Point outPoint;
+                        if (TryGetRoundedCorner(points, i, figure.IsClosed, radius, out inPoint, out outPoint))
+                        {
+                            incoming[i] = inPoint;
+                            outgoing[i] = outPoint;
+                            isRounded[i] = true;
+                            changed = true;
+                        }
+                        else
+                        {
+                            incoming[i] = points[i];
+                            outgoing[i] = points[i];
+                        }
+                    }
+
+                    Point start = figure.IsClosed ? outgoing[0] : points[0];
+                    ctx.BeginFigure(start, figure.IsFilled, figure.IsClosed);
+
+                    int firstInterior = figure.IsClosed ? 1 : 1;
+                    int lastInterior = figure.IsClosed ? points.Count - 1 : points.Count - 2;
+                    for (int i = firstInterior; i <= lastInterior; i++)
+                    {
+                        if (isRounded[i])
+                        {
+                            ctx.LineTo(incoming[i], true, false);
+                            AddQuadraticCorner(ctx, incoming[i], points[i], outgoing[i]);
+                        }
+                        else
+                        {
+                            ctx.LineTo(points[i], true, false);
+                        }
+                    }
+
+                    if (figure.IsClosed)
+                    {
+                        if (isRounded[0])
+                        {
+                            ctx.LineTo(incoming[0], true, false);
+                            AddQuadraticCorner(ctx, incoming[0], points[0], outgoing[0]);
+                        }
+                        else
+                        {
+                            ctx.LineTo(points[0], true, false);
+                        }
+                    }
+                    else
+                    {
+                        ctx.LineTo(points[points.Count - 1], true, false);
+                    }
+                }
+            }
+
+            if (!changed) return geometry;
+            roundedGeometry.Freeze();
+            return roundedGeometry;
+        }
+
+        private static List<Point> GetFlattenedPoints(PathFigure figure)
+        {
+            var points = new List<Point> { figure.StartPoint };
+            foreach (PathSegment segment in figure.Segments)
+            {
+                var line = segment as LineSegment;
+                if (line != null)
+                {
+                    points.Add(line.Point);
+                    continue;
+                }
+
+                var polyLine = segment as PolyLineSegment;
+                if (polyLine != null)
+                {
+                    foreach (Point point in polyLine.Points) points.Add(point);
+                }
+            }
+            return points;
+        }
+
+        private static bool TryGetRoundedCorner(List<Point> points, int index, bool isClosed, double radius, out Point incoming, out Point outgoing)
+        {
+            incoming = points[index];
+            outgoing = points[index];
+            if (!isClosed && (index == 0 || index == points.Count - 1)) return false;
+
+            int previousIndex = (index == 0) ? points.Count - 1 : index - 1;
+            int nextIndex = (index + 1) % points.Count;
+            Point corner = points[index];
+            double previousX = points[previousIndex].X - corner.X;
+            double previousY = points[previousIndex].Y - corner.Y;
+            double nextX = points[nextIndex].X - corner.X;
+            double nextY = points[nextIndex].Y - corner.Y;
+            double previousLength = Math.Sqrt(previousX * previousX + previousY * previousY);
+            double nextLength = Math.Sqrt(nextX * nextX + nextY * nextY);
+            if (previousLength < 0.001 || nextLength < 0.001) return false;
+
+            double previousUnitX = previousX / previousLength;
+            double previousUnitY = previousY / previousLength;
+            double nextUnitX = nextX / nextLength;
+            double nextUnitY = nextY / nextLength;
+            double dot = Math.Max(-1.0, Math.Min(1.0, previousUnitX * nextUnitX + previousUnitY * nextUnitY));
+            double interiorAngle = Math.Acos(dot);
+            double turnAngle = Math.PI - interiorAngle;
+
+            // Flattened Bezier curves contain many small joins. Only round distinct
+            // corners so smooth curves remain visually smooth.
+            if (turnAngle < 0.35 || turnAngle > Math.PI - 0.001) return false;
+
+            double tangentDistance = radius * Math.Tan(turnAngle * 0.5);
+            tangentDistance = Math.Min(tangentDistance, Math.Min(previousLength, nextLength) * 0.45);
+            if (tangentDistance < 0.001) return false;
+
+            incoming = new Point(corner.X + previousUnitX * tangentDistance, corner.Y + previousUnitY * tangentDistance);
+            outgoing = new Point(corner.X + nextUnitX * tangentDistance, corner.Y + nextUnitY * tangentDistance);
+            return true;
+        }
+
+        private static void AddQuadraticCorner(StreamGeometryContext ctx, Point start, Point control, Point end)
+        {
+            // Convert a quadratic Bezier through the original vertex into a cubic.
+            var control1 = new Point(start.X + (control.X - start.X) * (2.0 / 3.0), start.Y + (control.Y - start.Y) * (2.0 / 3.0));
+            var control2 = new Point(end.X + (control.X - end.X) * (2.0 / 3.0), end.Y + (control.Y - end.Y) * (2.0 / 3.0));
+            ctx.BezierTo(control1, control2, end, true, false);
+        }
+
+        private static double DistanceSquared(Point a, Point b)
+        {
+            double dx = a.X - b.X;
+            double dy = a.Y - b.Y;
+            return dx * dx + dy * dy;
+        }
+
         private Geometry BuildBezierPathGeometry(LayerNode node)
         {
             if (node.Geometry != null && node.Geometry.Nodes != null && node.Geometry.Nodes.Count > 0)
@@ -1328,12 +1643,15 @@ namespace Kerf.Engine
                         var prev = nodes[i - 1];
                         var cur = nodes[i];
 
-                        bool prevHasHandle = (prev.OutHandle.X != prev.Anchor.X || prev.OutHandle.Y != prev.Anchor.Y);
-                        bool curHasHandle = (cur.InHandle.X != cur.Anchor.X || cur.InHandle.Y != cur.Anchor.Y);
+                        bool prevHasHandle = prev.Type != BezierNodeType.Corner &&
+                                             (prev.OutHandle.X != prev.Anchor.X || prev.OutHandle.Y != prev.Anchor.Y);
+                        bool curHasHandle = cur.Type != BezierNodeType.Corner &&
+                                            (cur.InHandle.X != cur.Anchor.X || cur.InHandle.Y != cur.Anchor.Y);
 
                         if (prevHasHandle || curHasHandle)
                         {
-                            ctx.BezierTo(prev.OutHandle, cur.InHandle, cur.Anchor, true, false);
+                            ctx.BezierTo(prevHasHandle ? prev.OutHandle : prev.Anchor,
+                                curHasHandle ? cur.InHandle : cur.Anchor, cur.Anchor, true, false);
                         }
                         else
                         {
@@ -1345,12 +1663,15 @@ namespace Kerf.Engine
                     {
                         var last = nodes[nodes.Count - 1];
                         var first = nodes[0];
-                        bool lastHasHandle = (last.OutHandle.X != last.Anchor.X || last.OutHandle.Y != last.Anchor.Y);
-                        bool firstHasHandle = (first.InHandle.X != first.Anchor.X || first.InHandle.Y != first.Anchor.Y);
+                        bool lastHasHandle = last.Type != BezierNodeType.Corner &&
+                                             (last.OutHandle.X != last.Anchor.X || last.OutHandle.Y != last.Anchor.Y);
+                        bool firstHasHandle = first.Type != BezierNodeType.Corner &&
+                                              (first.InHandle.X != first.Anchor.X || first.InHandle.Y != first.Anchor.Y);
 
                         if (lastHasHandle || firstHasHandle)
                         {
-                            ctx.BezierTo(last.OutHandle, first.InHandle, first.Anchor, true, false);
+                            ctx.BezierTo(lastHasHandle ? last.OutHandle : last.Anchor,
+                                firstHasHandle ? first.InHandle : first.Anchor, first.Anchor, true, false);
                         }
                     }
                 }

@@ -45,7 +45,7 @@ namespace Kerf.UI
                 {
                     var res = MessageBox.Show(
                         "An unsaved project recovery file was found. Would you like to restore it?",
-                        "Kerf Studio — Crash Recovery",
+                        "Kerf — Crash Recovery",
                         MessageBoxButton.YesNo,
                         MessageBoxImage.Question);
 
@@ -68,7 +68,7 @@ namespace Kerf.UI
 
         private void InitializeWindow()
         {
-            Title = "Kerf Studio v3.0";
+            Title = ProductInfo.DisplayName;
 
             double workW = SystemParameters.WorkArea.Width;
             double workH = SystemParameters.WorkArea.Height;
@@ -195,7 +195,7 @@ namespace Kerf.UI
 
             _windowTitleBlock = new TextBlock
             {
-                Text = "Kerf Studio",
+                Text = "Kerf",
                 FontSize = 12,
                 FontWeight = FontWeights.Medium,
                 Foreground = KerfBrand.TextWhiteBrush,
@@ -258,7 +258,7 @@ namespace Kerf.UI
             _mainContainer.Children.Clear();
             _mainContainer.Children.Add(_homeView);
             _homeView.RefreshProjects();
-            _windowTitleBlock.Text = "Kerf Studio — Home";
+            _windowTitleBlock.Text = ProductInfo.Name + " — Home";
         }
 
         public void NavigateToStudio(KerfDocument doc, string filePath)
@@ -266,7 +266,7 @@ namespace Kerf.UI
             _mainContainer.Children.Clear();
             _studioView.LoadDocument(doc, filePath);
             _mainContainer.Children.Add(_studioView);
-            _windowTitleBlock.Text = string.Format("Kerf Studio — {0}", doc.Name);
+            _windowTitleBlock.Text = string.Format("{0} — {1}", ProductInfo.Name, doc.Name);
             _studioView.Focus();
         }
 
@@ -290,7 +290,7 @@ namespace Kerf.UI
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Failed to open file: " + ex.Message, "Kerf Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("Failed to open file: " + ex.Message, "Kerf", MessageBoxButton.OK, MessageBoxImage.Error);
                 NavigateToHome();
             }
         }
@@ -301,7 +301,7 @@ namespace Kerf.UI
             {
                 var res = MessageBox.Show(
                     string.Format("Do you want to save changes to \"{0}\" before returning to Home?", _studioView.Document.Name),
-                    "Kerf Studio",
+                    "Kerf",
                     MessageBoxButton.YesNoCancel,
                     MessageBoxImage.Question);
 
@@ -332,7 +332,7 @@ namespace Kerf.UI
             {
                 var res = MessageBox.Show(
                     string.Format("Do you want to save changes to \"{0}\" before closing?", _studioView.Document.Name),
-                    "Kerf Studio",
+                    "Kerf",
                     MessageBoxButton.YesNoCancel,
                     MessageBoxImage.Question);
 

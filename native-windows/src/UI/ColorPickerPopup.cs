@@ -36,6 +36,7 @@ namespace Kerf.UI
 
         public event Action<string, Color> ColorChanged;
         public event Action RequestClose;
+        public event Action RequestScreenPick;
 
         public Color SelectedColor
         {
@@ -80,6 +81,34 @@ namespace Kerf.UI
             };
             DockPanel.SetDock(title, Dock.Left);
             header.Children.Add(title);
+
+            var eyedropperBtn = new Button
+            {
+                Content = new Path
+                {
+                    Data = Geometry.Parse("M19.07,4.93 L17.66,3.52 C16.88,2.74 15.61,2.74 14.83,3.52 L12.71,5.64 11.3,4.23 9.89,5.64 11.3,7.05 4.94,13.41 4.94,18 9.53,18 15.89,11.64 17.3,13.05 18.71,11.64 17.3,10.23 19.42,8.11 C20.2,7.33 20.2,6.06 19.42,5.28 Z M7.05,16 L6,16 6,14.95 12.36,8.59 13.41,9.64 Z M16.95,6.1 L14.83,8.22 13.78,7.17 15.9,5.05 C16.1,4.85 16.42,4.85 16.61,5.05 L16.95,5.39 C17.15,5.58 17.15,5.9 16.95,6.1 Z"),
+                    Fill = KerfBrand.TextMutedBrush,
+                    Width = 14,
+                    Height = 14,
+                    Stretch = Stretch.Uniform
+                },
+                Width = 24,
+                Height = 22,
+                Margin = new Thickness(0, 0, 6, 0),
+                Background = Brushes.Transparent,
+                Foreground = KerfBrand.TextMutedBrush,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                ToolTip = "Pick a color from the screen",
+                Template = KerfBrand.CreateRoundedButtonTemplate(6)
+            };
+            eyedropperBtn.Click += (s, e) =>
+            {
+                if (RequestScreenPick != null) RequestScreenPick();
+            };
+            DockPanel.SetDock(eyedropperBtn, Dock.Right);
+            header.Children.Add(eyedropperBtn);
 
             var closeBtn = new Button
             {
@@ -633,6 +662,8 @@ namespace Kerf.UI
         }
 
         private readonly ColorPickerControl _picker;
+        private UIElement _ownerTarget;
+        private Action<string> _onColorChanged;
 
         public ColorPickerControl Picker { get { return _picker; } }
 
@@ -659,8 +690,38 @@ namespace Kerf.UI
 
             _picker = new ColorPickerControl();
             _picker.RequestClose += () => { this.IsOpen = false; };
+            _picker.RequestScreenPick += BeginScreenPick;
             border.Child = _picker;
             Child = border;
+        }
+
+        private void BeginScreenPick()
+        {
+            UIElement target = _ownerTarget;
+            Action<string> onColorChanged = _onColorChanged;
+            string originalHex = _picker.SelectedHex;
+            if (target == null) return;
+
+            IsOpen = false;
+            Window owner = Window.GetWindow(target);
+
+            ScreenColorPickerSession.Start(
+                owner,
+                color =>
+                {
+                    string sampledHex = string.Format("#{0:X2}{1:X2}{2:X2}", color.R, color.G, color.B);
+                    if (onColorChanged != null) onColorChanged(sampledHex);
+                    if (target.IsVisible) ShowAt(target, sampledHex, onColorChanged);
+                },
+                () =>
+                {
+                    if (target.IsVisible) ShowAt(target, originalHex, onColorChanged);
+                },
+                error =>
+                {
+                    if (target.IsVisible) ShowAt(target, originalHex, onColorChanged);
+                    MessageBox.Show(owner, error, "Screen Color Picker", MessageBoxButton.OK, MessageBoxImage.Warning);
+                });
         }
 
         public static ColorPickerPopup ShowAt(UIElement target, string initialHex, Action<string> onColorChanged)
@@ -678,6 +739,8 @@ namespace Kerf.UI
 
             var popup = new ColorPickerPopup();
             popup.PlacementTarget = target;
+            popup._ownerTarget = target;
+            popup._onColorChanged = onColorChanged;
             popup.Picker.SetColor(initialHex);
             popup.Picker.ColorChanged += (hex, col) =>
             {

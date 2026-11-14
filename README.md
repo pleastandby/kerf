@@ -1,4 +1,4 @@
-# Kerf — Native Windows GPU-Accelerated Vector Design Application
+# Kerf 3.1 Beta — Native Windows Vector Design
 
 ![Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows)
 ![DirectX](https://img.shields.io/badge/Graphics-Direct3D%2011%20Hardware-green)
@@ -7,7 +7,7 @@
 [![npm version](https://img.shields.io/npm/v/kerf-react.svg?logo=npm&color=CB3837)](https://www.npmjs.com/package/kerf-react)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-**Kerf** is a standalone, GPU-accelerated native Windows desktop application for professional vector design, Bézier path manipulation, and component layout. Built with a Direct3D 11 hardware-accelerated retained scene graph and a high-performance native Rust geometric kernel (`kerf_core.dll`), Kerf Studio delivers true 60+ FPS subpixel rendering, analytical mathematical Bézier solvers, and a creative suite experience inspired by After Effects and Figma.
+**Kerf** is a native Windows application for vector design, Bézier editing, layout, and animation. It combines a Direct3D 11 renderer with a Rust geometry engine and a command-history editing workflow.
 
 ---
 
@@ -63,7 +63,7 @@
 - **Crash Recovery & Autosave**:
   - Background atomic project persistence preventing data loss.
 - **Multi-Version Migration**:
-  - Transparent forward migration of legacy `.kerf` documents to canonical v3.0 schemas.
+  - Transparent forward migration of legacy `.kerf` documents to the canonical v4.0.0 schema.
 - **Production Asset Export**:
   - Pixel-perfect SVG vector export and high-DPI rasterization (1x, 2x, 3x).
 
@@ -73,13 +73,15 @@
 
 ```
 Figma/
-├── KerfStudio.exe                 # Standalone 64-bit Desktop Application
-├── KerfStudioSetup.exe            # Windows Installer Wizard
-├── kerf_core.dll                  # Native Rust Acceleration Library (x64)
+├── build-output/
+│   └── release/
+│       ├── Kerf.exe               # 64-bit Desktop Application
+│       ├── KerfSetup.exe           # Standalone Windows Installer
+│       └── kerf_core.dll           # Native Rust Acceleration Library (x64)
 ├── PROGRESS.md                    # Modernization Handover & Milestone Tracker
 ├── README.md                      # Project Documentation
 ├── assets/                        # Brand Assets & Vector Logos
-│   ├── kerf-logo-new.svg          # Official folded-ribbon SVG
+│   ├── Kerf-Logo.svg              # Official mint-and-charcoal Kerf logo
 │   └── kerf.ico                   # Multi-resolution Windows application icon
 ├── native-windows/                # Desktop Application Source Directory
 │   ├── build.bat                  # Unified compilation script (Rust + C#)
@@ -98,7 +100,7 @@ Figma/
 │   │   ├── Tools/                 # BezierVectorEngine, AutoLayout, Booleans
 │   │   ├── IO/                    # StorageManager, SvgExporter, RasterExporter
 │   │   └── UI/                    # StudioView, HomePageView, MainWindow, SplashScreen, KerfLogo
-│   └── tests/                     # Automated Verification Test Suite (81/81 tests)
+│   └── tests/                     # Automated Verification Test Suite
 │       ├── TestRunner.cs
 │       └── TestRunner.exe
 └── packages/                      # Distributed Runtime Packages
@@ -145,47 +147,28 @@ cd native-windows
 build.bat
 ```
 This will automatically:
-1. Compile `crates/kerf_core` in release mode into `kerf_core.dll`.
-2. Deploy `kerf_core.dll` into the output path.
-3. Compile all C# source modules into `KerfStudio.exe` with `kerf.ico` embedded.
-4. Compile `KerfStudioSetup.exe` installer with registry and file associations.
+1. Generate a multi-resolution Windows icon from the official green `assets/Kerf-Logo.svg`.
+2. Compile `crates/kerf_core` in release mode and deploy `kerf_core.dll`.
+3. Compile the application as `build-output\release\Kerf.exe` with the current icon and splash image embedded.
+4. Compile `build-output\release\KerfSetup.exe` with the application and native core embedded, so the installer runs without adjacent payload files.
 
-### 2. Run the Verification Test Suite
+### 2. Build and Run the Verification Test Suite
 ```cmd
-native-windows\tests\TestRunner.exe
+cd native-windows
+build.bat --test
 ```
-Output:
-```
-=====================================================================
- Kerf Studio - Automated Verification Test Suite (v3.0.0)
-=====================================================================
-[PASS] Document Migrations: Legacy React v1/v2 to Canonical v3.0
-[PASS] Document Migrations: Legacy WPF v2.4 to Canonical v3.0
-[PASS] Document Persistence: Atomic Save & Re-load Roundtrip
-[PASS] Command History: Add, Undo, Redo, Batch Transactions
-[PASS] Transform Engine: 8-handle Aspect Ratio & Center Scaling
-[PASS] Bézier Engine: Anchor & Smooth Handle Alignments
-[PASS] Auto Layout Engine: Horizontal & Vertical Reflow with Hug Sizing
-[PASS] Boolean Geometry Engine: Path Combination
-[PASS] SVG Exporter: Compliant Vector XML Generation
-[PASS] Layer Hierarchy & Management: Containers, Cycles, Nested Undo/Redo
-[PASS] Bézier Pen Curves & Vector Edit Mode: Handles, HitTest, Node Mutators
-[PASS] Path Geometry Sync & Corner Curving: Movement, Scaling, Corner Widgets
-    [INFO] Rust Core: Native DLL Loaded (AVX2 + FMA Accelerated)
-[PASS] Native Rust Acceleration: Signed Area, Point Containment & Convex Hull
-=====================================================================
- Tests Completed: 13 Passed, 0 Failed
-=====================================================================
-```
+This builds the app and standalone installer, compiles the automated test runner, runs the suite, and removes the temporary runner after success.
 
-### 3. Launch Kerf Studio
-Simply double-click `KerfStudio.exe` or execute:
+### 3. Launch Kerf
+Double-click `build-output\release\Kerf.exe` or execute:
 ```cmd
-KerfStudio.exe
+build-output\release\Kerf.exe
 ```
-Kerf Studio will open with the After Effects-style splash loading screen, initialize the Direct3D hardware context and native Rust SIMD engine, and present the studio canvas.
+Kerf opens with the splash screen, initializes the Direct3D rendering context and native Rust engine, and presents the studio canvas.
+
+To distribute Kerf, provide `build-output\release\KerfSetup.exe`; it contains the application and native core and installs without requiring the other build outputs.
 
 ---
 
 ## 📄 License
-MIT License. © 2026 Kerf Studio Team.
+MIT License. © 2026 Kerf Team.

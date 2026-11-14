@@ -117,8 +117,17 @@ namespace Kerf.IO
                 throw new FileNotFoundException("Document file not found: " + filePath);
             }
 
-            string json = File.ReadAllText(filePath, Encoding.UTF8);
-            var doc = DocumentMigrations.LoadAndMigrate(json, out report);
+            KerfDocument doc;
+            if (string.Equals(IOPath.GetExtension(filePath), ".kfx", StringComparison.OrdinalIgnoreCase))
+            {
+                doc = KfxPackage.ImportPackage(filePath, out report);
+            }
+            else
+            {
+                string json = File.ReadAllText(filePath, Encoding.UTF8);
+                doc = DocumentMigrations.LoadAndMigrate(json, out report);
+            }
+
             AddRecentProject(filePath);
             return doc;
         }

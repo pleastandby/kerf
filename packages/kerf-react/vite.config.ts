@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
+      entry: resolve(import.meta.dirname, 'src/index.ts'),
       name: 'KerfReact',
       formats: ['es', 'cjs'],
       fileName: (format) => `index.${format === 'es' ? 'js' : 'cjs'}`

@@ -9,6 +9,8 @@ export interface UseKerfOptions {
   inputs?: Record<string, boolean | number>;
   onLoad?: (pkg: KfxPackage) => void;
   onStateChange?: (stateName: string) => void;
+  onEvent?: (eventName: string) => void;
+  onTextInputChange?: (name: string, value: string) => void;
 }
 
 export interface UseKerfResult {
@@ -96,11 +98,14 @@ export function useKerf(options: UseKerfOptions): UseKerfResult {
 
         const player = new KerfRuntimePlayer(pkg);
         player.isPlaying = options.autoplay ?? true;
+        player.loop = options.loop ?? null;
 
         player.onStateChange = (state) => {
           setActiveState(state);
           options.onStateChange?.(state);
         };
+        player.onEvent = (eventName) => options.onEvent?.(eventName);
+        player.onTextInputChange = (name, value) => options.onTextInputChange?.(name, value);
 
         if (options.inputs) {
           for (const [key, val] of Object.entries(options.inputs)) {
@@ -141,7 +146,7 @@ export function useKerf(options: UseKerfOptions): UseKerfResult {
       cancelAnimationFrame(animId);
       playerRef.current = null;
     };
-  }, [options.src, options.autoplay]);
+  }, [options.src, options.autoplay, options.loop]);
 
   const KerfComponent = useCallback((props?: { style?: React.CSSProperties; className?: string }) => {
     const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -157,6 +162,31 @@ export function useKerf(options: UseKerfOptions): UseKerfResult {
       playerRef.current?.handlePointerLeave();
     };
 
+    const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const player = playerRef.current;
+      const canvas = canvasRef.current;
+      if (!player || !canvas) return;
+      const coords = player.getArtboardCoords(canvas, e.clientX, e.clientY);
+      player.handlePointerMove(coords.x, coords.y);
+      player.handlePointerDown();
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+
+    const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const player = playerRef.current;
+      const canvas = canvasRef.current;
+      if (!player || !canvas) return;
+      const coords = player.getArtboardCoords(canvas, e.clientX, e.clientY);
+      player.handlePointerMove(coords.x, coords.y);
+      player.handlePointerUp();
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    };
+
+      const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        playerRef.current?.handlePointerCancel();
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      };
+
     return (
       <canvas
         ref={canvasRef}
@@ -168,7 +198,11 @@ export function useKerf(options: UseKerfOptions): UseKerfResult {
           ...props?.style
         }}
         onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
+        onPointerCancel={handlePointerCancel}
+        onClick={() => playerRef.current?.handlePointerClick()}
       />
     );
   }, []);

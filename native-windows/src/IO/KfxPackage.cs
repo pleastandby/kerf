@@ -22,7 +22,7 @@ namespace Kerf.IO
         public KfxManifestPayload()
         {
             FormatVersion = "1.0.0";
-            Generator = "Kerf Studio 4.0.0";
+            Generator = Kerf.ProductInfo.DisplayName;
             CreatedAt = DateTime.UtcNow.ToString("o");
             RuntimeCompatibility = ">=1.0.0";
             Title = "Untitled";
@@ -104,7 +104,7 @@ namespace Kerf.IO
                     var manifest = new KfxManifestPayload
                     {
                         FormatVersion = "1.0.0",
-                        Generator = "Kerf Studio 4.0.0",
+                        Generator = Kerf.ProductInfo.DisplayName,
                         CreatedAt = DateTime.UtcNow.ToString("o"),
                         RuntimeCompatibility = ">=1.0.0",
                         Title = doc.Name != null ? doc.Name : "Untitled",
@@ -202,6 +202,13 @@ namespace Kerf.IO
 
         public static KerfDocument ImportPackage(string packageFilePath)
         {
+            MigrationReport ignoredReport;
+            return ImportPackage(packageFilePath, out ignoredReport);
+        }
+
+        public static KerfDocument ImportPackage(string packageFilePath, out MigrationReport report)
+        {
+            report = null;
             if (string.IsNullOrEmpty(packageFilePath))
             {
                 throw new ArgumentNullException("packageFilePath");
@@ -225,23 +232,23 @@ namespace Kerf.IO
                 string metadataJson = ReadZipEntryText(archive, "metadata.json");
 
                 var manifest = !string.IsNullOrEmpty(manifestJson)
-                    ? serializer.Deserialize<KfxManifestPayload>(manifestJson)
+                    ? DeserializePackageEntry<KfxManifestPayload>(serializer, manifestJson)
                     : null;
 
                 var scene = !string.IsNullOrEmpty(sceneJson)
-                    ? serializer.Deserialize<KfxScenePayload>(sceneJson)
+                    ? DeserializePackageEntry<KfxScenePayload>(serializer, sceneJson)
                     : new KfxScenePayload();
 
                 var clips = !string.IsNullOrEmpty(animationsJson)
-                    ? serializer.Deserialize<List<Clip>>(animationsJson)
+                    ? DeserializePackageEntry<List<Clip>>(serializer, animationsJson)
                     : new List<Clip>();
 
                 var stateMachine = !string.IsNullOrEmpty(stateMachinesJson)
-                    ? serializer.Deserialize<StateMachineDefinition>(stateMachinesJson)
+                    ? DeserializePackageEntry<StateMachineDefinition>(serializer, stateMachinesJson)
                     : new StateMachineDefinition();
 
                 var metadata = !string.IsNullOrEmpty(metadataJson)
-                    ? serializer.Deserialize<KfxMetadataPayload>(metadataJson)
+                    ? DeserializePackageEntry<KfxMetadataPayload>(serializer, metadataJson)
                     : null;
 
                 var doc = new KerfDocument();
@@ -303,7 +310,6 @@ namespace Kerf.IO
 
                 // Run migration, ID healing, and reference validation
                 string docJson = DocumentMigrations.SerializeToCanonicalJson(doc);
-                MigrationReport report;
                 var validatedDoc = DocumentMigrations.LoadAndMigrate(docJson, out report);
                 return validatedDoc != null ? validatedDoc : doc;
             }
@@ -328,6 +334,12 @@ namespace Kerf.IO
             {
                 return reader.ReadToEnd();
             }
+        }
+
+        private static T DeserializePackageEntry<T>(JavaScriptSerializer serializer, string json)
+        {
+            string normalizedJson = DocumentMigrations.NormalizeJsonForTypedDeserialization(json, serializer);
+            return serializer.Deserialize<T>(normalizedJson);
         }
     }
 }

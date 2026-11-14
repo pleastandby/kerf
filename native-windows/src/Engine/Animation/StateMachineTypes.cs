@@ -7,7 +7,8 @@ namespace Kerf.Engine.Animation
     {
         Bool = 0,
         Number = 1,
-        Trigger = 2
+        Trigger = 2,
+        Folder = 3
     }
 
     public class MachineInput
@@ -16,6 +17,7 @@ namespace Kerf.Engine.Animation
         public int Id { get; set; }
         public string Name { get; set; }
         public InputKind Kind { get; set; }
+        public string ParentFolderId { get; set; }
         public double Value { get; set; }
         public double InitialValue { get; set; }
         public bool Fired { get; set; }
@@ -30,6 +32,7 @@ namespace Kerf.Engine.Animation
             Id = 0;
             Name = name ?? "Input";
             Kind = kind;
+            ParentFolderId = null;
             if (double.IsNaN(initialVal) || double.IsInfinity(initialVal)) initialVal = 0.0;
             Value = initialVal;
             InitialValue = initialVal;
@@ -49,6 +52,11 @@ namespace Kerf.Engine.Animation
         public static MachineInput Trigger(string name, string inputId = null)
         {
             return new MachineInput(name, InputKind.Trigger, 0.0, inputId);
+        }
+
+        public static MachineInput Folder(string name, string inputId = null)
+        {
+            return new MachineInput(name, InputKind.Folder, 0.0, inputId);
         }
     }
 
@@ -123,6 +131,40 @@ namespace Kerf.Engine.Animation
 
         public bool IsTrue(IList<MachineInput> inputs, StateMachineViewModel viewModel, StateMachineDefinition def)
         {
+            // Prefer explicit state-machine input identity over a same-named view-model
+            // property. This is especially important for trigger inputs, which carry a
+            // one-frame impulse and must not be interpreted as a boolean/number binding.
+            MachineInput targetInput = null;
+            if (inputs != null)
+            {
+                if (!string.IsNullOrEmpty(InputId))
+                {
+                    for (int i = 0; i < inputs.Count; i++)
+                    {
+                        if (inputs[i] != null && string.Equals(inputs[i].InputId, InputId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            targetInput = inputs[i];
+                            break;
+                        }
+                    }
+                }
+                if (targetInput == null && InputIndex >= 0 && InputIndex < inputs.Count)
+                {
+                    targetInput = inputs[InputIndex];
+                }
+            }
+            else if (def != null)
+            {
+                if (!string.IsNullOrEmpty(InputId)) targetInput = def.FindInputById(InputId);
+                if (targetInput == null && InputIndex >= 0) targetInput = def.FindInputById(InputIndex);
+            }
+
+            if (targetInput != null)
+            {
+                if (targetInput.Kind == InputKind.Folder) return false;
+                return targetInput.Kind == InputKind.Trigger ? targetInput.Fired : Evaluate(targetInput.Value);
+            }
+
             if (!string.IsNullOrEmpty(PropertyName) && viewModel != null)
             {
                 if (viewModel.IsText(PropertyName))
@@ -139,52 +181,28 @@ namespace Kerf.Engine.Animation
                 }
             }
 
-            MachineInput targetInput = null;
-            if (inputs != null)
+            if (inputs != null && !string.IsNullOrEmpty(PropertyName))
             {
-                if (!string.IsNullOrEmpty(InputId))
+                for (int i = 0; i < inputs.Count; i++)
                 {
-                    for (int i = 0; i < inputs.Count; i++)
-                    {
-                        if (inputs[i] != null && string.Equals(inputs[i].InputId, InputId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            targetInput = inputs[i];
-                            break;
-                        }
-                    }
-                }
-                if (targetInput == null && !string.IsNullOrEmpty(PropertyName))
-                {
-                    for (int i = 0; i < inputs.Count; i++)
-                    {
-                        if (inputs[i] != null && (string.Equals(inputs[i].InputId, PropertyName, StringComparison.OrdinalIgnoreCase) ||
-                                                  string.Equals(inputs[i].Name, PropertyName, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            targetInput = inputs[i];
-                            break;
-                        }
-                    }
-                }
-                if (targetInput == null && InputIndex >= 0 && InputIndex < inputs.Count)
-                {
-                    targetInput = inputs[InputIndex];
+                    MachineInput input = inputs[i];
+                    if (input == null || (!string.Equals(input.InputId, PropertyName, StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(input.Name, PropertyName, StringComparison.OrdinalIgnoreCase))) continue;
+                    if (input.Kind == InputKind.Folder) return false;
+                    return input.Kind == InputKind.Trigger ? input.Fired : Evaluate(input.Value);
                 }
             }
-            else if (def != null)
+            else if (def != null && !string.IsNullOrEmpty(PropertyName))
             {
-                if (!string.IsNullOrEmpty(InputId)) targetInput = def.FindInputById(InputId);
-                if (targetInput == null && !string.IsNullOrEmpty(PropertyName)) targetInput = def.FindInputById(PropertyName);
-                if (targetInput == null && InputIndex >= 0) targetInput = def.FindInputById(InputIndex);
+                targetInput = def.FindInputById(PropertyName);
+                if (targetInput != null)
+                {
+                    if (targetInput.Kind == InputKind.Folder) return false;
+                    return targetInput.Kind == InputKind.Trigger ? targetInput.Fired : Evaluate(targetInput.Value);
+                }
             }
 
-            if (targetInput == null) return false;
-
-            if (targetInput.Kind == InputKind.Trigger)
-            {
-                return targetInput.Fired;
-            }
-
-            return Evaluate(targetInput.Value);
+            return false;
         }
 
         private bool Evaluate(double actual)
@@ -320,8 +338,10 @@ namespace Kerf.Engine.Animation
         {
             get
             {
+                // Once is represented by Loop=false. This preserves old KFX files
+                // whose LoopMode defaulted to Once even though Loop=true was authored.
                 if (!Loop) return LoopMode.OneShot;
-                return _loopMode;
+                return _loopMode == LoopMode.PingPong ? LoopMode.PingPong : LoopMode.Loop;
             }
             set
             {
@@ -657,23 +677,32 @@ namespace Kerf.Engine.Animation
 
     public enum PointerEventKind
     {
+        None = -1,
+        // 13 Rive-style Listeners
+        PointerEnter = 3,
+        PointerExit = 4,
+        PointerDown = 0,
+        PointerUp = 1,
+        PointerMove = 2,
+        PointerDrag = 8,
+        Click = 5,
+        Focus = 10,
+        Blur = 11,
+        Keyboard = 12,
+        Gamepad = 13,
+        TextInput = 14,
+        SemanticAction = 15,
+
+        // Legacy & runtime aliases
         Down = 0,
         Up = 1,
         Move = 2,
         Enter = 3,
         Exit = 4,
-        Click = 5,
         Tap = 6,
         DragStart = 7,
         Drag = 8,
-        DragEnd = 9,
-
-        // Aliases matching specs
-        PointerDown = 0,
-        PointerUp = 1,
-        PointerMove = 2,
-        PointerEnter = 3,
-        PointerExit = 4
+        DragEnd = 9
     }
 
     public enum ActionKind
@@ -687,6 +716,14 @@ namespace Kerf.Engine.Animation
         SetViewModelText = 6,
         ToggleBool = 7,
         Reset = 8,
+        SetPointerX = 9,
+        SetPointerY = 10,
+        SetPointerNormalizedX = 11,
+        SetPointerNormalizedY = 12,
+        AlignObjectToPointer = 13,
+        ReportEvent = 14,
+        Blank = 15,
+        FocusTarget = 16,
 
         // Alias
         FireTrigger = 2
@@ -700,6 +737,8 @@ namespace Kerf.Engine.Animation
         public string PropertyName { get; set; }
         public string TextValue { get; set; }
         public double Parameter { get; set; }
+        public string TargetLayerId { get; set; }
+        public uint TargetNodeId { get; set; }
 
         public ListenerAction() : this(ActionKind.Fire, -1, 0.0) { }
 
@@ -711,6 +750,8 @@ namespace Kerf.Engine.Animation
             PropertyName = null;
             TextValue = null;
             Parameter = param;
+            TargetLayerId = null;
+            TargetNodeId = 0u;
         }
 
         public ListenerAction(ActionKind kind, string propertyName, double param = 0.0)
@@ -725,6 +766,8 @@ namespace Kerf.Engine.Animation
             act.InputId = InputId;
             act.PropertyName = PropertyName;
             act.TextValue = TextValue;
+            act.TargetLayerId = TargetLayerId;
+            act.TargetNodeId = TargetNodeId;
             return act;
         }
     }
@@ -732,8 +775,10 @@ namespace Kerf.Engine.Animation
     public class NodeListener
     {
         public string ListenerId { get; set; }
+        public string Name { get; set; }
         public uint TargetNodeId { get; set; }
         public string TargetLayerId { get; set; }
+        public string Filter { get; set; }
         public bool IsActive { get; set; }
         public PointerEventKind Kind { get; set; }
         public bool Enabled { get; set; }
@@ -744,8 +789,10 @@ namespace Kerf.Engine.Animation
         public NodeListener(uint targetNodeId, PointerEventKind kind)
         {
             ListenerId = "sm_lst_" + Guid.NewGuid().ToString("N");
+            Name = "Listener";
             TargetNodeId = targetNodeId;
             TargetLayerId = string.Empty;
+            Filter = string.Empty;
             IsActive = true;
             Kind = kind;
             Enabled = true;
@@ -755,8 +802,10 @@ namespace Kerf.Engine.Animation
         public NodeListener(uint targetNodeId, PointerEventKind kind, string listenerId, bool enabled)
         {
             ListenerId = !string.IsNullOrEmpty(listenerId) ? listenerId : ("sm_lst_" + Guid.NewGuid().ToString("N"));
+            Name = "Listener";
             TargetNodeId = targetNodeId;
             TargetLayerId = string.Empty;
+            Filter = string.Empty;
             IsActive = true;
             Kind = kind;
             Enabled = enabled;
@@ -766,7 +815,9 @@ namespace Kerf.Engine.Animation
         public NodeListener Clone()
         {
             var copy = new NodeListener(TargetNodeId, Kind, ListenerId, Enabled);
+            copy.Name = Name;
             copy.TargetLayerId = TargetLayerId;
+            copy.Filter = Filter;
             copy.IsActive = IsActive;
             if (Actions != null)
             {

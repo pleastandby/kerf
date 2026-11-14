@@ -8,6 +8,8 @@ export interface UseKerfOptions {
     inputs?: Record<string, boolean | number>;
     onLoad?: (pkg: KfxPackage) => void;
     onStateChange?: (stateName: string) => void;
+    onEvent?: (eventName: string) => void;
+    onTextInputChange?: (name: string, value: string) => void;
 }
 export interface UseKerfResult {
     /** The Canvas React element to render */

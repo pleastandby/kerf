@@ -28,10 +28,41 @@ namespace Kerf.Tools
             var res = new BezierHitResult();
             if (geometry == null || geometry.Nodes == null) return res;
 
-            // Check handles first (they are smaller and on top of anchors)
+            // Anchors get the smaller, direct hit target first. Corner nodes have
+            // no active handles, even though their stored handle coordinates equal
+            // the anchor, so dragging a sharp point always moves the point itself.
+            int anchorIndex = -1;
+            double anchorDistanceSq = double.MaxValue;
+            double anchorTolerance = tolerance * 0.35;
             for (int i = 0; i < geometry.Nodes.Count; i++)
             {
                 var node = geometry.Nodes[i];
+                if (Math.Abs(point.X - node.Anchor.X) <= anchorTolerance && Math.Abs(point.Y - node.Anchor.Y) <= anchorTolerance)
+                {
+                    double dx = point.X - node.Anchor.X;
+                    double dy = point.Y - node.Anchor.Y;
+                    double distanceSq = dx * dx + dy * dy;
+                    if (distanceSq < anchorDistanceSq)
+                    {
+                        anchorDistanceSq = distanceSq;
+                        anchorIndex = i;
+                    }
+                }
+            }
+            if (anchorIndex >= 0)
+            {
+                res.NodeIndex = anchorIndex;
+                res.IsAnchor = true;
+                return res;
+            }
+
+            // Only curved/split nodes expose tangent handles. Test these after
+            // anchors so nearby handles cannot steal the anchor's drag target.
+            for (int i = 0; i < geometry.Nodes.Count; i++)
+            {
+                var node = geometry.Nodes[i];
+                if (node.Type == BezierNodeType.Corner) continue;
+
                 if (Math.Abs(point.X - node.InHandle.X) <= tolerance && Math.Abs(point.Y - node.InHandle.Y) <= tolerance)
                 {
                     res.NodeIndex = i;
@@ -42,18 +73,6 @@ namespace Kerf.Tools
                 {
                     res.NodeIndex = i;
                     res.IsOutHandle = true;
-                    return res;
-                }
-            }
-
-            // Check anchors
-            for (int i = 0; i < geometry.Nodes.Count; i++)
-            {
-                var node = geometry.Nodes[i];
-                if (Math.Abs(point.X - node.Anchor.X) <= tolerance && Math.Abs(point.Y - node.Anchor.Y) <= tolerance)
-                {
-                    res.NodeIndex = i;
-                    res.IsAnchor = true;
                     return res;
                 }
             }
@@ -80,8 +99,11 @@ namespace Kerf.Tools
                 var p0 = geometry.Nodes[i];
                 var p1 = geometry.Nodes[(i + 1) % count];
 
-                bool isCurve = (p0.OutHandle.X != p0.Anchor.X || p0.OutHandle.Y != p0.Anchor.Y ||
-                                p1.InHandle.X != p1.Anchor.X || p1.InHandle.Y != p1.Anchor.Y);
+                bool p0HasHandle = p0.Type != BezierNodeType.Corner &&
+                                   (p0.OutHandle.X != p0.Anchor.X || p0.OutHandle.Y != p0.Anchor.Y);
+                bool p1HasHandle = p1.Type != BezierNodeType.Corner &&
+                                   (p1.InHandle.X != p1.Anchor.X || p1.InHandle.Y != p1.Anchor.Y);
+                bool isCurve = p0HasHandle || p1HasHandle;
 
                 if (!isCurve)
                 {
@@ -101,7 +123,9 @@ namespace Kerf.Tools
                     for (int s = 1; s <= steps; s++)
                     {
                         double t = (double)s / steps;
-                        Point curPt = SampleCubicBezier(p0.Anchor, p0.OutHandle, p1.InHandle, p1.Anchor, t);
+                        Point outHandle = p0HasHandle ? p0.OutHandle : p0.Anchor;
+                        Point inHandle = p1HasHandle ? p1.InHandle : p1.Anchor;
+                        Point curPt = SampleCubicBezier(p0.Anchor, outHandle, inHandle, p1.Anchor, t);
                         Point proj;
                         double dSq = DistanceSqToSegment(point, prevPt, curPt, out proj);
                         if (dSq < bestDistSq)
@@ -292,14 +316,28 @@ namespace Kerf.Tools
             }
             else if (type == BezierNodeType.Smooth || type == BezierNodeType.Symmetric)
             {
-                // Align handles
+                // Reuse an existing tangent where possible; a new smooth point should
+                // follow the adjacent path segments instead of receiving horizontal handles.
                 double dx = node.OutHandle.X - node.Anchor.X;
                 double dy = node.OutHandle.Y - node.Anchor.Y;
                 if (Math.Abs(dx) < 0.001 && Math.Abs(dy) < 0.001)
                 {
-                    // Default horizontal handles
-                    node.OutHandle = new Point(node.Anchor.X + 20, node.Anchor.Y);
-                    node.InHandle = new Point(node.Anchor.X - 20, node.Anchor.Y);
+                    double inDx = node.Anchor.X - node.InHandle.X;
+                    double inDy = node.Anchor.Y - node.InHandle.Y;
+                    if (Math.Abs(inDx) >= 0.001 || Math.Abs(inDy) >= 0.001)
+                    {
+                        dx = inDx;
+                        dy = inDy;
+                        node.OutHandle = new Point(node.Anchor.X + dx, node.Anchor.Y + dy);
+                        if (type == BezierNodeType.Symmetric)
+                            node.InHandle = new Point(node.Anchor.X - dx, node.Anchor.Y - dy);
+                        else
+                            MoveHandle(geometry, index, true, node.OutHandle);
+                    }
+                    else
+                    {
+                        InitializeHandlesFromNeighbors(geometry, index, node, type == BezierNodeType.Symmetric);
+                    }
                 }
                 else
                 {
@@ -313,6 +351,57 @@ namespace Kerf.Tools
                     }
                 }
             }
+        }
+
+        private static void InitializeHandlesFromNeighbors(VectorGeometry geometry, int index, BezierNode node, bool symmetric)
+        {
+            int count = geometry.Nodes.Count;
+            bool hasPrevious = geometry.IsClosed || index > 0;
+            bool hasNext = geometry.IsClosed || index < count - 1;
+            if (!hasPrevious && !hasNext)
+            {
+                node.InHandle = node.Anchor;
+                node.OutHandle = node.Anchor;
+                return;
+            }
+
+            Point previous = hasPrevious ? geometry.Nodes[(index - 1 + count) % count].Anchor : node.Anchor;
+            Point next = hasNext ? geometry.Nodes[(index + 1) % count].Anchor : node.Anchor;
+            double dx = hasPrevious && hasNext ? next.X - previous.X : next.X - node.Anchor.X;
+            double dy = hasPrevious && hasNext ? next.Y - previous.Y : next.Y - node.Anchor.Y;
+            if (hasPrevious && !hasNext)
+            {
+                dx = node.Anchor.X - previous.X;
+                dy = node.Anchor.Y - previous.Y;
+            }
+
+            double tangentLength = Math.Sqrt(dx * dx + dy * dy);
+            if (tangentLength < 0.001)
+            {
+                dx = hasNext ? next.X - node.Anchor.X : node.Anchor.X - previous.X;
+                dy = hasNext ? next.Y - node.Anchor.Y : node.Anchor.Y - previous.Y;
+                tangentLength = Math.Sqrt(dx * dx + dy * dy);
+            }
+            if (tangentLength < 0.001)
+            {
+                node.InHandle = node.Anchor;
+                node.OutHandle = node.Anchor;
+                return;
+            }
+
+            dx /= tangentLength;
+            dy /= tangentLength;
+            double inLength = hasPrevious ? Math.Sqrt(Math.Pow(node.Anchor.X - previous.X, 2) + Math.Pow(node.Anchor.Y - previous.Y, 2)) * 0.25 : 20.0;
+            double outLength = hasNext ? Math.Sqrt(Math.Pow(next.X - node.Anchor.X, 2) + Math.Pow(next.Y - node.Anchor.Y, 2)) * 0.25 : 20.0;
+            if (symmetric)
+            {
+                double sharedLength = hasPrevious && hasNext ? Math.Min(inLength, outLength) : (hasPrevious ? inLength : outLength);
+                inLength = sharedLength;
+                outLength = sharedLength;
+            }
+
+            node.InHandle = new Point(node.Anchor.X - dx * inLength, node.Anchor.Y - dy * inLength);
+            node.OutHandle = new Point(node.Anchor.X + dx * outLength, node.Anchor.Y + dy * outLength);
         }
 
         /// <summary>
@@ -405,14 +494,18 @@ namespace Kerf.Tools
                 var prev = nodes[i - 1];
                 var cur = nodes[i];
 
-                bool prevHasHandle = (prev.OutHandle.X != prev.Anchor.X || prev.OutHandle.Y != prev.Anchor.Y);
-                bool curHasHandle = (cur.InHandle.X != cur.Anchor.X || cur.InHandle.Y != cur.Anchor.Y);
+                bool prevHasHandle = prev.Type != BezierNodeType.Corner &&
+                                     (prev.OutHandle.X != prev.Anchor.X || prev.OutHandle.Y != prev.Anchor.Y);
+                bool curHasHandle = cur.Type != BezierNodeType.Corner &&
+                                    (cur.InHandle.X != cur.Anchor.X || cur.InHandle.Y != cur.Anchor.Y);
 
                 if (prevHasHandle || curHasHandle)
                 {
                     sb.AppendFormat(CultureInfo.InvariantCulture, " C {0:F2} {1:F2}, {2:F2} {3:F2}, {4:F2} {5:F2}",
-                        prev.OutHandle.X, prev.OutHandle.Y,
-                        cur.InHandle.X, cur.InHandle.Y,
+                        prevHasHandle ? prev.OutHandle.X : prev.Anchor.X,
+                        prevHasHandle ? prev.OutHandle.Y : prev.Anchor.Y,
+                        curHasHandle ? cur.InHandle.X : cur.Anchor.X,
+                        curHasHandle ? cur.InHandle.Y : cur.Anchor.Y,
                         cur.Anchor.X, cur.Anchor.Y);
                 }
                 else
@@ -470,9 +563,22 @@ namespace Kerf.Tools
         {
             if (geo == null || geo.Nodes == null || geo.Nodes.Count == 0) return Rect.Empty;
 
-            // Use accelerated native Rust engine exact cubic bounds when available!
+            // Use the native bounds engine when all stored handles match the node types.
+            // Corner nodes are sharp even if an older document has stale handle values.
+            bool hasInactiveCornerHandles = false;
+            foreach (var node in geo.Nodes)
+            {
+                if (node.Type == BezierNodeType.Corner &&
+                    (node.InHandle.X != node.Anchor.X || node.InHandle.Y != node.Anchor.Y ||
+                     node.OutHandle.X != node.Anchor.X || node.OutHandle.Y != node.Anchor.Y))
+                {
+                    hasInactiveCornerHandles = true;
+                    break;
+                }
+            }
+
             Rect rustBounds;
-            if (RustEngineInterop.TryComputePathBounds(geo, out rustBounds))
+            if (!hasInactiveCornerHandles && RustEngineInterop.TryComputePathBounds(geo, out rustBounds))
             {
                 return rustBounds;
             }
@@ -481,10 +587,12 @@ namespace Kerf.Tools
             double maxX = double.MinValue, maxY = double.MinValue;
             foreach (var node in geo.Nodes)
             {
-                minX = Math.Min(minX, Math.Min(node.Anchor.X, Math.Min(node.InHandle.X, node.OutHandle.X)));
-                minY = Math.Min(minY, Math.Min(node.Anchor.Y, Math.Min(node.InHandle.Y, node.OutHandle.Y)));
-                maxX = Math.Max(maxX, Math.Max(node.Anchor.X, Math.Max(node.InHandle.X, node.OutHandle.X)));
-                maxY = Math.Max(maxY, Math.Max(node.Anchor.Y, Math.Max(node.InHandle.Y, node.OutHandle.Y)));
+                Point inHandle = node.Type == BezierNodeType.Corner ? node.Anchor : node.InHandle;
+                Point outHandle = node.Type == BezierNodeType.Corner ? node.Anchor : node.OutHandle;
+                minX = Math.Min(minX, Math.Min(node.Anchor.X, Math.Min(inHandle.X, outHandle.X)));
+                minY = Math.Min(minY, Math.Min(node.Anchor.Y, Math.Min(inHandle.Y, outHandle.Y)));
+                maxX = Math.Max(maxX, Math.Max(node.Anchor.X, Math.Max(inHandle.X, outHandle.X)));
+                maxY = Math.Max(maxY, Math.Max(node.Anchor.Y, Math.Max(inHandle.Y, outHandle.Y)));
             }
             return new Rect(minX, minY, Math.Max(1.0, maxX - minX), Math.Max(1.0, maxY - minY));
         }
@@ -492,20 +600,8 @@ namespace Kerf.Tools
         public static void SmoothAllNodes(VectorGeometry geo)
         {
             if (geo == null || geo.Nodes == null || geo.Nodes.Count < 2) return;
-            int count = geo.Nodes.Count;
-            for (int i = 0; i < count; i++)
-            {
-                var prev = geo.Nodes[(i - 1 + count) % count];
-                var cur = geo.Nodes[i];
-                var next = geo.Nodes[(i + 1) % count];
-
-                double dx = (next.Anchor.X - prev.Anchor.X) * 0.25;
-                double dy = (next.Anchor.Y - prev.Anchor.Y) * 0.25;
-
-                cur.Type = BezierNodeType.Smooth;
-                cur.OutHandle = new Point(cur.Anchor.X + dx, cur.Anchor.Y + dy);
-                cur.InHandle = new Point(cur.Anchor.X - dx, cur.Anchor.Y - dy);
-            }
+            for (int i = 0; i < geo.Nodes.Count; i++)
+                SetNodeType(geo, i, BezierNodeType.Smooth);
         }
 
         public static void SharpenAllNodes(VectorGeometry geo)

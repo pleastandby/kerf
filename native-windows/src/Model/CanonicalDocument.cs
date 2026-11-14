@@ -847,6 +847,164 @@ namespace Kerf.Model
         }
     }
 
+    /// <summary>
+    /// Rive-style animation and rigging constraint types.
+    /// </summary>
+    public enum AnimationConstraintType
+    {
+        Transform = 0,
+        Distance = 1,
+        Translation = 2,
+        Scale = 3,
+        Rotation = 4,
+        IK = 5,
+        FollowPath = 6,
+        Scroll = 7
+    }
+
+    public enum DistanceConstraintMode
+    {
+        Exact = 0,
+        Closer = 1,
+        Further = 2
+    }
+
+    public enum ScrollConstraintDirection
+    {
+        Vertical = 0,
+        Horizontal = 1,
+        Both = 2
+    }
+
+    /// <summary>
+    /// Rive-style rigging constraint applied to a shape/path/group/frame.
+    /// </summary>
+    public class AnimationConstraintData
+    {
+        public string Id { get; set; }
+        public AnimationConstraintType Type { get; set; }
+        public string TargetLayerId { get; set; }
+        public uint TargetNodeId { get; set; }
+        public double Strength { get; set; } // 0.0 to 1.0 (default 1.0 = 100%)
+        public bool Enabled { get; set; }
+
+        // Translation / Scale / Rotation axis flags & limits
+        public bool ConstrainX { get; set; }
+        public bool ConstrainY { get; set; }
+        public double OffsetX { get; set; }
+        public double OffsetY { get; set; }
+        public double OffsetRotation { get; set; }
+        public bool MinLimitEnabled { get; set; }
+        public double MinLimit { get; set; }
+        public bool MaxLimitEnabled { get; set; }
+        public double MaxLimit { get; set; }
+
+        // Distance Constraint
+        public DistanceConstraintMode DistanceMode { get; set; }
+        public double Distance { get; set; }
+
+        // IK Constraint
+        public double BoneLength1 { get; set; }
+        public double BoneLength2 { get; set; }
+        public bool InvertBend { get; set; }
+
+        // Follow Path Constraint
+        public double PathDistance { get; set; } // Percentage along path; open paths can extend past 100%
+        public bool OrientToPath { get; set; }  // rotate to match path tangent
+        public double PathOffset { get; set; }
+
+        // Scroll Constraint
+        public ScrollConstraintDirection ScrollDirection { get; set; }
+        public double ScrollOffset { get; set; }
+        public double MinScrollOffset { get; set; }
+        public double MaxScrollOffset { get; set; }
+
+        public AnimationConstraintData()
+        {
+            Id = "cst_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            Type = AnimationConstraintType.Translation;
+            Strength = 1.0;
+            Enabled = true;
+            ConstrainX = true;
+            ConstrainY = true;
+            DistanceMode = DistanceConstraintMode.Closer;
+            Distance = 50.0;
+            BoneLength1 = 60.0;
+            BoneLength2 = 60.0;
+            InvertBend = false;
+            PathDistance = 0.0;
+            OrientToPath = true;
+            PathOffset = 0.0;
+            ScrollDirection = ScrollConstraintDirection.Vertical;
+            ScrollOffset = 0.0;
+            MinScrollOffset = -1000.0;
+            MaxScrollOffset = 1000.0;
+        }
+
+        public AnimationConstraintData Clone()
+        {
+            return new AnimationConstraintData
+            {
+                Id = this.Id,
+                Type = this.Type,
+                TargetLayerId = this.TargetLayerId,
+                TargetNodeId = this.TargetNodeId,
+                Strength = this.Strength,
+                Enabled = this.Enabled,
+                ConstrainX = this.ConstrainX,
+                ConstrainY = this.ConstrainY,
+                OffsetX = this.OffsetX,
+                OffsetY = this.OffsetY,
+                OffsetRotation = this.OffsetRotation,
+                MinLimitEnabled = this.MinLimitEnabled,
+                MinLimit = this.MinLimit,
+                MaxLimitEnabled = this.MaxLimitEnabled,
+                MaxLimit = this.MaxLimit,
+                DistanceMode = this.DistanceMode,
+                Distance = this.Distance,
+                BoneLength1 = this.BoneLength1,
+                BoneLength2 = this.BoneLength2,
+                InvertBend = this.InvertBend,
+                PathDistance = this.PathDistance,
+                OrientToPath = this.OrientToPath,
+                PathOffset = this.PathOffset,
+                ScrollDirection = this.ScrollDirection,
+                ScrollOffset = this.ScrollOffset,
+                MinScrollOffset = this.MinScrollOffset,
+                MaxScrollOffset = this.MaxScrollOffset
+            };
+        }
+    }
+
+    /// <summary>
+    /// Rive-style clipping target specifying a shape, path, group, or frame that clips the layer.
+    /// </summary>
+    public class ClippingTargetData
+    {
+        public string TargetLayerId { get; set; }
+        public uint TargetNodeId { get; set; }
+        public bool IsInverse { get; set; } // false = Inside clip, true = Outside/Hole clip
+        public bool Enabled { get; set; }
+
+        public ClippingTargetData()
+        {
+            TargetLayerId = string.Empty;
+            IsInverse = false;
+            Enabled = true;
+        }
+
+        public ClippingTargetData Clone()
+        {
+            return new ClippingTargetData
+            {
+                TargetLayerId = this.TargetLayerId,
+                TargetNodeId = this.TargetNodeId,
+                IsInverse = this.IsInverse,
+                Enabled = this.Enabled
+            };
+        }
+    }
+
     public class LayerNode
     {
         public string Id { get; set; }
@@ -906,6 +1064,10 @@ namespace Kerf.Model
         public bool IsMask { get; set; }
         public MaskType MaskType { get; set; }
         public BooleanOp BooleanOperation { get; set; }
+
+        // Rive-style Rigging Constraints & Target Clipping
+        public List<AnimationConstraintData> Constraints { get; set; }
+        public List<ClippingTargetData> ClippingTargets { get; set; }
 
         // Components & Instances
         public string ComponentId { get; set; }
@@ -968,6 +1130,8 @@ namespace Kerf.Model
             IsCollapsed = false;
             LockAspectRatio = false;
             RenderTransform = new RenderTransform();
+            Constraints = new List<AnimationConstraintData>();
+            ClippingTargets = new List<ClippingTargetData>();
             ParentId = null;
             Children = new List<LayerNode>();
         }
@@ -981,6 +1145,8 @@ namespace Kerf.Model
                 Fills = new List<Paint>(),
                 Strokes = new List<StrokeData>(),
                 Effects = new List<EffectData>(),
+                Constraints = new List<AnimationConstraintData>(),
+                ClippingTargets = new List<ClippingTargetData>(),
                 Children = new List<LayerNode>()
             };
         }
@@ -1153,8 +1319,19 @@ namespace Kerf.Model
                 Fills = new List<Paint>(),
                 Strokes = new List<StrokeData>(),
                 Effects = new List<EffectData>(),
+                Constraints = new List<AnimationConstraintData>(),
+                ClippingTargets = new List<ClippingTargetData>(),
                 Children = new List<LayerNode>()
             };
+
+            if (this.Constraints != null)
+            {
+                foreach (var c in this.Constraints) n.Constraints.Add(c.Clone());
+            }
+            if (this.ClippingTargets != null)
+            {
+                foreach (var cl in this.ClippingTargets) n.ClippingTargets.Add(cl.Clone());
+            }
 
             if (this.Fills != null)
             {

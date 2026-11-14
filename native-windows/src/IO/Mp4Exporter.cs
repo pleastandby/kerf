@@ -207,6 +207,7 @@ namespace Kerf.IO
 
             // Capture initial rest poses
             var restPoses = new Dictionary<LayerNode, RenderTransform>();
+            var restGeometry = AnimationFrameSampler.CaptureRestGeometry(page);
             if (page.Layers != null)
             {
                 foreach (var l in page.Layers)
@@ -224,9 +225,7 @@ namespace Kerf.IO
             try
             {
                 // Sample first frame to determine video dimensions
-                var firstPose = new Dictionary<uint, Dictionary<ushort, double>>();
-                clip.SampleToPose(startT, firstPose);
-                PropertyBinder.ApplyPoseToLayers(page.Layers, firstPose);
+                AnimationFrameSampler.ApplyPose(page, clip, startT, restGeometry);
 
                 BitmapSource firstFrame = HighQualityImageRenderer.Render(page, (IEnumerable<LayerNode>)null, options.Scale, false);
                 int width = firstFrame.PixelWidth;
@@ -242,7 +241,7 @@ namespace Kerf.IO
                 try
                 {
                     // Primary engine: Windows Media Foundation SinkWriter (H.264/AVC)
-                    ExportViaMediaFoundation(page, clip, tempVideo, width, height, fps, totalFrames, startT, endT, options);
+                    ExportViaMediaFoundation(page, clip, tempVideo, width, height, fps, totalFrames, startT, endT, options, restGeometry);
                     mfSuccess = true;
                 }
                 catch
@@ -253,7 +252,7 @@ namespace Kerf.IO
                 if (!mfSuccess)
                 {
                     // Fallback engine: Standard ISO container with Motion-JPEG bitstream & valid sample tables
-                    ExportViaIsoContainer(page, clip, tempVideo, width, height, fps, totalFrames, startT, endT, options);
+                    ExportViaIsoContainer(page, clip, tempVideo, width, height, fps, totalFrames, startT, endT, options, restGeometry);
                 }
 
                 if (File.Exists(targetFilePath)) File.Delete(targetFilePath);
@@ -267,6 +266,7 @@ namespace Kerf.IO
                 }
 
                 // Restore rest poses
+                AnimationFrameSampler.RestoreRestGeometry(restGeometry);
                 if (page.Layers != null)
                 {
                     foreach (var l in page.Layers)
@@ -300,7 +300,8 @@ namespace Kerf.IO
             int totalFrames,
             double startT,
             double endT,
-            Mp4ExportOptions options)
+            Mp4ExportOptions options,
+            Dictionary<LayerNode, VectorGeometry> restGeometry)
         {
             int hr = MFStartup(0x00020070, 0);
             if (hr != 0) throw new InvalidOperationException("MFStartup failed: 0x" + hr.ToString("X8"));
@@ -426,9 +427,7 @@ namespace Kerf.IO
                     double t = startT + ((double)f / fps);
                     if (t > endT) t = endT;
 
-                    var pose = new Dictionary<uint, Dictionary<ushort, double>>();
-                    clip.SampleToPose(t, pose);
-                    PropertyBinder.ApplyPoseToLayers(page.Layers, pose);
+                    AnimationFrameSampler.ApplyPose(page, clip, t, restGeometry);
 
                     BitmapSource frameBmp = HighQualityImageRenderer.Render(page, (IEnumerable<LayerNode>)null, options.Scale, false);
                     ExtractFramePixels(frameBmp, width, height, rawPixels, options.BackgroundColor);
@@ -543,7 +542,8 @@ namespace Kerf.IO
             int totalFrames,
             double startT,
             double endT,
-            Mp4ExportOptions options)
+            Mp4ExportOptions options,
+            Dictionary<LayerNode, VectorGeometry> restGeometry)
         {
             var frameDataList = new List<byte[]>();
             var sampleSizes = new List<int>();
@@ -559,9 +559,7 @@ namespace Kerf.IO
                 double t = startT + ((double)f / fps);
                 if (t > endT) t = endT;
 
-                var pose = new Dictionary<uint, Dictionary<ushort, double>>();
-                clip.SampleToPose(t, pose);
-                PropertyBinder.ApplyPoseToLayers(page.Layers, pose);
+                AnimationFrameSampler.ApplyPose(page, clip, t, restGeometry);
 
                 BitmapSource frameBmp = HighQualityImageRenderer.Render(page, (IEnumerable<LayerNode>)null, options.Scale, false);
 

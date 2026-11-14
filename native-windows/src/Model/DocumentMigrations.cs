@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Web.Script.Serialization;
@@ -12,6 +14,85 @@ namespace Kerf.Model
     public static class DocumentMigrations
     {
         public const string CurrentSchemaVersion = "4.0.0";
+
+        internal static string NormalizeJsonForTypedDeserialization(string json, JavaScriptSerializer serializer)
+        {
+            if (string.IsNullOrEmpty(json)) return json;
+            if (serializer == null) throw new ArgumentNullException("serializer");
+            object payload = serializer.DeserializeObject(json);
+            return serializer.Serialize(NormalizeOptionalJsonValues(payload, null));
+        }
+
+        private static object NormalizeOptionalJsonValues(object value, string propertyName)
+        {
+            var dictionary = value as IDictionary<string, object>;
+            if (dictionary != null)
+            {
+                // JavaScriptSerializer crashes when mapping nested explicit null values or
+                // object-shaped nullable WPF Point/Rect values to typed document properties.
+                // Omitted nulls preserve model defaults; WPF converters accept coordinate strings.
+                if (string.Equals(propertyName, "GradientStart", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(propertyName, "GradientEnd", StringComparison.OrdinalIgnoreCase))
+                {
+                    object x;
+                    object y;
+                    if (TryGetCaseInsensitive(dictionary, "X", out x) && TryGetCaseInsensitive(dictionary, "Y", out y))
+                        return FormatGeometryComponent(x) + "," + FormatGeometryComponent(y);
+                }
+                else if (string.Equals(propertyName, "CropRect", StringComparison.OrdinalIgnoreCase))
+                {
+                    object x;
+                    object y;
+                    object width;
+                    object height;
+                    if (TryGetCaseInsensitive(dictionary, "X", out x) &&
+                        TryGetCaseInsensitive(dictionary, "Y", out y) &&
+                        TryGetCaseInsensitive(dictionary, "Width", out width) &&
+                        TryGetCaseInsensitive(dictionary, "Height", out height))
+                    {
+                        return FormatGeometryComponent(x) + "," + FormatGeometryComponent(y) + "," +
+                            FormatGeometryComponent(width) + "," + FormatGeometryComponent(height);
+                    }
+                }
+
+                var normalized = new Dictionary<string, object>();
+                foreach (var property in dictionary)
+                    if (property.Value != null)
+                        normalized[property.Key] = NormalizeOptionalJsonValues(property.Value, property.Key);
+                return normalized;
+            }
+
+            var list = value as IList;
+            if (list != null)
+            {
+                var normalized = new object[list.Count];
+                for (int i = 0; i < list.Count; i++)
+                    normalized[i] = NormalizeOptionalJsonValues(list[i], null);
+                return normalized;
+            }
+
+            return value;
+        }
+
+        private static bool TryGetCaseInsensitive(IDictionary<string, object> dictionary, string key, out object value)
+        {
+            if (dictionary.TryGetValue(key, out value)) return true;
+            foreach (var property in dictionary)
+            {
+                if (string.Equals(property.Key, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+            value = null;
+            return false;
+        }
+
+        private static string FormatGeometryComponent(object value)
+        {
+            return Convert.ToDouble(value, CultureInfo.InvariantCulture).ToString("R", CultureInfo.InvariantCulture);
+        }
 
         public static KerfDocument MigrateToCanonical(string json)
         {
@@ -62,7 +143,7 @@ namespace Kerf.Model
                 {
                     try
                     {
-                        doc = serializer.Deserialize<KerfDocument>(json);
+                        doc = serializer.Deserialize<KerfDocument>(NormalizeJsonForTypedDeserialization(json, serializer));
                     }
                     catch (Exception ex)
                     {
@@ -527,6 +608,13 @@ namespace Kerf.Model
         {
             if (string.IsNullOrEmpty(t)) return ElementType.Rectangle;
             t = t.Trim().ToLowerInvariant();
+
+            int numericType;
+            if (int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out numericType) &&
+                Enum.IsDefined(typeof(ElementType), numericType))
+            {
+                return (ElementType)numericType;
+            }
 
             if (t.Contains("componentinstance") || t.Contains("instance")) return ElementType.ComponentInstance;
             if (t.Contains("frame")) return ElementType.Frame;

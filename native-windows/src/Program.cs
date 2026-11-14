@@ -62,8 +62,8 @@ namespace Kerf
             {
                 Log("Fatal exception in Main: " + ex.ToString());
                 MessageBox.Show(
-                    "A critical error occurred in Kerf Studio:\n\n" + ex.ToString(),
-                    "Kerf Studio Error",
+                    "A critical error occurred in Kerf:\n\n" + ex.ToString(),
+                    "Kerf Error",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
                 return 1;
