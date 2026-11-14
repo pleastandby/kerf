@@ -399,8 +399,25 @@ namespace Kerf.UI
         private bool _renameFocusReady;
         private bool _isFinishingRename;
         private Point _dragCardStartPoint;
+        private LayerNode _layerSelectionAnchor;
+        private bool _layerDragGestureConsumed;
+        private Border _layerDropIndicator;
+        private Panel _layerDropIndicatorParent;
+        private LayerNode _layerDropTarget;
+        private DropPosition _layerDropPosition;
+        private LayerDragPayload _activeLayerDragPayload;
         private int _layerDragAutoScrollDirection;
         private int _layerGroupCounter = 1;
+
+        private sealed class LayerDragPayload
+        {
+            public readonly List<LayerNode> Layers;
+
+            public LayerDragPayload(IEnumerable<LayerNode> layers)
+            {
+                Layers = layers != null ? layers.Where(layer => layer != null).ToList() : new List<LayerNode>();
+            }
+        }
 
         // Adobe Illustrator Duplicate & Transform Engine State
         private Dictionary<LayerNode, Point> _dragInitialPositions = new Dictionary<LayerNode, Point>();
@@ -1831,6 +1848,7 @@ namespace Kerf.UI
             _layerListScrollViewer = scrollLayers;
             scrollLayers.PreviewDragOver += HandleLayerListPreviewDragOver;
             scrollLayers.PreviewDrop += (s, e) => StopLayerDragAutoScroll();
+            scrollLayers.Drop += HandleLayerListDrop;
             _layerListStack = new StackPanel { Margin = new Thickness(8, 0, 8, 12) };
             scrollLayers.Content = _layerListStack;
             Grid.SetRow(scrollLayers, 1);
@@ -2985,6 +3003,154 @@ namespace Kerf.UI
             return true;
         }
 
+        private List<LayerNode> GetVisibleLayerOrder()
+        {
+            var visible = new List<LayerNode>();
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page == null || page.Layers == null) return visible;
+
+            Action<LayerNode> append = null;
+            append = node =>
+            {
+                if (!MatchesFilter(node)) return;
+                visible.Add(node);
+                if ((node.Type == ElementType.Frame || node.Type == ElementType.Group) &&
+                    node.Children != null && !node.IsCollapsed)
+                {
+                    for (int i = node.Children.Count - 1; i >= 0; i--) append(node.Children[i]);
+                }
+            };
+
+            for (int i = page.Layers.Count - 1; i >= 0; i--) append(page.Layers[i]);
+            return visible;
+        }
+
+        private void SelectLayerFromLayerPanel(LayerNode layer, bool shift, bool control, bool refreshLayerList)
+        {
+            if (layer == null) return;
+            var visible = GetVisibleLayerOrder();
+            int clickedIndex = visible.IndexOf(layer);
+            int anchorIndex = visible.IndexOf(_layerSelectionAnchor);
+
+            if (shift && clickedIndex >= 0)
+            {
+                if (anchorIndex < 0 && _selectedLayers.Count > 0)
+                    anchorIndex = visible.IndexOf(_selectedLayers[_selectedLayers.Count - 1]);
+                if (anchorIndex < 0)
+                {
+                    _layerSelectionAnchor = layer;
+                    anchorIndex = clickedIndex;
+                }
+
+                if (!control) _selectedLayers.Clear();
+                int first = Math.Min(anchorIndex, clickedIndex);
+                int last = Math.Max(anchorIndex, clickedIndex);
+                for (int i = first; i <= last; i++)
+                    if (!_selectedLayers.Contains(visible[i])) _selectedLayers.Add(visible[i]);
+            }
+            else if (control)
+            {
+                if (_selectedLayers.Contains(layer)) _selectedLayers.Remove(layer);
+                else _selectedLayers.Add(layer);
+                _layerSelectionAnchor = layer;
+            }
+            else
+            {
+                _selectedLayers.Clear();
+                _selectedLayers.Add(layer);
+                _layerSelectionAnchor = layer;
+            }
+
+            if (refreshLayerList)
+            {
+                OnSelectionChanged();
+            }
+            else
+            {
+                ColorPickerPopup.CloseActive();
+                if (_editingGradientLayer != null && !_selectedLayers.Contains(_editingGradientLayer))
+                    ClearEditingGradient();
+                if (_booleanToolbar != null)
+                    _booleanToolbar.Visibility = _selectedLayers.Count >= 2 ? Visibility.Visible : Visibility.Collapsed;
+                RefreshCanvas();
+                RefreshPropertyInspector();
+                if (_currentStudioMode == StudioMode.Animate)
+                {
+                    RefreshTimelineTracks();
+                    RefreshTimelineCanvas();
+                }
+                UpdateLayerCardSelectionVisuals();
+            }
+        }
+
+        private List<LayerNode> GetLayerDragRoots(IEnumerable<LayerNode> requestedLayers)
+        {
+            var requested = requestedLayers != null
+                ? requestedLayers.Where(layer => layer != null).Distinct().ToList()
+                : new List<LayerNode>();
+            var set = new HashSet<LayerNode>(requested);
+            var visibleOrder = GetVisibleLayerOrder();
+            var page = Document != null ? Document.GetActivePage() : null;
+            if (page != null)
+            {
+                foreach (var layer in page.GetAllLayersFlat())
+                    if (!visibleOrder.Contains(layer)) visibleOrder.Add(layer);
+            }
+            var result = new List<LayerNode>();
+            foreach (var layer in visibleOrder)
+            {
+                if (!set.Contains(layer)) continue;
+                bool coveredBySelectedAncestor = false;
+                foreach (var possibleAncestor in requested)
+                {
+                    if (possibleAncestor != layer && Kerf.Model.Page.IsDescendant(possibleAncestor, layer))
+                    {
+                        coveredBySelectedAncestor = true;
+                        break;
+                    }
+                }
+                if (!coveredBySelectedAncestor) result.Add(layer);
+            }
+            return result;
+        }
+
+        private void UpdateLayerCardSelectionVisuals()
+        {
+            if (_layerListStack == null) return;
+            Action<DependencyObject> visit = null;
+            visit = parent =>
+            {
+                int childCount = VisualTreeHelper.GetChildrenCount(parent);
+                for (int i = 0; i < childCount; i++)
+                {
+                    var child = VisualTreeHelper.GetChild(parent, i);
+                    var card = child as Border;
+                    var layer = card != null ? card.Tag as LayerNode : null;
+                    if (layer != null)
+                    {
+                        bool selected = _selectedLayers.Contains(layer);
+                        card.Background = selected ? KerfBrand.TealBrush : KerfBrand.DarkSlateBrush;
+                        card.BorderBrush = selected ? KerfBrand.MintBrush : KerfBrand.TealBrush;
+                        var grid = card.Child as Grid;
+                        if (grid != null)
+                        {
+                            var name = grid.Children.OfType<TextBlock>().FirstOrDefault(element => Grid.GetColumn(element) == 2);
+                            if (name != null)
+                            {
+                                bool component = layer.IsMasterComponent || !string.IsNullOrEmpty(layer.ComponentId);
+                                name.Foreground = component
+                                    ? (selected ? new SolidColorBrush(Color.FromRgb(196, 181, 253)) : new SolidColorBrush(Color.FromRgb(167, 139, 250)))
+                                    : (selected ? Brushes.White : new SolidColorBrush(Color.FromRgb(190, 200, 220)));
+                                name.FontWeight = selected || component ? FontWeights.SemiBold : FontWeights.Normal;
+                            }
+                        }
+                    }
+                    visit(child);
+                }
+            };
+            visit(_layerListStack);
+        }
+
         private Geometry GetIconForLayer(LayerNode layer)
         {
             if (layer != null)
@@ -3286,7 +3452,7 @@ namespace Kerf.UI
 
         private void HandleLayerListPreviewDragOver(object sender, DragEventArgs e)
         {
-            if (_layerListScrollViewer == null || !e.Data.GetDataPresent(typeof(LayerNode)))
+            if (_layerListScrollViewer == null || !e.Data.GetDataPresent(typeof(LayerDragPayload)))
             {
                 StopLayerDragAutoScroll();
                 return;
@@ -3342,6 +3508,8 @@ namespace Kerf.UI
                     double next = Math.Max(0.0, Math.Min(viewer.ScrollableHeight,
                         viewer.VerticalOffset + _layerDragAutoScrollDirection * speed));
                     viewer.ScrollToVerticalOffset(next);
+                    viewer.UpdateLayout();
+                    UpdateLayerDropPreviewUnderPointer(viewer);
                     if ((_layerDragAutoScrollDirection < 0 && next <= 0.0) ||
                         (_layerDragAutoScrollDirection > 0 && next >= viewer.ScrollableHeight))
                         StopLayerDragAutoScroll();
@@ -3356,6 +3524,180 @@ namespace Kerf.UI
             _layerDragAutoScrollDirection = 0;
             if (_layerDragAutoScrollTimer != null && _layerDragAutoScrollTimer.IsEnabled)
                 _layerDragAutoScrollTimer.Stop();
+        }
+
+        private Dictionary<Border, Point> CaptureLayerCardPositions()
+        {
+            var positions = new Dictionary<Border, Point>();
+            if (_layerListStack == null || _layerListScrollViewer == null) return positions;
+            Action<DependencyObject> visit = null;
+            visit = parent =>
+            {
+                int count = VisualTreeHelper.GetChildrenCount(parent);
+                for (int i = 0; i < count; i++)
+                {
+                    var child = VisualTreeHelper.GetChild(parent, i);
+                    var card = child as Border;
+                    if (card != null && card.Tag is LayerNode && card.IsLoaded)
+                    {
+                        try { positions[card] = card.TransformToAncestor(_layerListScrollViewer).Transform(new Point(0, 0)); }
+                        catch (InvalidOperationException) { }
+                    }
+                    visit(child);
+                }
+            };
+            visit(_layerListStack);
+            return positions;
+        }
+
+        private void AnimateLayerCardDisplacement(Dictionary<Border, Point> before)
+        {
+            if (before == null || before.Count == 0 || _layerListStack == null) return;
+            _layerListStack.UpdateLayout();
+            var after = CaptureLayerCardPositions();
+            var duration = new Duration(TimeSpan.FromMilliseconds(150));
+            var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            foreach (var pair in before)
+            {
+                Point current;
+                if (!after.TryGetValue(pair.Key, out current)) continue;
+                double dx = pair.Value.X - current.X;
+                double dy = pair.Value.Y - current.Y;
+                if (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5) continue;
+
+                var translate = new TranslateTransform(dx, dy);
+                pair.Key.RenderTransform = translate;
+                translate.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, duration) { EasingFunction = ease });
+                translate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, duration) { EasingFunction = ease });
+            }
+        }
+
+        private void ShowLayerDropPreview(Border card, DropPosition position)
+        {
+            if (card == null) return;
+            _layerDropTarget = card.Tag as LayerNode;
+            _layerDropPosition = position;
+            var row = VisualTreeHelper.GetParent(card) as Panel;
+            if (row == null) return;
+
+            Panel targetPanel;
+            int targetIndex;
+            if (position == DropPosition.Inside)
+            {
+                targetPanel = row;
+                targetIndex = Math.Max(0, targetPanel.Children.IndexOf(card) + 1);
+            }
+            else
+            {
+                targetPanel = VisualTreeHelper.GetParent(row) as Panel;
+                if (targetPanel == null) return;
+                targetIndex = targetPanel.Children.IndexOf(row) + (position == DropPosition.Above || position == DropPosition.Before ? 0 : 1);
+            }
+
+            var before = CaptureLayerCardPositions();
+            if (_layerDropIndicator == null)
+            {
+                _layerDropIndicator = new Border
+                {
+                    Height = 3,
+                    CornerRadius = new CornerRadius(2),
+                    Background = KerfBrand.MintBrush,
+                    Margin = new Thickness(card.Padding.Left + 2, 0, 8, 2),
+                    IsHitTestVisible = false
+                };
+            }
+
+            if (_layerDropIndicatorParent == targetPanel && _layerDropIndicator.Parent == targetPanel)
+            {
+                int currentIndex = targetPanel.Children.IndexOf(_layerDropIndicator);
+                int normalizedTargetIndex = Math.Max(0, Math.Min(targetIndex, targetPanel.Children.Count));
+                if (currentIndex < normalizedTargetIndex) normalizedTargetIndex--;
+                if (currentIndex == normalizedTargetIndex)
+                {
+                    return;
+                }
+            }
+
+            if (_layerDropIndicatorParent != null && _layerDropIndicator.Parent == _layerDropIndicatorParent)
+                _layerDropIndicatorParent.Children.Remove(_layerDropIndicator);
+
+            targetIndex = Math.Max(0, Math.Min(targetIndex, targetPanel.Children.Count));
+            targetPanel.Children.Insert(targetIndex, _layerDropIndicator);
+            _layerDropIndicatorParent = targetPanel;
+            AnimateLayerCardDisplacement(before);
+        }
+
+        private void UpdateLayerDropPreviewUnderPointer(ScrollViewer viewer)
+        {
+            if (viewer == null || _activeLayerDragPayload == null) return;
+            Point point = Mouse.GetPosition(viewer);
+            HitTestResult hit = VisualTreeHelper.HitTest(viewer, point);
+            DependencyObject current = hit != null ? hit.VisualHit : null;
+            Border card = null;
+            while (current != null && current != viewer)
+            {
+                var candidate = current as Border;
+                if (candidate != null && candidate.Tag is LayerNode)
+                {
+                    card = candidate;
+                    break;
+                }
+                current = VisualTreeHelper.GetParent(current);
+            }
+            if (card == null) return;
+
+            var target = card.Tag as LayerNode;
+            if (_activeLayerDragPayload.Layers.Contains(target) ||
+                _activeLayerDragPayload.Layers.Any(source => Kerf.Model.Page.IsDescendant(source, target)))
+            {
+                ClearLayerDropPreview();
+                return;
+            }
+
+            double y = Mouse.GetPosition(card).Y;
+            double height = Math.Max(1.0, card.ActualHeight);
+            bool isContainer = target.Type == ElementType.Frame || target.Type == ElementType.Group;
+            DropPosition position = isContainer && y > height * 0.25 && y < height * 0.75
+                ? DropPosition.Inside
+                : (isContainer ? (y <= height * 0.25 ? DropPosition.Above : DropPosition.Below)
+                               : (y <= height * 0.5 ? DropPosition.Above : DropPosition.Below));
+            ShowLayerDropPreview(card, position);
+        }
+
+        private void ClearLayerDropPreview()
+        {
+            _layerDropTarget = null;
+            _layerDropPosition = DropPosition.None;
+            if (_layerDropIndicator == null || _layerDropIndicatorParent == null || _layerDropIndicator.Parent != _layerDropIndicatorParent)
+            {
+                _layerDropIndicatorParent = null;
+                return;
+            }
+
+            var before = CaptureLayerCardPositions();
+            _layerDropIndicatorParent.Children.Remove(_layerDropIndicator);
+            _layerDropIndicatorParent = null;
+            AnimateLayerCardDisplacement(before);
+        }
+
+        private void HandleLayerListDrop(object sender, DragEventArgs e)
+        {
+            var payload = e.Data.GetData(typeof(LayerDragPayload)) as LayerDragPayload;
+            var target = _layerDropTarget;
+            var position = _layerDropPosition;
+            if (payload == null || target == null || position == DropPosition.None) return;
+            e.Handled = true;
+            ClearLayerDropPreview();
+            MoveLayerHierarchy(payload.Layers, target, position);
+            StopLayerDragAutoScroll();
+        }
+
+        private void CompleteLayerDrop(LayerDragPayload payload, LayerNode target, DropPosition position)
+        {
+            ClearLayerDropPreview();
+            if (payload != null && target != null && position != DropPosition.None)
+                MoveLayerHierarchy(payload.Layers, target, position);
+            StopLayerDragAutoScroll();
         }
 
         private FrameworkElement CreateLayerCard(LayerNode layer, int depth)
@@ -3604,22 +3946,17 @@ namespace Kerf.UI
             // Selection click
             card.MouseLeftButtonUp += (s, e) =>
             {
+                if (_layerDragGestureConsumed)
+                {
+                    _layerDragGestureConsumed = false;
+                    e.Handled = true;
+                    return;
+                }
                 if (_renamingLayerId == layer.Id) { e.Handled = true; return; }
                 Focus();
                 bool isShift = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
                 bool isCtrl = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
-
-                if (isShift || isCtrl)
-                {
-                    if (_selectedLayers.Contains(layer)) _selectedLayers.Remove(layer);
-                    else _selectedLayers.Add(layer);
-                }
-                else
-                {
-                    _selectedLayers.Clear();
-                    _selectedLayers.Add(layer);
-                }
-                OnSelectionChanged();
+                SelectLayerFromLayerPanel(layer, isShift, isCtrl, true);
             };
 
             // Double click to rename
@@ -3646,8 +3983,33 @@ namespace Kerf.UI
                     Point cur = e.GetPosition(card);
                     if (Math.Abs(cur.X - _dragCardStartPoint.X) > 4 || Math.Abs(cur.Y - _dragCardStartPoint.Y) > 4)
                     {
-                        DragDrop.DoDragDrop(card, layer, DragDropEffects.Move);
-                        StopLayerDragAutoScroll();
+                        bool isShift = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
+                        bool isCtrl = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+                        if (!_selectedLayers.Contains(layer) || isShift || isCtrl)
+                            SelectLayerFromLayerPanel(layer, isShift, isCtrl, false);
+
+                        IEnumerable<LayerNode> dragSelection = _selectedLayers.Contains(layer)
+                            ? (IEnumerable<LayerNode>)_selectedLayers
+                            : new[] { layer };
+                        var movingLayers = GetLayerDragRoots(dragSelection);
+                        if (movingLayers.Count == 0) movingLayers.Add(layer);
+                        Focus();
+                        _layerDropTarget = null;
+                        _layerDropPosition = DropPosition.None;
+                        _layerDragGestureConsumed = true;
+                        var payload = new LayerDragPayload(movingLayers);
+                        _activeLayerDragPayload = payload;
+                        try
+                        {
+                            DragDrop.DoDragDrop(card, payload, DragDropEffects.Move);
+                        }
+                        finally
+                        {
+                            _activeLayerDragPayload = null;
+                            StopLayerDragAutoScroll();
+                            ClearLayerDropPreview();
+                            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => _layerDragGestureConsumed = false));
+                        }
                     }
                 }
             };
@@ -3655,10 +4017,13 @@ namespace Kerf.UI
             card.DragOver += (s, e) =>
             {
                 e.Handled = true;
-                var dropped = e.Data.GetData(typeof(LayerNode)) as LayerNode;
-                if (dropped == null || dropped == layer)
+                var payload = e.Data.GetData(typeof(LayerDragPayload)) as LayerDragPayload;
+                if (payload == null || payload.Layers.Count == 0 || payload.Layers.Contains(layer) ||
+                    payload.Layers.Any(source => Kerf.Model.Page.IsDescendant(source, layer)))
                 {
                     e.Effects = DragDropEffects.None;
+                    if (payload != null && payload.Layers.Any(source => source == layer || Kerf.Model.Page.IsDescendant(source, layer)))
+                        ClearLayerDropPreview();
                     return;
                 }
                 e.Effects = DragDropEffects.Move;
@@ -3689,6 +4054,12 @@ namespace Kerf.UI
                     card.BorderBrush = new SolidColorBrush(Color.FromRgb(99, 102, 241));
                     card.BorderThickness = (y <= h * 0.5) ? new Thickness(1, 3, 1, 1) : new Thickness(1, 1, 1, 3);
                 }
+
+                DropPosition previewPosition = isContainer && y > h * 0.25 && y < h * 0.75
+                    ? DropPosition.Inside
+                    : (isContainer ? (y <= h * 0.25 ? DropPosition.Above : DropPosition.Below)
+                                   : (y <= h * 0.5 ? DropPosition.Above : DropPosition.Below));
+                ShowLayerDropPreview(card, previewPosition);
             };
 
             card.DragLeave += (s, e) =>
@@ -3703,8 +4074,8 @@ namespace Kerf.UI
                 card.BorderBrush = isSelected ? new SolidColorBrush(Color.FromRgb(99, 102, 241)) : new SolidColorBrush(Color.FromRgb(32, 38, 56));
                 card.BorderThickness = new Thickness(1);
 
-                var dropped = e.Data.GetData(typeof(LayerNode)) as LayerNode;
-                if (dropped == null || dropped == layer || (dropped.Id != null && dropped.Id == layer.Id)) return;
+                var payload = e.Data.GetData(typeof(LayerDragPayload)) as LayerDragPayload;
+                if (payload == null || payload.Layers.Count == 0 || payload.Layers.Contains(layer)) return;
 
                 double y = e.GetPosition(card).Y;
                 double h = card.ActualHeight;
@@ -3721,7 +4092,7 @@ namespace Kerf.UI
                     pos = (y <= h * 0.5) ? DropPosition.Above : DropPosition.Below;
                 }
 
-                MoveLayerHierarchy(dropped, layer, pos);
+                CompleteLayerDrop(payload, layer, pos);
             };
 
             // Right-Click Context Menu
@@ -3731,9 +4102,7 @@ namespace Kerf.UI
             {
                 if (!_selectedLayers.Contains(layer))
                 {
-                    _selectedLayers.Clear();
-                    _selectedLayers.Add(layer);
-                    OnSelectionChanged();
+                    SelectLayerFromLayerPanel(layer, false, false, true);
                 }
             };
 
@@ -16807,12 +17176,13 @@ namespace Kerf.UI
 
             if (targetIdx >= 0 && targetIdx < container.Count && targetIdx != idx)
             {
-                container.RemoveAt(idx);
-                container.Insert(targetIdx, layer);
-                _sceneGraph.Synchronize(page);
-                RefreshCanvas();
-                RefreshLayersList();
-                History.MarkDirty();
+                string parentId = parent != null ? parent.Id : null;
+                History.Execute(new ReorderLayerCommand(page, layer, parentId, idx, parentId, targetIdx, () =>
+                {
+                    _sceneGraph.Synchronize(page);
+                    RefreshCanvas();
+                    RefreshLayersList();
+                }));
             }
         }
 
@@ -16997,31 +17367,37 @@ namespace Kerf.UI
 
         public void MoveLayerHierarchy(LayerNode source, LayerNode target, DropPosition position)
         {
-            if (source == null || target == null || source == target || (source.Id != null && source.Id == target.Id)) return;
+            if (source == null) return;
+            MoveLayerHierarchy(new[] { source }, target, position);
+        }
+
+        private void MoveLayerHierarchy(IEnumerable<LayerNode> sources, LayerNode target, DropPosition position)
+        {
+            if (target == null || position == DropPosition.None) return;
             var page = Document.GetActivePage();
             if (page == null) return;
 
-            // Prevent cyclic hierarchy
-            if (Kerf.Model.Page.IsDescendant(source, target)) return;
+            var movingLayers = GetLayerDragRoots(sources);
+            if (movingLayers.Count == 0 || movingLayers.Contains(target)) return;
 
-            LayerNode oldParent;
-            var oldContainer = page.FindContainer(source, out oldParent);
-            if (oldContainer == null) oldContainer = page.Layers;
-            int oldIdx = oldContainer.IndexOf(source);
-            string oldParentId = oldParent != null ? oldParent.Id : null;
+            // Prevent cyclic hierarchy before removing any selected nodes.
+            if (movingLayers.Any(source => Kerf.Model.Page.IsDescendant(source, target))) return;
 
             if (position == DropPosition.Inside && (target.Type == ElementType.Frame || target.Type == ElementType.Group))
             {
                 string newParentId = target.Id;
-                int newIdx = (target.Children != null) ? target.Children.Count : 0;
-                var cmd = new ReorderLayerCommand(page, source, oldParentId, oldIdx, newParentId, newIdx, () =>
+                var targetChildren = target.Children ?? new List<LayerNode>();
+                int newIdx = targetChildren.Count;
+                foreach (var source in movingLayers)
                 {
-                    _sceneGraph.Synchronize(page);
-                    RefreshCanvas();
-                    RefreshLayersList();
-                });
-                History.Execute(cmd);
+                    LayerNode sourceParent;
+                    var sourceContainer = page.FindContainer(source, out sourceParent);
+                    if (sourceContainer == targetChildren && sourceContainer.IndexOf(source) >= 0) newIdx--;
+                }
+                newIdx = Math.Max(0, newIdx);
+                var orderedForInsertion = movingLayers.AsEnumerable().Reverse().ToList();
                 target.IsCollapsed = false;
+                ExecuteLayerReorder(page, orderedForInsertion, newParentId, newIdx);
             }
             else
             {
@@ -17031,47 +17407,34 @@ namespace Kerf.UI
                 int targetIdx = targetContainer.IndexOf(target);
                 string targetParentId = targetParent != null ? targetParent.Id : null;
 
-                int newIdx;
                 bool isVisuallyAbove = (position == DropPosition.Before || position == DropPosition.Above);
-
-                if (isVisuallyAbove)
+                int baseInsertionIndex = isVisuallyAbove ? targetIdx + 1 : targetIdx;
+                int selectedBeforeInsertion = movingLayers.Count(source =>
                 {
-                    // In UI, dropping on top half means visually ABOVE target in list, which is HIGHER z-index (after target in container).
-                    if (oldContainer == targetContainer && oldIdx >= 0)
-                    {
-                        newIdx = (oldIdx < targetIdx) ? targetIdx : targetIdx + 1;
-                    }
-                    else
-                    {
-                        newIdx = targetIdx + 1;
-                    }
-                }
-                else
-                {
-                    // In UI, dropping on bottom half means visually BELOW target in list, which is LOWER z-index (before target in container).
-                    if (oldContainer == targetContainer && oldIdx >= 0)
-                    {
-                        newIdx = (oldIdx < targetIdx) ? Math.Max(0, targetIdx - 1) : targetIdx;
-                    }
-                    else
-                    {
-                        newIdx = targetIdx;
-                    }
-                }
-
-                var cmd = new ReorderLayerCommand(page, source, oldParentId, oldIdx, targetParentId, newIdx, () =>
-                {
-                    _sceneGraph.Synchronize(page);
-                    RefreshCanvas();
-                    RefreshLayersList();
+                    LayerNode sourceParent;
+                    var sourceContainer = page.FindContainer(source, out sourceParent);
+                    return sourceContainer == targetContainer && sourceContainer.IndexOf(source) < baseInsertionIndex;
                 });
-                History.Execute(cmd);
+                int insertionIndex = baseInsertionIndex - selectedBeforeInsertion;
+
+                // Layer cards are displayed top-to-bottom while the document stores siblings bottom-to-top.
+                var orderedForInsertion = movingLayers.AsEnumerable().Reverse().ToList();
+                ExecuteLayerReorder(page, orderedForInsertion, targetParentId, Math.Max(0, insertionIndex));
             }
 
-            _sceneGraph.Synchronize(page);
-            RefreshCanvas();
-            RefreshLayersList();
             History.MarkDirty();
+        }
+
+        private void ExecuteLayerReorder(Kerf.Model.Page page, IList<LayerNode> orderedLayers, string parentId, int insertionIndex)
+        {
+            if (page == null || orderedLayers == null || orderedLayers.Count == 0) return;
+            var command = new ReorderLayersCommand(page, orderedLayers, parentId, insertionIndex, () =>
+            {
+                _sceneGraph.Synchronize(page);
+                RefreshCanvas();
+                RefreshLayersList();
+            });
+            History.Execute(command);
         }
 
         public void FrameSelectedLayers()

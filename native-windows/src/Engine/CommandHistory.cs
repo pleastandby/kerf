@@ -1729,6 +1729,120 @@ namespace Kerf.Engine
         }
     }
 
+    public class ReorderLayersCommand : ICommand
+    {
+        private sealed class LayerPlacement
+        {
+            public LayerNode Layer;
+            public string ParentId;
+            public int Index;
+            public bool IgnoreAutoLayout;
+        }
+
+        private readonly Page _page;
+        private readonly List<LayerPlacement> _originalPlacements;
+        private readonly List<LayerNode> _layers;
+        private readonly string _newParentId;
+        private readonly int _newIndex;
+        private readonly Action _onRender;
+
+        public string Description
+        {
+            get { return _layers.Count == 1 ? "Reorder Layer " + _layers[0].Name : string.Format("Reorder {0} Layers", _layers.Count); }
+        }
+
+        public ReorderLayersCommand(Page page, IEnumerable<LayerNode> layers, string newParentId, int newIndex, Action onRender)
+        {
+            _page = page;
+            _newParentId = newParentId;
+            _newIndex = newIndex;
+            _onRender = onRender;
+            _layers = new List<LayerNode>();
+            _originalPlacements = new List<LayerPlacement>();
+
+            if (page == null || layers == null) return;
+            foreach (var layer in layers)
+            {
+                if (layer == null || _layers.Contains(layer)) continue;
+                LayerNode parent;
+                var container = page.FindContainer(layer, out parent);
+                if (container == null) continue;
+                _layers.Add(layer);
+                _originalPlacements.Add(new LayerPlacement
+                {
+                    Layer = layer,
+                    ParentId = parent != null ? parent.Id : null,
+                    Index = container.IndexOf(layer),
+                    IgnoreAutoLayout = layer.IgnoreAutoLayout
+                });
+            }
+        }
+
+        public void Execute()
+        {
+            MoveToNewLocation();
+        }
+
+        public void Unexecute()
+        {
+            if (_page == null || _layers.Count == 0) return;
+            foreach (var layer in _layers) _page.RemoveLayerEverywhere(layer);
+
+            foreach (var placement in _originalPlacements.OrderBy(p => p.ParentId ?? string.Empty).ThenBy(p => p.Index))
+            {
+                var container = ResolveContainer(placement.ParentId);
+                placement.Layer.ParentId = string.IsNullOrEmpty(placement.ParentId) ? null : placement.ParentId;
+                placement.Layer.IgnoreAutoLayout = placement.IgnoreAutoLayout;
+                container.Insert(Math.Max(0, Math.Min(placement.Index, container.Count)), placement.Layer);
+            }
+
+            ReflowAffectedContainers(_originalPlacements.Select(p => p.ParentId).Concat(new[] { _newParentId }));
+            if (_onRender != null) _onRender();
+        }
+
+        private void MoveToNewLocation()
+        {
+            if (_page == null || _layers.Count == 0) return;
+            foreach (var layer in _layers) _page.RemoveLayerEverywhere(layer);
+
+            var target = ResolveContainer(_newParentId);
+            int index = Math.Max(0, Math.Min(_newIndex, target.Count));
+            foreach (var layer in _layers)
+            {
+                target.Insert(index++, layer);
+                layer.ParentId = string.IsNullOrEmpty(_newParentId) ? null : _newParentId;
+                var original = _originalPlacements.FirstOrDefault(p => p.Layer == layer);
+                if (original != null) layer.IgnoreAutoLayout = original.IgnoreAutoLayout;
+            }
+
+            ReflowAffectedContainers(_originalPlacements.Select(p => p.ParentId).Concat(new[] { _newParentId }));
+            if (_onRender != null) _onRender();
+        }
+
+        private List<LayerNode> ResolveContainer(string parentId)
+        {
+            if (string.IsNullOrEmpty(parentId)) return _page.Layers;
+            var parent = _page.FindLayerById(parentId);
+            if (parent == null || (parent.Type != ElementType.Frame && parent.Type != ElementType.Group)) return _page.Layers;
+            if (parent.Children == null) parent.Children = new List<LayerNode>();
+            return parent.Children;
+        }
+
+        private void ReflowAffectedContainers(IEnumerable<string> parentIds)
+        {
+            var seen = new HashSet<string>();
+            foreach (var parentId in parentIds)
+            {
+                if (string.IsNullOrEmpty(parentId) || !seen.Add(parentId)) continue;
+                var parent = _page.FindLayerById(parentId);
+                if (parent != null) AutoLayoutEngine.ReflowHierarchy(_page, parent);
+            }
+
+            foreach (var layer in _layers)
+                if (string.IsNullOrEmpty(layer.ParentId)) AutoLayoutEngine.ReflowHierarchy(_page, layer);
+        }
+    }
+
     public class FrameSelectionCommand : ICommand
     {
         public string Description { get { return "Frame Selection"; } }
