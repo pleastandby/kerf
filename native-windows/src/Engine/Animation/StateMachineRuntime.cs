@@ -244,6 +244,16 @@ namespace Kerf.Engine.Animation
             }
         }
 
+        private ClipInstance CreateClipInstanceForState(MachineLayer layer, int stateIndex)
+        {
+            var instance = new ClipInstance(stateIndex);
+            if (layer == null || stateIndex < 0 || stateIndex >= layer.States.Count) return instance;
+            MachineState state = layer.States[stateIndex];
+            if (state != null && state.Kind == StateKind.Animation && state.ClipIndex >= 0 && state.ClipIndex < Clips.Count)
+                instance.Time = Clips[state.ClipIndex].GetNormalizedWorkAreaStart();
+            return instance;
+        }
+
         public void RebuildViewModel()
         {
             ViewModel = new StateMachineViewModel(Definition != null ? Definition.ViewModelProperties : null);
@@ -668,8 +678,12 @@ namespace Kerf.Engine.Animation
             MachineState state = layer.States[currentStateIdx];
             if (state.Kind == StateKind.Animation && state.ClipIndex >= 0 && state.ClipIndex < Clips.Count)
             {
-                double d = Clips[state.ClipIndex].Duration;
-                return (d > 0.0) ? Math.Max(0.0, curTime / d) : 1.0;
+                Clip clip = Clips[state.ClipIndex];
+                double start = clip.GetNormalizedWorkAreaStart();
+                double end = clip.GetNormalizedWorkAreaEnd();
+                return (end > start)
+                    ? Math.Max(0.0, Math.Min(1.0, (curTime - start) / (end - start)))
+                    : 1.0;
             }
             return 1.0;
         }
@@ -827,12 +841,17 @@ namespace Kerf.Engine.Animation
                         // Playback belongs to the state. Do not let the referenced clip's
                         // global loop mode turn a looping state into a one-shot (or vice versa).
                         LoopMode loopMode = curState.LoopMode;
-                        double rawNextTime = layerRt.CurTime.Time + dt * stateSpeed * layerRt.CurTime.Speed * layerRt.CurTime.Direction;
+                        double workStart = clip.GetNormalizedWorkAreaStart();
+                        double workEnd = clip.GetNormalizedWorkAreaEnd();
+                        double previousTime = layerRt.CurTime.Time;
+                        if (double.IsNaN(previousTime) || double.IsInfinity(previousTime) || previousTime < workStart || previousTime > workEnd)
+                            previousTime = workStart;
+                        double rawNextTime = previousTime + dt * stateSpeed * layerRt.CurTime.Speed * layerRt.CurTime.Direction;
                         int rawMotionDirection = (dt * stateSpeed * layerRt.CurTime.Speed * layerRt.CurTime.Direction) < 0.0 ? -1 : 1;
-                        bool crossedBoundary = layerRt.CurTime.Advance(dt * stateSpeed, clip.Duration, loopMode);
+                        bool crossedBoundary = layerRt.CurTime.Advance(dt * stateSpeed, workStart, workEnd, loopMode);
                         currentStateCrossedPlaybackBoundary = loopMode == LoopMode.Loop
                             ? crossedBoundary
-                            : (loopMode == LoopMode.PingPong && rawMotionDirection > 0 && rawNextTime >= clip.Duration);
+                            : (loopMode == LoopMode.PingPong && rawMotionDirection > 0 && rawNextTime >= workEnd);
                         needsRedraw = true;
                     }
                 }
@@ -852,7 +871,11 @@ namespace Kerf.Engine.Animation
                             Clip clip = Clips[toState.ClipIndex];
                             double toStateSpeed = (Math.Abs(toState.Speed) < 0.0001) ? 1.0 : toState.Speed;
                             LoopMode toLoopMode = toState.LoopMode;
-                            layerRt.ActiveTransition.ToTime.Advance(dt * toStateSpeed, clip.Duration, toLoopMode);
+                            layerRt.ActiveTransition.ToTime.Advance(
+                                dt * toStateSpeed,
+                                clip.GetNormalizedWorkAreaStart(),
+                                clip.GetNormalizedWorkAreaEnd(),
+                                toLoopMode);
                         }
                     }
                 }
@@ -913,6 +936,12 @@ namespace Kerf.Engine.Animation
                         int toState = nextTrans.ToState;
                         double duration = nextTrans.Duration;
                         layerRt.ActiveTransition = new ActiveTransitionState(nextTrans, toState, duration);
+                        if (toState >= 0 && toState < layerDef.States.Count)
+                        {
+                            MachineState targetState = layerDef.States[toState];
+                            if (targetState != null && targetState.Kind == StateKind.Animation && targetState.ClipIndex >= 0 && targetState.ClipIndex < Clips.Count)
+                                layerRt.ActiveTransition.ToTime.Time = Clips[targetState.ClipIndex].GetNormalizedWorkAreaStart();
+                        }
                         layerRt.ActiveTransition.SnapshotPose = snapshot;
                         layerRt.ActiveTransition.SnapshotGeometryPose = geometrySnapshot;
                         needsRedraw = true;
@@ -922,7 +951,7 @@ namespace Kerf.Engine.Animation
                             // Instant zero-duration transition: complete immediately and allow chain resolution
                             layerRt.PreviousState = layerRt.CurrentState;
                             layerRt.CurrentState = toState;
-                            layerRt.CurTime = new ClipInstance(toState);
+                            layerRt.CurTime = CreateClipInstanceForState(layerDef, toState);
                             layerRt.ActiveTransition = null;
                             layerRt.TimeInCurrentState = 0.0;
                             layerRt.InputVersionAtStateEntry = _inputVersion;

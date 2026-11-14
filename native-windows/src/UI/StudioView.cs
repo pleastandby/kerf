@@ -24238,6 +24238,8 @@ namespace Kerf.UI
                 var runtime = sm.LayerRuntimes[0];
                 runtime.CurrentState = stateIndex;
                 runtime.CurTime = new ClipInstance(state.ClipIndex);
+                if (state.Kind == StateKind.Animation && state.ClipIndex >= 0 && state.ClipIndex < sm.Clips.Count && sm.Clips[state.ClipIndex] != null)
+                    runtime.CurTime.Time = sm.Clips[state.ClipIndex].GetNormalizedWorkAreaStart();
                 runtime.ActiveTransition = null;
                 runtime.IsFinished = false;
             }

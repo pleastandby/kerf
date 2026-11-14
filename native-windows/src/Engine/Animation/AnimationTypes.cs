@@ -690,8 +690,28 @@ namespace Kerf.Engine.Animation
                 return true;
             }
 
+            return Advance(dt, 0.0, duration, loopMode);
+        }
+
+        public bool Advance(double dt, double startTime, double endTime, LoopMode loopMode)
+        {
+            if (double.IsNaN(dt) || double.IsInfinity(dt)) dt = 0.0;
+            if (double.IsNaN(startTime) || double.IsInfinity(startTime)) startTime = 0.0;
+            if (double.IsNaN(endTime) || double.IsInfinity(endTime)) endTime = startTime + 0.001;
+            startTime = Math.Max(0.0, startTime);
+            if (endTime <= startTime) endTime = startTime + 0.001;
+
+            double range = endTime - startTime;
+            if (range <= 0.0)
+            {
+                Time = startTime;
+                return true;
+            }
+
             if (double.IsNaN(Speed) || double.IsInfinity(Speed)) Speed = 1.0;
             if (Direction == 0) Direction = 1;
+            if (double.IsNaN(Time) || double.IsInfinity(Time) || Time < startTime || Time > endTime)
+                Time = startTime;
             double previousTime = Time;
             double delta = dt * Speed * Direction;
             double nextTime = previousTime + delta;
@@ -700,31 +720,32 @@ namespace Kerf.Engine.Animation
             switch (loopMode)
             {
                 case LoopMode.OneShot:
-                    if (nextTime >= duration)
+                    if (nextTime >= endTime)
                     {
-                        Time = duration;
+                        Time = endTime;
                         completed = delta >= 0.0;
                     }
-                    else if (nextTime <= 0.0)
+                    else if (nextTime <= startTime)
                     {
-                        Time = 0.0;
+                        Time = startTime;
                         completed = delta <= 0.0;
                     }
                     else Time = nextTime;
                     break;
 
                 case LoopMode.Loop:
-                    Time = nextTime % duration;
-                    if (Time < 0.0) Time += duration;
-                    completed = nextTime < 0.0 || nextTime >= duration;
+                    double loopPhase = (nextTime - startTime) % range;
+                    if (loopPhase < 0.0) loopPhase += range;
+                    Time = startTime + loopPhase;
+                    completed = nextTime < startTime || nextTime >= endTime;
                     break;
 
                 case LoopMode.PingPong:
-                    double phase = nextTime % (duration * 2.0);
-                    if (phase < 0.0) phase += duration * 2.0;
-                    Time = phase <= duration ? phase : (duration * 2.0 - phase);
-                    Direction = (phase <= duration ? 1 : -1) * (delta < 0.0 ? -1 : 1);
-                    completed = nextTime < 0.0 || nextTime > duration;
+                    double phase = (nextTime - startTime) % (range * 2.0);
+                    if (phase < 0.0) phase += range * 2.0;
+                    Time = startTime + (phase <= range ? phase : (range * 2.0 - phase));
+                    Direction = (phase <= range ? 1 : -1) * (delta < 0.0 ? -1 : 1);
+                    completed = nextTime < startTime || nextTime > endTime;
                     break;
             }
 

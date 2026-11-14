@@ -173,7 +173,7 @@ namespace Kerf.Runtime
                 // their only interaction and do not assign a clip to the initial state.
                 if (poseMap.Count == 0 && geometryPose.Count == 0 && _activeClip != null && _clipInstance != null)
                 {
-                    _clipInstance.Advance(dt, _activeClip.Duration, _activeClip.LoopMode);
+                    _clipInstance.Advance(dt, _activeClip.GetNormalizedWorkAreaStart(), _activeClip.GetNormalizedWorkAreaEnd(), _activeClip.LoopMode);
                     _activeClip.SampleToPose(_clipInstance.Time, poseMap, geometryPose);
                 }
 
@@ -199,7 +199,7 @@ namespace Kerf.Runtime
             // 2. Otherwise evaluate active Clip if present
             else if (_activeClip != null && _clipInstance != null)
             {
-                _clipInstance.Advance(dt, _activeClip.Duration, _activeClip.LoopMode);
+                _clipInstance.Advance(dt, _activeClip.GetNormalizedWorkAreaStart(), _activeClip.GetNormalizedWorkAreaEnd(), _activeClip.LoopMode);
                 _activeClip.SampleToPose(_clipInstance.Time, poseMap, geometryPose);
             }
 
